@@ -1,0 +1,8 @@
+target/
+/node_modules/
+/web/node_modules/
+/web/dist/
+/graph.json
+*.db
+*.db-shm
+*.db-wal

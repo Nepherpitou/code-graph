@@ -1,0 +1,103 @@
+# Metrics reference
+
+All metrics are computed from one graph: project nodes are functions, methods, constructors, and constants/variables; call edges point caller → callee; data edges point function → referenced constant. External/library callees are counted but excluded from graph metrics unless `--include-external` is set.
+
+The report carries every node metric in `nodes[].metrics`, graph aggregates in `stats`, and leaderboards in `top`.
+
+## Structural metrics (base)
+
+| Metric | Formula / rule | Notes |
+|---|---|---|
+| `fanIn` | distinct project functions that call or reference the node | Blast radius. For constants, the number of referencing functions. |
+| `fanOut` | distinct project functions/constants the node calls or references | Constants count as data dependencies, matching the graph's edges. |
+| `callIn` / `callOut` | call/reference **sites**, counting multiplicity | A loop calling `f()` ten times adds 10. |
+| `transitiveFanIn` | BFS over reversed call edges, excluding self | "How many functions can reach this one." Capped at 3000 callables for cost; beyond that it equals direct fan-in. |
+| `transitiveFanOut` | BFS over call edges, excluding self | Reachable surface. Data edges are excluded from transitive reachability. |
+| `depth` | 0 for a source SCC; otherwise the longest edge distance from a source SCC | Computed on the SCC condensation DAG, so cycles get a finite value. |
+| `height` | longest path from this SCC to a sink | Same condensation DAG. |
+| `scc`, `sccSize`, `inCycle` | Tarjan strongly connected components | A component larger than one node is a call cycle. |
+| `density` (graph) | `E / (N * (N - 1))` over callables | Directed edge density. |
+| `crossFileRatio` (graph) | cross-file call edges / all call edges | A quick modularity smell: a very high ratio is normal in small projects, but a very low one suggests hidden coupling or dead modules. |
+
+Structural fan-in/out are the classic call-graph metrics used for defect prediction (Aivosto; Punia et al.). Multiplicity is kept separate from distinct degree so that a single hot call site does not hide broad coupling.
+
+## Centrality
+
+| Metric | Definition | Source / caveat |
+|---|---|---|
+| `pageRank` | PageRank over the combined call + constant-use graph, damping 0.85, dangling nodes redistributed, 100 iterations / 1e-9 tolerance | Punia et al. call this **CGBR** (call-graph based ranking). Combined graph means heavily used constants are visible too; pure call-graph PageRank would rank them 0. |
+| `betweenness` | Brandes' algorithm, directed and unweighted, over call edges | "How often a function lies on shortest call paths." O(V·E); skipped above 6M operations, leaving zeros. |
+
+Centrality answers a different question than degree: a small utility can have huge fan-in (high PageRank) while a coordinator with modest degree sits on every path between subsystems (high betweenness).
+
+## Coupling and stability
+
+| Metric | Formula | Interpretation |
+|---|---|---|
+| `instability` | `fanOut / (fanIn + fanOut)` | Robert Martin's package metric applied to functions: 0 = everyone depends on me, I depend on nobody; 1 = I depend on many, nobody depends on me. High fan-in **and** high fan-out marks a node nobody wants to change. |
+| `externalFanOut` | distinct external callees | Library/OS surface used by the function. |
+| `constantsUsed` | distinct constant/variable data edges | Data coupling inside the project. |
+| `moduleRefs` | references from module scope | Constant usage or callable registration outside any function; excluded from call edges but relevant to dead-code decisions. |
+| `resultIgnoredRatio` | ignored call sites / call sites with known usage | Data-flow smell: a function that calls many things but discards every result is side-effect-driven. Unknown sites (macros, unsupported syntax) are excluded. |
+
+The `instability` metric is normally defined on packages/classes (`Ce/(Ca+Ce)`); applying it to functions is a deliberate prototype-level analogy. The coupling.dev and ast-metrics write-ups give the original definition and the Stable Dependencies Principle.
+
+## Complexity and size
+
+| Metric | Rule |
+|---|---|
+| `cyclomatic` | `1 + decision points`, counted from the tree-sitter AST; nested functions are excluded. |
+| `params` | Explicit parameters; receivers (`self`, `this`) are excluded. |
+| `loc` | Lines spanned by the declaration (LSP range). |
+| `ifc` | `LOC + (fanIn × fanOut)²` — information flow complexity from Punia et al. |
+| `hotspot` | Heuristic min-max blend over callables: `0.35·transitiveFanIn + 0.20·fanIn + 0.15·cyclomatic + 0.15·loc + 0.15·fanOut`. Not a scientific metric; a triage score. |
+
+Cyclomatic decision nodes per language:
+
+- **TypeScript/JS**: `if_statement`, `for_statement`, `for_in_statement`, `while_statement`, `do_statement`, `switch_case`, `catch_clause`, `conditional_expression`; `&&`, `||`, `??` binary operators.
+- **Rust**: `if_expression`, `while_expression`, `for_expression`, `loop_expression`, `try_expression` (`?`); `&&`, `||`; a `match_expression` contributes `arms - 1`.
+- **C/C++**: `if_statement`, `for_statement`, `while_statement`, `do_statement`, `case_statement`, `catch_clause`, `conditional_expression`; `&&`, `||`.
+- **Python**: `if_statement`, `for_statement`, `while_statement`, `except_clause`, `conditional_expression`, `case_pattern`. Boolean operators are not counted yet because Python uses `boolean_operator`, not `binary_expression`.
+
+This is McCabe's metric, not cognitive complexity: nesting is ignored, so a deeply nested but linear function can score lower than a flat switch. Sonar's cognitive complexity is the better readability metric, and the AST already exposes the nesting needed to compute it.
+
+## Quality signals
+
+- **Dead-code candidate**: `callIn == 0`, `moduleRefs == 0`, not exported, not entry-like (`main`, tests, framework hooks), name does not start with `_`, not a constructor, and not in a cycle. This catches unused private helpers. It can produce false positives for reflection, generated wiring, and handlers registered through patterns LSP cannot see; treat it as a candidate list, not proof.
+- **Cycles**: SCCs larger than one node. Cycles are not automatically bad (mutual recursion, protocol state machines), but they break layering and complicate testing.
+- **Ignored results**: see `resultIgnoredRatio`. A function with a high ratio is a candidate for returning `void` and documenting side effects.
+- **Isolated nodes**: no incoming and no outgoing edges; usually entry points, callbacks, or dead code.
+- **Depth/height**: long chains in a condensation DAG are testing and debugging cost; a high `height` means many transitive dependencies before a leaf result.
+
+## Researched but not implemented
+
+| Candidate | Why it is useful | Why it is absent / what it needs |
+|---|---|---|
+| Cognitive complexity (Sonar) | Penalizes nesting and breaks from McCabe's mathematical model; correlates better with readability | Needs nesting-aware AST walk, recursion-cycle increments, and per-language rule sets. Tree-sitter exposes all of it; this is the top follow-up. |
+| LCOM / LCOM4 (Chidamber–Kemerer) | Detects classes whose methods share no fields (low cohesion) | Needs class/field-level AST access and method-to-field usage; the current graph intentionally stops at function level. |
+| CBO / RFC | Class coupling and response-set size | LSP references can approximate accessor/method dependencies, but class-level aggregation and inheritance semantics are missing. |
+| Change/logical coupling | Files that change together even without static dependencies | Requires VCS history (git log), outside a static LSP pass. |
+| Test coverage / mutation score | Direct evidence of untested blast radius | Requires running the test suite and collecting coverage. |
+| Halstead volume/effort | Token-level operator/operand complexity | Requires a token classifier per language; cyclomatic + LOC + IFC are already available. |
+| Type-hierarchy metrics (DIT/NOC) | Inheritance depth and breadth | LSP has `typeHierarchy`; it is not wired into the graph yet. |
+| Semantic clone detection | Duplication across functions | Requires embeddings or AST fingerprints; not an LSP feature. |
+
+## LSP surface used
+
+- `initialize` capabilities: `documentSymbol`, `callHierarchy`, `references`, `workspace/symbol`.
+- `textDocument/documentSymbol` → node universe (functions, methods, constructors, constants, class/impl containers).
+- `textDocument/prepareCallHierarchy` + `callHierarchy/outgoingCalls` → call edges and call-site ranges.
+- `textDocument/references` → constant usage and the inferred-edge fallback.
+- Rust readiness is checked by asking for one real call-hierarchy item, because rust-analyzer returns empty results (not errors) while the crate graph loads.
+
+Not used: diagnostics (unused variables would duplicate the dead-code heuristic), type hierarchy, semantic tokens, inlay hints. They are valid follow-ups but do not change the graph shape.
+
+## Sources
+
+- Punia, Kumar, Sharma. *Evaluation the Quality of Software Design by Call Graph based Metrics*, GJCST 2014 — LOC, fan-in/out, CGBR (PageRank-style), IFC. <https://globaljournals.org/GJCST_Volume14/9-Evaluation-the-Quality-of-Software-Design-by-Call.pdf>
+- Martin's instability / afferent-efferent coupling: <https://ast-metrics.dev/metrics/coupling/> and <https://coupling.dev/posts/related-topics/afferent-and-efferent-coupling/>
+- McCabe cyclomatic complexity: <https://en.wikipedia.org/wiki/Cyclomatic_complexity>
+- SonarSource, *Cognitive Complexity*: <https://www.sonarsource.com/docs/CognitiveComplexity.pdf>
+- Chidamber–Kemerer metrics suite, including LCOM: <https://www.cs.uah.edu/~letzkorn/joop.pdf>
+- Aivosto, structural fan-in/fan-out: <https://www.aivosto.com/project/help/pm-sf.html>
+- PageRank: <https://en.wikipedia.org/wiki/PageRank>; betweenness (Brandes): <https://en.wikipedia.org/wiki/Betweenness_centrality>

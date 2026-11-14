@@ -1,0 +1,459 @@
+use std::collections::HashSet;
+use std::path::Path;
+
+use serde_json::Value;
+
+use crate::languages::{Adapter, LanguageId};
+use crate::lsp::LspRange;
+use crate::source::ast::{
+    declares_callable, declares_data, describe_function, signature_at, variable_callable,
+};
+use crate::source::SourceFile;
+
+use super::{Builder, NodeRecord, RawSymbol};
+use crate::graph::model::{GraphNode, NodeKind, NodeMetrics};
+
+fn parse_range(value: &Value) -> Option<LspRange> {
+    serde_json::from_value(value.clone()).ok()
+}
+
+fn parse_symbol(value: &Value) -> Option<RawSymbol> {
+    let name = value.get("name")?.as_str()?.to_string();
+    let kind = value.get("kind")?.as_u64()? as u32;
+    let detail = value
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (range, selection) = if let Some(location) = value.get("location") {
+        let range = parse_range(location.get("range")?)?;
+        (range, range)
+    } else {
+        let range = parse_range(value.get("range")?)?;
+        let selection = value
+            .get("selectionRange")
+            .and_then(parse_range)
+            .unwrap_or(range);
+        (range, selection)
+    };
+    let children = value
+        .get("children")
+        .and_then(Value::as_array)
+        .map(|children| children.iter().filter_map(parse_symbol).collect())
+        .unwrap_or_default();
+    Some(RawSymbol {
+        name,
+        kind,
+        detail,
+        range,
+        selection,
+        children,
+    })
+}
+
+pub(crate) fn parse_symbols(value: &Value) -> Vec<RawSymbol> {
+    value
+        .as_array()
+        .map(|symbols| symbols.iter().filter_map(parse_symbol).collect())
+        .unwrap_or_default()
+}
+
+fn node_kind_from_symbol(kind: u32) -> Option<NodeKind> {
+    match kind {
+        12 => Some(NodeKind::Function),
+        6 => Some(NodeKind::Method),
+        9 => Some(NodeKind::Constructor),
+        14 => Some(NodeKind::Constant),
+        13 => Some(NodeKind::Variable),
+        _ => None,
+    }
+}
+
+fn declaration_line(source: Option<&SourceFile>, line: u32) -> String {
+    source
+        .and_then(|source| source.text.lines().nth(line as usize))
+        .map(|text| text.trim().chars().take(200).collect())
+        .unwrap_or_default()
+}
+
+fn is_exported(
+    adapter: &Adapter,
+    declaration: &str,
+    rel: &str,
+    name: &str,
+    parent_exported: bool,
+) -> bool {
+    match adapter.id {
+        LanguageId::TypeScript => {
+            parent_exported || declaration.split_whitespace().any(|word| word == "export")
+        }
+        LanguageId::Rust => {
+            parent_exported
+                || declaration
+                    .split_whitespace()
+                    .any(|word| word == "pub" || word.starts_with("pub("))
+        }
+        LanguageId::Python => {
+            let module_private = rel
+                .rsplit('/')
+                .next()
+                .map(|file| file.starts_with('_'))
+                .unwrap_or(false);
+            !name.starts_with('_') && !module_private
+        }
+        LanguageId::Cpp => {
+            parent_exported
+                || (matches!(
+                    Path::new(rel).extension().and_then(|ext| ext.to_str()),
+                    Some("h" | "hh" | "hpp" | "hxx")
+                ) && !declaration.split_whitespace().any(|word| word == "static"))
+        }
+    }
+}
+
+fn is_entry_like(name: &str, rel: &str) -> bool {
+    let last = name.rsplit('.').next().unwrap_or(name).to_lowercase();
+    let prefixes = [
+        "main",
+        "init",
+        "run",
+        "start",
+        "setup",
+        "teardown",
+        "beforeeach",
+        "aftereach",
+        "describe",
+        "it",
+        "test",
+        "bench",
+    ];
+    if prefixes.iter().any(|prefix| last.starts_with(prefix)) {
+        return true;
+    }
+    if last.starts_with("test_") || last.ends_with("_test") {
+        return true;
+    }
+    if rel
+        .split('/')
+        .any(|part| matches!(part, "test" | "tests" | "__tests__" | "spec"))
+    {
+        return true;
+    }
+    if rel.contains(".test.") || rel.contains(".spec.") {
+        return true;
+    }
+    rel.ends_with("tests.rs") || rel.ends_with("test.rs")
+}
+
+fn normalize_container_name(name: &str) -> String {
+    let mut cleaned = name.trim_start_matches("impl ").trim_start().to_string();
+    if cleaned.starts_with('<') {
+        if let Some(end) = cleaned.find('>') {
+            cleaned = cleaned[end + 1..].trim().to_string();
+        }
+    }
+    if let Some((_, rest)) = cleaned.split_once(" for ") {
+        cleaned = rest.trim().to_string();
+    }
+    cleaned.replace(['<', '>'], "").trim().to_string()
+}
+
+fn signature_hash(signature: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in signature.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn ensure_unique(base: String, used: &mut HashSet<String>) -> String {
+    if used.insert(base.clone()) {
+        return base;
+    }
+    let mut index = 2;
+    loop {
+        let candidate = format!("{base}#{index}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+impl Builder {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn create_node(
+        &mut self,
+        symbol: &RawSymbol,
+        rel: &str,
+        qname: String,
+        kind: NodeKind,
+        parent_exported: bool,
+        synthetic: bool,
+        lazy: bool,
+        _class_name: Option<String>,
+    ) -> Option<String> {
+        if self.records.len() >= self.max_nodes {
+            self.truncated = true;
+            return None;
+        }
+        let (declaration, params, cyclomatic, resolved_kind) = {
+            let source = self.sources.get(rel);
+            let mut declaration = declaration_line(source, symbol.range.start.line);
+            if declaration.is_empty() {
+                declaration = symbol.detail.clone();
+            }
+            let mut params = 0;
+            let mut cyclomatic = 0;
+            let mut resolved_kind = kind;
+            if let Some(source) = source {
+                if let Some(tree) = &source.tree {
+                    if !synthetic && kind.is_callable() {
+                        if let Some((p, c)) = describe_function(
+                            tree,
+                            &source.text,
+                            self.adapter,
+                            symbol.selection.start,
+                        ) {
+                            if !declares_callable(
+                                tree,
+                                &source.text,
+                                self.adapter,
+                                symbol.selection.start,
+                            ) {
+                                return None; // e.g. JSX branches TypeScript reports as methods
+                            }
+                            params = p;
+                            cyclomatic = c;
+                        } else if let Some((p, c)) = variable_callable(
+                            tree,
+                            &source.text,
+                            self.adapter,
+                            symbol.selection.start,
+                        ) {
+                            params = p;
+                            cyclomatic = c;
+                        } else {
+                            return None;
+                        }
+                    } else if kind.is_data() {
+                        if self.adapter.id == LanguageId::TypeScript
+                            && !declares_data(
+                                tree,
+                                &source.text,
+                                self.adapter,
+                                symbol.selection.start,
+                            )
+                        {
+                            return None;
+                        }
+                        if let Some((p, c)) = variable_callable(
+                            tree,
+                            &source.text,
+                            self.adapter,
+                            symbol.selection.start,
+                        ) {
+                            resolved_kind = NodeKind::Function;
+                            params = p;
+                            cyclomatic = c;
+                        }
+                    }
+                }
+            }
+            (declaration, params, cyclomatic, resolved_kind)
+        };
+        let name = symbol.name.clone();
+        let exported = is_exported(self.adapter, &declaration, rel, &name, parent_exported);
+        let line = symbol.selection.start.line;
+        // Deliberately no line/column: IDs must survive edits above the symbol.
+        let signature = if resolved_kind.is_callable() && !synthetic {
+            self.sources
+                .get(rel)
+                .and_then(|source| {
+                    source.tree.as_ref().and_then(|tree| {
+                        signature_at(tree, &source.text, self.adapter, symbol.selection.start)
+                    })
+                })
+                .or_else(|| {
+                    let detail = symbol.detail.trim();
+                    (!detail.is_empty()).then(|| detail.to_string())
+                })
+        } else {
+            None
+        };
+        let base = match signature.as_deref().filter(|value| !value.is_empty()) {
+            Some(signature) => format!(
+                "{rel}#{}:{qname}@{:016x}",
+                resolved_kind.as_str(),
+                signature_hash(signature)
+            ),
+            None => format!("{rel}#{}:{qname}", resolved_kind.as_str()),
+        };
+        let id = ensure_unique(base, &mut self.used_ids);
+        let node = GraphNode {
+            id: id.clone(),
+            name,
+            qname: qname.clone(),
+            kind: resolved_kind,
+            file: rel.to_string(),
+            line: line + 1,
+            end_line: symbol.range.end.line + 1,
+            loc: symbol
+                .range
+                .end
+                .line
+                .saturating_sub(symbol.range.start.line)
+                + 1,
+            params,
+            cyclomatic,
+            exported,
+            external: false,
+            lazy,
+            synthetic,
+            is_entry_like: resolved_kind.is_callable() && is_entry_like(&qname, rel),
+            declaration,
+            metrics: NodeMetrics::default(),
+        };
+        let uri = self.uri_for_rel(rel);
+        self.record(NodeRecord {
+            node,
+            uri,
+            rel: rel.to_string(),
+            range: symbol.range,
+            selection: symbol.selection,
+        });
+        Some(id)
+    }
+
+    pub(crate) fn add_symbol(
+        &mut self,
+        symbol: &RawSymbol,
+        rel: &str,
+        parent_qname: &str,
+        parent_exported: bool,
+        container: Option<&str>,
+    ) {
+        if symbol.name.ends_with(") callback") || symbol.name.starts_with('<') {
+            return;
+        }
+        let local = symbol.name.clone();
+        let qname = if !parent_qname.is_empty() {
+            format!("{parent_qname}.{local}")
+        } else if let Some(container) = container {
+            format!("{container}.{local}")
+        } else {
+            local.clone()
+        };
+
+        if symbol.kind == 5 {
+            let class_key = format!(
+                "{rel}#{}:{}",
+                symbol.range.start.line, symbol.range.start.character
+            );
+            let class_key_alt = format!(
+                "{rel}#{}:{}",
+                symbol.selection.start.line, symbol.selection.start.character
+            );
+            let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
+            let class_exported =
+                is_exported(self.adapter, &declaration, rel, &local, parent_exported);
+            let constructor_id =
+                if let Some(constructor) = symbol.children.iter().find(|child| child.kind == 9) {
+                    self.create_node(
+                        constructor,
+                        rel,
+                        format!("{qname}.constructor"),
+                        NodeKind::Constructor,
+                        class_exported,
+                        false,
+                        false,
+                        Some(qname.clone()),
+                    )
+                } else {
+                    let synthetic = RawSymbol {
+                        name: format!("{local}.constructor"),
+                        kind: 9,
+                        detail: "implicit constructor".to_string(),
+                        range: symbol.range,
+                        selection: symbol.selection,
+                        children: Vec::new(),
+                    };
+                    self.create_node(
+                        &synthetic,
+                        rel,
+                        format!("{qname}.constructor"),
+                        NodeKind::Constructor,
+                        class_exported,
+                        true,
+                        false,
+                        Some(qname.clone()),
+                    )
+                };
+            if let Some(id) = constructor_id {
+                self.class_map.insert(class_key, id.clone());
+                self.class_map.insert(class_key_alt, id);
+            }
+            for child in &symbol.children {
+                if child.kind == 9 {
+                    continue;
+                }
+                if child.kind == 6 || child.kind == 12 {
+                    self.add_symbol(child, rel, &qname, class_exported, Some(&qname));
+                }
+            }
+            return;
+        }
+
+        match symbol.kind {
+            23 => return, // Rust struct: a type, not a graph primitive
+            19 => {
+                let container = normalize_container_name(&local);
+                let trait_impl = local.contains(" for ");
+                for child in &symbol.children {
+                    self.add_symbol(
+                        child,
+                        rel,
+                        "",
+                        parent_exported || trait_impl,
+                        Some(&container),
+                    );
+                }
+                return;
+            }
+            11 | 10 | 2 | 3 | 4 => {
+                for child in &symbol.children {
+                    self.add_symbol(child, rel, &qname, parent_exported, Some(&qname));
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        let Some(kind) = node_kind_from_symbol(symbol.kind) else {
+            return;
+        };
+        if kind.is_data() {
+            let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
+            let is_type_alias = ["type ", "export type ", "declare type "]
+                .iter()
+                .any(|prefix| declaration.starts_with(prefix));
+            if is_type_alias
+                || !self.include_constants
+                || (kind == NodeKind::Variable && container.is_some())
+            {
+                return;
+            }
+        }
+        self.create_node(
+            symbol,
+            rel,
+            qname.clone(),
+            kind,
+            parent_exported,
+            false,
+            false,
+            container.map(str::to_string),
+        );
+    }
+}
