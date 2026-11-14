@@ -6,6 +6,11 @@ export const CARD_HEIGHT = 86;
 export const CONSTANT_WIDTH = 176;
 export const CONSTANT_HEIGHT = 58;
 
+/** Below this zoom the card's 12px name is under 9px, so text is no longer readable. */
+export const MIN_READABLE_ZOOM = 0.8;
+/** React Flow's culling has overhead, but pays off once the canvas holds this many cards. */
+export const CULL_THRESHOLD = 150;
+
 export const KIND_COLORS: Record<string, string> = {
   function: '#4f8ef7',
   method: '#8b5cf6',

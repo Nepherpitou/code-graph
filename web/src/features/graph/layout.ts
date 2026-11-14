@@ -1,4 +1,5 @@
-import ELK from 'elkjs/lib/elk.bundled.js';
+import ELK from 'elkjs/lib/elk-api';
+import ElkWorker from 'elkjs/lib/elk-worker.min.js?worker';
 
 export type LayoutKind = 'layered' | 'stress' | 'grid';
 
@@ -14,13 +15,49 @@ export interface LayoutEdge {
   target: string;
 }
 
-const elk = new ELK();
+type ElkInstance = InstanceType<typeof ELK>;
+
+let activeElk: ElkInstance | null = null;
+let layoutGeneration = 0;
+const layoutCache = new Map<string, Record<string, { x: number; y: number }>>();
+const MAX_LAYOUT_CACHE = 8;
+
+function createElk(): ElkInstance {
+  return new ELK({ workerFactory: () => new ElkWorker() });
+}
+
+function elk(): ElkInstance {
+  activeElk ??= createElk();
+  return activeElk;
+}
+
+/**
+ * Drop the current layout worker. Any in-flight `computeLayout` resolves to
+ * `null`; the next call gets a fresh worker.
+ */
+export function cancelLayout(): void {
+  layoutGeneration += 1;
+  activeElk?.terminateWorker();
+  activeElk = null;
+}
+
+function cacheKey(
+  nodes: LayoutNode[],
+  edges: LayoutEdge[],
+  kind: LayoutKind,
+  scope: string,
+): string {
+  return `${scope}|${kind}|${nodes.map((node) => node.id).join('|')}|${edges
+    .map((edge) => edge.id)
+    .join('|')}`;
+}
 
 export async function computeLayout(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
   kind: LayoutKind,
-): Promise<Record<string, { x: number; y: number }>> {
+  scope = '',
+): Promise<Record<string, { x: number; y: number }> | null> {
   if (nodes.length === 0) return {};
   if (kind === 'grid') {
     const sorted = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
@@ -37,6 +74,10 @@ export async function computeLayout(
     return positions;
   }
 
+  const key = cacheKey(nodes, edges, kind, scope);
+  const cached = layoutCache.get(key);
+  if (cached) return cached;
+  const generation = layoutGeneration;
   const graph = {
     id: 'root',
     layoutOptions: {
@@ -47,7 +88,10 @@ export async function computeLayout(
       'elk.spacing.componentSpacing': '60',
       'elk.spacing.nodeNode': '32',
       'elk.layered.spacing.nodeNodeBetweenLayers': '78',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      // BRANDES_KOEPF is markedly faster than NETWORK_SIMPLEX on sparse call
+      // graphs. It produces a taller drawing, which is acceptable because the
+      // canvas is panned rather than fitted wholesale.
+      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
       'elk.layered.cycleBreaking.strategy': 'GREEDY',
       'elk.stress.desiredEdgeLength': '150',
       'elk.aspectRatio': '1.6',
@@ -61,10 +105,27 @@ export async function computeLayout(
     edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
   };
 
-  const result = await elk.layout(graph);
-  const positions: Record<string, { x: number; y: number }> = {};
-  for (const child of result.children ?? []) {
-    positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+  const instance = elk();
+  try {
+    const result = await instance.layout(graph);
+    if (generation !== layoutGeneration) return null;
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const child of result.children ?? []) {
+      positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+    }
+    layoutCache.set(key, positions);
+    if (layoutCache.size > MAX_LAYOUT_CACHE) {
+      const oldest = layoutCache.keys().next().value;
+      if (oldest) layoutCache.delete(oldest);
+    }
+    return positions;
+  } catch (error) {
+    if (generation !== layoutGeneration) return null;
+    // A worker that failed is unusable for the next request.
+    if (activeElk === instance) {
+      activeElk.terminateWorker();
+      activeElk = null;
+    }
+    throw error;
   }
-  return positions;
 }

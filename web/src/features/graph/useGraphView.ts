@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -25,6 +26,7 @@ import type {
   PathResult,
 } from '../../types';
 import {
+  MIN_READABLE_ZOOM,
   defaultFilters,
   neighborhood,
   nodeSize,
@@ -35,7 +37,33 @@ import {
   type FlowEdge,
   type FlowNode,
 } from './graph';
-import { computeLayout, type LayoutKind } from './layout';
+import { cancelLayout, computeLayout, type LayoutKind } from './layout';
+
+/**
+ * The readable zoom shows only a local window of a very large graph. Fitting
+ * all nodes would land in an empty gap between separated components; choose
+ * the densest bucket instead.
+ */
+function denseCenter(nodes: FlowNode[]): { x: number; y: number } | null {
+  if (nodes.length === 0) return null;
+  const cell = 900;
+  const buckets = new Map<string, { x: number; y: number; count: number }>();
+  for (const node of nodes) {
+    const x = node.position.x + Number(node.width ?? 0) / 2;
+    const y = node.position.y + Number(node.height ?? 0) / 2;
+    const key = `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+    const bucket = buckets.get(key) ?? { x: 0, y: 0, count: 0 };
+    bucket.x += x;
+    bucket.y += y;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+  }
+  let best: { x: number; y: number; count: number } | null = null;
+  for (const bucket of buckets.values()) {
+    if (!best || bucket.count > best.count) best = bucket;
+  }
+  return best ? { x: best.x / best.count, y: best.y / best.count } : null;
+}
 
 interface Input {
   report: GraphReport | null;
@@ -103,6 +131,7 @@ export function useGraphView({
   } | null>(null);
   const [layouting, setLayouting] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
+  const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
     () => (entryRoots.length ? new Set(entryRoots.map((root) => root.id)) : null),
@@ -177,9 +206,13 @@ export function useGraphView({
     () => visible.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
     [visible.nodes],
   );
+  const layoutScope = report?.meta.generatedAt ?? '';
   const viewKey = useMemo(
-    () => `${layoutKind}|${layoutNonce}|${layoutNodes.map((node) => node.id).join('|')}`,
-    [layoutKind, layoutNonce, layoutNodes],
+    () =>
+      `${layoutScope}|${layoutKind}|${layoutNonce}|${layoutNodes.map((node) => node.id).join('|')}|${visible.edges
+        .map((edge) => edge.id)
+        .join('|')}`,
+    [layoutScope, layoutKind, layoutNonce, layoutNodes, visible.edges],
   );
 
   useEffect(() => {
@@ -191,8 +224,8 @@ export function useGraphView({
     setLayouting(true);
     const timer = window.setTimeout(async () => {
       try {
-        const next = await computeLayout(layoutNodes, visible.edges, layoutKind);
-        if (cancelled) return;
+        const next = await computeLayout(layoutNodes, visible.edges, layoutKind, layoutScope);
+        if (cancelled || !next) return;
         setPositions(next);
         setLayouting(false);
       } catch (caught) {
@@ -204,16 +237,25 @@ export function useGraphView({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      cancelLayout();
     };
-  }, [viewKey]);
+  }, [viewKey, layoutScope]);
 
   useEffect(() => {
-    if (layouting || Object.keys(positions).length === 0) return;
-    const timer = window.setTimeout(() => {
-      void reactFlow.fitView({ padding: 0.12, duration: 200, minZoom: 0.4 });
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [positions, layouting, reactFlow]);
+    if (Object.keys(positions).length === 0 || centeredPositions.current === positions) return;
+    centeredPositions.current = positions;
+
+    const rootId = entryRoots[0]?.id;
+    const root = rootId ? flowNodes.find((node) => node.id === rootId) : null;
+    const center = root
+      ? {
+          x: root.position.x + Number(root.width ?? 0) / 2,
+          y: root.position.y + Number(root.height ?? 0) / 2,
+        }
+      : denseCenter(flowNodes);
+    if (!center) return;
+    void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
+  }, [positions, flowNodes, entryRoots, reactFlow]);
 
   const selectAndCenter = useCallback((id: string) => {
     setSelectedId(id);

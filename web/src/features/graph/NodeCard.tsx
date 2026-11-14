@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { FlowNode } from './graph';
 
@@ -5,7 +6,7 @@ function fileBase(file: string): string {
   return file.split('/').at(-1) ?? file;
 }
 
-export function NodeCard({ data, selected }: NodeProps<FlowNode>) {
+export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<FlowNode>) {
   const { node, dimmed, highlighted, entryPoint } = data;
   const metrics = node.metrics;
   const dead = metrics.deadCodeCandidate && !entryPoint;
@@ -57,4 +58,4 @@ export function NodeCard({ data, selected }: NodeProps<FlowNode>) {
       <Handle type="source" position={Position.Bottom} className="rf-handle" isConnectable={false} />
     </div>
   );
-}
+});

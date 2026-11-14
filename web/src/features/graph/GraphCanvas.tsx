@@ -2,26 +2,23 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  MiniMap,
   Panel,
   ReactFlow,
-  type Node,
   type NodeMouseHandler,
   type NodeTypes,
 } from '@xyflow/react';
 
 import type { GraphNode } from '../../types';
-import { KIND_COLORS, type FlowNodeData } from './graph';
+import { CanvasMiniMap } from './CanvasMiniMap';
+import {
+  CULL_THRESHOLD,
+  MIN_READABLE_ZOOM,
+  type FlowNodeData,
+} from './graph';
 import { NodeCard } from './NodeCard';
 import type { GraphView } from './useGraphView';
 
 const nodeTypes = { card: NodeCard } as unknown as NodeTypes;
-
-function miniMapColor(node: Node): string {
-  // MiniMap drops our node generic; every rendered node came from FlowNodeData.
-  const data = node.data as FlowNodeData;
-  return KIND_COLORS[data.node.kind] ?? '#64748b';
-}
 
 interface Props {
   view: GraphView;
@@ -41,9 +38,16 @@ export function GraphCanvas({ view, onContextMenu }: Props) {
       edges={view.flowEdges}
       nodeTypes={nodeTypes}
       fitView={false}
-      minZoom={0.05}
+      minZoom={MIN_READABLE_ZOOM}
       maxZoom={2}
       nodesConnectable={false}
+      nodesDraggable={false}
+      nodesFocusable={false}
+      edgesFocusable={false}
+      edgesReconnectable={false}
+      elevateNodesOnSelect={false}
+      autoPanOnNodeFocus={false}
+      onlyRenderVisibleElements={view.flowNodes.length > CULL_THRESHOLD}
       colorMode="system"
       onNodeClick={view.onNodeClick}
       onNodeDoubleClick={view.onNodeDoubleClick}
@@ -51,12 +55,7 @@ export function GraphCanvas({ view, onContextMenu }: Props) {
       onPaneClick={() => view.setSelectedId(null)}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
-      <MiniMap
-        pannable
-        zoomable
-        nodeColor={miniMapColor}
-        maskColor="color-mix(in srgb, var(--bg) 70%, transparent)"
-      />
+      <CanvasMiniMap nodes={view.flowNodes} />
       <Controls showInteractive={false} />
       <Panel position="top-left" className="flow-status">
         {view.layouting ? <span className="badge accent">layout…</span> : null}
