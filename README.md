@@ -80,7 +80,8 @@ code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /status` | Live analysis state: phase, message, timestamps, graph id. |
+| `GET /status` | Live analysis state: phase, message, timestamps, graph id, `canAnalyze`. |
+| `POST /refresh` | Re-read the configured project from disk and store a new snapshot. Returns `409` while an analysis is running; only available with `up`. |
 | `GET /graphs` | Snapshot list with meta/stats/top. |
 | `GET /graphs/{id}` | One snapshot (`latest` is accepted). |
 | `GET /graphs/{id}/overview?group=dir\|file` | Aggregated directory/file nodes and call edges. |
@@ -104,7 +105,7 @@ The graph store keeps normalized rows for filtering and full node/edge payloads 
 
 The directory and file screens are plain lists; only the graph screens use React Flow.
 
-`up` binds the HTTP port first, then runs analysis on a dedicated runtime thread. Progress is printed to the terminal and exposed through `/status`; the SPA polls it, shows the current phase/message, and loads the snapshot automatically when it becomes `ready`. `serve` only exposes existing snapshots.
+`up` binds the HTTP port first. If the database already contains a snapshot, it loads the latest one and does not re-analyze; the header shows a **Refresh** button that calls `POST /refresh`, re-reads the project, stores a new snapshot, and reloads the UI. If the database is empty, `up` analyzes immediately. Progress is printed to the terminal and exposed through `/status`; the SPA polls it, shows the current phase/message, and loads the snapshot automatically when it becomes `ready`. `serve` only exposes existing snapshots and has no Refresh button.
 
 ## Graph semantics
 

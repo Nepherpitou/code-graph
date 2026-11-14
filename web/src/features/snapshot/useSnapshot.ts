@@ -6,6 +6,7 @@ import {
   fetchGraphSummary,
   fetchOverview,
   fetchStatus,
+  refreshAnalysis,
 } from '../../lib/api';
 import type {
   AnalysisStatus,
@@ -30,6 +31,7 @@ export interface SnapshotSlice {
   loadReport: (data: GraphReport) => void;
   readFile: (file: File) => void;
   loadFileOverview: () => Promise<Overview | null>;
+  refreshAnalysis: () => Promise<void>;
 }
 
 export function useSnapshot(): SnapshotSlice {
@@ -122,6 +124,17 @@ export function useSnapshot(): SnapshotSlice {
     }
   }, [apiContext, fileOverview]);
 
+  const refresh = useCallback(async () => {
+    if (!apiContext) return;
+    try {
+      setError(null);
+      const status = await refreshAnalysis(apiContext.base);
+      setAnalysisStatus(status);
+    } catch (caught) {
+      setError(`Refresh failed: ${(caught as Error).message}`);
+    }
+  }, [apiContext]);
+
   const readFile = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -198,5 +211,6 @@ export function useSnapshot(): SnapshotSlice {
     loadReport,
     readFile,
     loadFileOverview,
+    refreshAnalysis: refresh,
   };
 }

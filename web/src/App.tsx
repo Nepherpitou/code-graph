@@ -119,6 +119,8 @@ export function App() {
   const backLabel = screen === 'graph' && directory && state.fileOverview ? 'Files' : 'Directories';
   const meta = state.snapshot?.meta ?? state.report?.meta;
   const stats = state.snapshot?.stats ?? state.report?.stats;
+  const refreshing = state.analysisStatus?.state === 'running';
+  const canRefresh = Boolean(state.apiContext && state.analysisStatus?.canAnalyze);
   const menuActions: ContextAction[] = contextMenu ? [
     { label: 'Focus 2-hop neighborhood', onSelect: () => graph.focusNode(contextMenu.node.id) },
     { label: 'Show callers', onSelect: () => void graph.showImpact(contextMenu.node, 'in') },
@@ -171,6 +173,16 @@ export function App() {
           )}
         </div>
         <div className="actions">
+          {canRefresh ? (
+            <button
+              className="button"
+              onClick={() => void state.refreshAnalysis()}
+              disabled={refreshing}
+              title="Re-read the project from disk and store a new snapshot"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          ) : null}
           {state.apiContext ? (
             <button className="button" onClick={() => void openEntryPoints()}>Top entries</button>
           ) : null}

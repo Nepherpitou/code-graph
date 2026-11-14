@@ -20,7 +20,7 @@ pub(super) struct Cli {
 pub(super) enum Commands {
     /// Build a call graph and metrics from a codebase.
     Analyze(AnalyzeArgs),
-    /// Start the HTTP server and analyze the codebase in the background.
+    /// Start the HTTP server; reuse the latest snapshot, or analyze when the DB is empty.
     Up(UpArgs),
     /// Print a summary of a graph JSON file.
     Inspect(InspectArgs),

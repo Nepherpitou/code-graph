@@ -31,6 +31,15 @@ export async function fetchStatus(base: string): Promise<AnalysisStatus> {
   return getJson<AnalysisStatus>(`${normalizeBase(base)}/status`);
 }
 
+export async function refreshAnalysis(base: string): Promise<AnalysisStatus> {
+  const response = await fetch(`${normalizeBase(base)}/refresh`, { method: 'POST' });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<AnalysisStatus>;
+}
+
 export async function fetchGraphSummary(base: string, graphId: string): Promise<GraphSummary> {
   return getJson<GraphSummary>(`${normalizeBase(base)}/graphs/${encodeURIComponent(graphId)}`);
 }

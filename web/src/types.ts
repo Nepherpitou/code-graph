@@ -113,6 +113,7 @@ export interface AnalysisStatus {
   finishedAt: string | null;
   graphId: number | null;
   error: string | null;
+  canAnalyze: boolean;
 }
 
 export interface GraphSummary {

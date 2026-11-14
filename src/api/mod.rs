@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -34,6 +34,7 @@ struct AnalysisStatus {
     finished_at: Option<String>,
     graph_id: Option<i64>,
     error: Option<String>,
+    can_analyze: bool,
 }
 
 impl Default for AnalysisStatus {
@@ -46,6 +47,7 @@ impl Default for AnalysisStatus {
             finished_at: None,
             graph_id: None,
             error: None,
+            can_analyze: false,
         }
     }
 }
@@ -55,9 +57,13 @@ struct JobState {
 }
 
 impl JobState {
-    fn new() -> Self {
+    fn new(can_analyze: bool) -> Self {
+        let status = AnalysisStatus {
+            can_analyze,
+            ..AnalysisStatus::default()
+        };
         Self {
-            status: RwLock::new(AnalysisStatus::default()),
+            status: RwLock::new(status),
         }
     }
 
@@ -66,7 +72,14 @@ impl JobState {
     }
 
     fn start(&self) {
+        self.try_start();
+    }
+
+    fn try_start(&self) -> bool {
         let mut status = self.status.write().unwrap();
+        if status.state == "running" {
+            return false;
+        }
         status.state = "running".to_string();
         status.phase = "start".to_string();
         status.message = "analysis started".to_string();
@@ -74,6 +87,7 @@ impl JobState {
         status.finished_at = None;
         status.error = None;
         status.graph_id = None;
+        true
     }
 
     fn progress(&self, event: ProgressEvent) {
@@ -122,11 +136,13 @@ struct AppState {
     store: Store,
     query: Arc<QueryService>,
     job: Arc<JobState>,
+    analyze_options: Option<Arc<AnalyzeOptions>>,
 }
 
 enum ApiError {
     NotFound(String),
     BadRequest(String),
+    Conflict(String),
     Internal(anyhow::Error),
 }
 
@@ -135,6 +151,7 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message),
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            ApiError::Conflict(message) => (StatusCode::CONFLICT, message),
             ApiError::Internal(error) => {
                 tracing::error!("API error: {error:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
@@ -297,15 +314,19 @@ pub async fn serve(
         .try_init();
 
     let store = Store::open(db).await?;
-    let job = Arc::new(JobState::new());
-    let pending_analysis = analyze_options.map(|options| (options, store.clone(), job.clone()));
+    let latest = store.latest_graph().await?;
+    let analyze_options = analyze_options.map(Arc::new);
+    let job = Arc::new(JobState::new(analyze_options.is_some()));
+    let analysis_store = store.clone();
     let state = AppState {
         query: Arc::new(QueryService::new(store.clone())),
         store,
-        job,
+        job: job.clone(),
+        analyze_options: analyze_options.clone(),
     };
     let api = Router::new()
         .route("/status", get(status))
+        .route("/refresh", post(refresh))
         .route("/graphs", get(list_graphs))
         .route("/graphs/{id}", get(get_graph))
         .route("/graphs/{id}/search", get(search))
@@ -334,27 +355,44 @@ pub async fn serve(
         .map_err(|error| anyhow!("invalid bind address {bind}: {error}"))?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("serving on http://{addr}");
-    if let Some((options, thread_store, thread_job)) = pending_analysis {
-        thread_job.start();
-        std::thread::Builder::new()
-            .name("code-graph-analysis".to_string())
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        thread_job.failed(format!("cannot start analysis runtime: {error}"));
-                        return;
-                    }
-                };
-                runtime.block_on(run_analysis(thread_store, thread_job, options));
-            })
-            .map_err(|error| anyhow!("cannot spawn analysis thread: {error}"))?;
+    if let Some(options) = analyze_options.as_ref() {
+        if let Some(graph) = latest {
+            job.ready(graph.id);
+            tracing::info!(
+                "using existing snapshot #{}; POST /api/v1/refresh to re-analyze",
+                graph.id
+            );
+        } else {
+            job.start();
+            spawn_analysis(analysis_store, job.clone(), options.as_ref().clone())
+                .map_err(|error| anyhow!("cannot spawn analysis thread: {error}"))?;
+        }
     }
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+fn spawn_analysis(
+    store: Store,
+    job: Arc<JobState>,
+    options: AnalyzeOptions,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("code-graph-analysis".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    job.failed(format!("cannot start analysis runtime: {error}"));
+                    return;
+                }
+            };
+            runtime.block_on(run_analysis(store, job, options));
+        })
+        .map(|_| ())
 }
 
 async fn run_analysis(store: Store, job: Arc<JobState>, options: AnalyzeOptions) {
@@ -373,6 +411,29 @@ async fn run_analysis(store: Store, job: Arc<JobState>, options: AnalyzeOptions)
 
 async fn status(State(state): State<AppState>) -> Json<AnalysisStatus> {
     Json(state.job.snapshot())
+}
+
+async fn refresh(State(state): State<AppState>) -> Result<Json<AnalysisStatus>, ApiError> {
+    let Some(options) = state.analyze_options.as_ref() else {
+        return Err(ApiError::BadRequest(
+            "analysis is not configured; start the server with `code-graph up`".to_string(),
+        ));
+    };
+    if !state.job.try_start() {
+        return Err(ApiError::Conflict(
+            "analysis is already running".to_string(),
+        ));
+    }
+    if let Err(error) = spawn_analysis(
+        state.store.clone(),
+        state.job.clone(),
+        options.as_ref().clone(),
+    ) {
+        let message = format!("cannot spawn analysis thread: {error}");
+        state.job.failed(message.clone());
+        return Err(ApiError::Internal(anyhow!(message)));
+    }
+    Ok(Json(state.job.snapshot()))
 }
 
 async fn list_graphs(State(state): State<AppState>) -> Result<Json<GraphsResponse>, ApiError> {

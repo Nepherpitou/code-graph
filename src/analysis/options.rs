@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::languages::LanguageId;
 
+#[derive(Clone)]
 pub struct AnalyzeOptions {
     pub root: PathBuf,
     pub lang: Option<LanguageId>,
