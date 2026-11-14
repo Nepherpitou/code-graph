@@ -48,6 +48,34 @@ For TypeScript, install the server next to the project (or globally):
 npm install --no-save typescript@5.9.3 typescript-language-server@4.4.0
 ```
 
+### Native TypeScript 7 servers
+
+The default adapter still uses TypeScript 5 `tsserver` because it is the most compatible baseline. TypeScript 7's native LSP can be selected explicitly with `--server-cmd`:
+
+```bash
+# Go implementation (official TypeScript 7)
+npm install --no-save @typescript/native-preview
+./target/release/code-graph analyze . \
+  --server-cmd 'node_modules/.bin/tsgo --lsp --stdio' -o /tmp/tsgo.json
+
+# Rust implementation (tsrs, experimental)
+npm install --no-save tsrs
+./target/release/code-graph analyze . \
+  --server-cmd 'node_modules/.bin/tsrs --lsp -stdio' -o /tmp/tsrs.json
+```
+
+Both speak the TypeScript 7 language-server protocol. The client omits absent optional `detail` fields because both servers reject `detail: null`.
+
+On the NFL backend snapshot (883 files, 3984 TS5 nodes), the current numbers are:
+
+| Server | Time | Project call graph |
+|---|---:|---|
+| `typescript-language-server` | 27.4 s | 3984 nodes, 4837 call edges |
+| `tsgo` | 10.0 s | 4546 nodes, 6409 call edges |
+| `tsrs` | 8.5 s | 4546 nodes, 6409 call edges |
+
+`tsgo` and `tsrs` produce the same project nodes/edges and all fixtures tested here. With `--include-external`, `tsgo` is more complete (527 external nodes / 3366 external edges vs 501 / 3315 for tsrs). **Use `tsgo` as the production default for TypeScript 7; use `tsrs` as the opt-in fastest backend while validating its beta LSP.**
+
 ## CLI
 
 ```text

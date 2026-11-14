@@ -184,7 +184,7 @@ pub async fn analyze_with_progress(
         ));
     }
 
-    let files: Vec<(String, String)> = sources
+    let mut files: Vec<(String, String)> = sources
         .values()
         .map(|source| {
             (
@@ -195,6 +195,7 @@ pub async fn analyze_with_progress(
             )
         })
         .collect();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
 
     reporter.emit("symbols", "collecting document symbols");
     let client_ref = &client;
@@ -210,6 +211,7 @@ pub async fn analyze_with_progress(
         .buffer_unordered(8)
         .collect()
         .await;
+    symbol_results.sort_by(|left, right| left.0.cmp(&right.0));
 
     let empty = symbol_results
         .iter()
@@ -237,6 +239,7 @@ pub async fn analyze_with_progress(
         .buffer_unordered(8)
         .collect()
         .await;
+        symbol_results.sort_by(|left, right| left.0.cmp(&right.0));
     }
 
     let symbol_count: usize = symbol_results

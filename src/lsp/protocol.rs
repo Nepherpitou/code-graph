@@ -45,7 +45,7 @@ pub struct LspRange {
 pub struct CallHierarchyItem {
     pub name: String,
     pub kind: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub uri: String,
     pub range: LspRange,
@@ -65,4 +65,37 @@ pub struct OutgoingCall {
 pub struct Location {
     pub uri: String,
     pub range: LspRange,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn call_hierarchy_item_omits_absent_detail() {
+        let item = CallHierarchyItem {
+            name: "send".to_string(),
+            kind: 12,
+            detail: None,
+            uri: "file:///tmp/a.ts".to_string(),
+            range: LspRange::default(),
+            selection_range: LspRange::default(),
+        };
+        let value = serde_json::to_value(item).expect("serialize call hierarchy item");
+        assert!(value.get("detail").is_none());
+    }
+
+    #[test]
+    fn call_hierarchy_item_keeps_present_detail() {
+        let item = CallHierarchyItem {
+            name: "send".to_string(),
+            kind: 12,
+            detail: Some("AiChatController".to_string()),
+            uri: "file:///tmp/a.ts".to_string(),
+            range: LspRange::default(),
+            selection_range: LspRange::default(),
+        };
+        let value = serde_json::to_value(item).expect("serialize call hierarchy item");
+        assert_eq!(value["detail"], "AiChatController");
+    }
 }
