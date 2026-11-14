@@ -3,6 +3,7 @@ import type { GraphView } from './useGraphView';
 import { ServerPanel } from './ServerPanel';
 import { FilterPanel } from './FilterPanel';
 import { InsightsPanel } from './InsightsPanel';
+import { EntryPointsPanel } from './EntryPointsPanel';
 
 interface Props {
   view: GraphView;
@@ -25,6 +26,15 @@ export function GraphSidebar({ view, apiContext, snapshot, onError }: Props) {
 
   return (
     <>
+      {view.entryInfo ? (
+        <EntryPointsPanel
+          roots={view.entryRoots}
+          totalRoots={view.entryInfo.totalRoots}
+          depth={view.entryInfo.depth}
+          truncated={view.entryInfo.truncated}
+          onSelect={view.selectAndCenter}
+        />
+      ) : null}
       {report && apiContext ? (
         <ServerPanel
           base={apiContext.base}

@@ -14,8 +14,9 @@ import {
 } from '@xyflow/react';
 import { toPng } from 'html-to-image';
 
-import { fetchImpact, fetchSubgraph } from '../../lib/api';
+import { fetchEntryPoints, fetchImpact, fetchSubgraph } from '../../lib/api';
 import type {
+  EntryPoint,
   GraphEdge,
   GraphNode,
   GraphReport,
@@ -63,6 +64,9 @@ export interface GraphView {
   relayout: () => void;
   layouting: boolean;
   focusIds: Set<string> | null;
+  entryRoots: EntryPoint[];
+  entryInfo: { totalRoots: number; depth: number; truncated: boolean } | null;
+  openEntryPoints: () => Promise<void>;
   mergeSlice: (slice: GraphSlice, focus: Set<string> | null) => void;
   focusNode: (id: string) => void;
   clearFocus: () => void;
@@ -91,8 +95,19 @@ export function useGraphView({
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIds, setFocusIds] = useState<Set<string> | null>(null);
+  const [entryRoots, setEntryRoots] = useState<EntryPoint[]>([]);
+  const [entryInfo, setEntryInfo] = useState<{
+    totalRoots: number;
+    depth: number;
+    truncated: boolean;
+  } | null>(null);
   const [layouting, setLayouting] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
+
+  const entryIds = useMemo(
+    () => (entryRoots.length ? new Set(entryRoots.map((root) => root.id)) : null),
+    [entryRoots],
+  );
 
   const visible = useMemo(
     () => (report ? visibleGraph(report, filters, focusIds) : { nodes: [], edges: [] }),
@@ -116,11 +131,11 @@ export function useGraphView({
   }, [report, selectedId]);
 
   const flowNodes = useMemo<FlowNode[]>(
-    () => toFlowNodes(visible.nodes, selectedId, neighborIds).map((node) => ({
+    () => toFlowNodes(visible.nodes, selectedId, neighborIds, entryIds).map((node) => ({
       ...node,
       position: positions[node.id] ?? node.position,
     })),
-    [visible.nodes, selectedId, neighborIds, positions],
+    [visible.nodes, selectedId, neighborIds, entryIds, positions],
   );
 
   const flowEdges = useMemo(
@@ -129,6 +144,8 @@ export function useGraphView({
   );
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {
+    setEntryRoots([]);
+    setEntryInfo(null);
     setReport((current) => {
       const base = current ?? (snapshot ? {
         meta: snapshot.meta,
@@ -260,6 +277,41 @@ export function useGraphView({
     }
   }, [apiContext, report, mergeSlice, setError, setFocusIds, setSelectedId]);
 
+  const openEntryPoints = useCallback(async () => {
+    if (!apiContext || !snapshot) return;
+    try {
+      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, 8, 2, 180);
+      const warnings = data.truncated
+        ? [
+            ...snapshot.warnings,
+            `entry graph limited to ${data.nodes.length} nodes across ${data.roots.length} roots`,
+          ]
+        : snapshot.warnings;
+      setReport({
+        meta: snapshot.meta,
+        nodes: data.nodes,
+        edges: data.edges,
+        files: [],
+        stats: snapshot.stats,
+        top: snapshot.top,
+        warnings,
+      });
+      setEntryRoots(data.roots);
+      setEntryInfo({
+        totalRoots: data.totalRoots,
+        depth: data.depth,
+        truncated: data.truncated,
+      });
+      setSelectedId(null);
+      setFocusIds(null);
+      setFilters(defaultFilters());
+      setSearchText('');
+      setPositions({});
+    } catch (caught) {
+      setError(`Entry points failed: ${(caught as Error).message}`);
+    }
+  }, [apiContext, snapshot, setError, setReport]);
+
   const showImpact = useCallback(async (node: GraphNode, direction: 'in' | 'out') => {
     if (!apiContext) return;
     try {
@@ -305,6 +357,8 @@ export function useGraphView({
   const resetGraphView = useCallback(() => {
     setSelectedId(null);
     setFocusIds(null);
+    setEntryRoots([]);
+    setEntryInfo(null);
     setFilters(defaultFilters());
     setSearchText('');
     setPositions({});
@@ -329,6 +383,9 @@ export function useGraphView({
     relayout: () => setLayoutNonce((value) => value + 1),
     layouting,
     focusIds,
+    entryRoots,
+    entryInfo,
+    openEntryPoints,
     mergeSlice,
     focusNode,
     clearFocus,

@@ -6,22 +6,24 @@ function fileBase(file: string): string {
 }
 
 export function NodeCard({ data, selected }: NodeProps<FlowNode>) {
-  const { node, dimmed, highlighted } = data;
+  const { node, dimmed, highlighted, entryPoint } = data;
   const metrics = node.metrics;
+  const dead = metrics.deadCodeCandidate && !entryPoint;
   const classes = [
     'node-card',
     `kind-${node.kind}`,
     selected ? 'selected' : '',
     highlighted ? 'highlighted' : '',
     dimmed ? 'dimmed' : '',
-    metrics.deadCodeCandidate ? 'dead' : '',
+    dead ? 'dead' : '',
     node.external ? 'external' : '',
+    entryPoint ? 'entry-root' : '',
   ].filter(Boolean).join(' ');
   const tooltip = [
     `${node.qname}  (${node.kind})`,
     `${node.file}:${node.line}`,
-    `fan-in ${metrics.fanIn} · fan-out ${metrics.fanOut} · cyclomatic ${node.cyclomatic} · loc ${node.loc}`,
-    metrics.deadCodeCandidate ? 'dead-code candidate' : '',
+    `fan-in ${metrics.fanIn} · fan-out ${metrics.fanOut} · reach ${metrics.transitiveFanOut} · cyclomatic ${node.cyclomatic} · loc ${node.loc}`,
+    dead ? 'dead-code candidate' : '',
     metrics.inCycle ? `in a cycle (SCC ${metrics.sccSize})` : '',
   ].filter(Boolean).join('\n');
   const split = node.qname.lastIndexOf('.');
@@ -38,8 +40,11 @@ export function NodeCard({ data, selected }: NodeProps<FlowNode>) {
           <span className="card-name">{member}</span>
         </div>
         <div className="card-chips">
+          {entryPoint ? (
+            <span className="card-chip accent" title={`reaches ${metrics.transitiveFanOut} callables`}>root</span>
+          ) : null}
           {metrics.inCycle ? <span className="card-chip cycle">cycle</span> : null}
-          {metrics.deadCodeCandidate ? <span className="card-chip danger">dead</span> : null}
+          {dead ? <span className="card-chip danger">dead</span> : null}
           {node.isEntryLike ? <span className="card-chip success">entry</span> : null}
         </div>
       </div>

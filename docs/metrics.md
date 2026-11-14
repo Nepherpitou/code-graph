@@ -21,6 +21,20 @@ The report carries every node metric in `nodes[].metrics`, graph aggregates in `
 
 Structural fan-in/out are the classic call-graph metrics used for defect prediction (Aivosto; Punia et al.). Multiplicity is kept separate from distinct degree so that a single hot call site does not hide broad coupling.
 
+## Entry-point ranking
+
+The overview graph answers "where does the heaviest code start?" An entry point is a project callable (not a constructor) with:
+
+- zero incoming call sites (`callIn == 0`);
+- no test/spec attribution by path or member name;
+- at least one reachable callable.
+
+Roots are sorted by **`transitiveFanOut`**: the number of distinct callables reachable through outgoing call edges. This is the natural "subtree size" metric and avoids the entry-point bias of fan-in/PageRank, which are near zero for roots. Ties use `height`, then direct `fanOut`, then qualified name.
+
+The graph endpoint traverses **outgoing call edges only**. Using the bidirectional neighborhood traversal here would pull in every caller of a shared callee and rebuild almost the entire graph. Defaults are 8 roots, 2 hops, and a 180-node cap: on a 3984-node backend snapshot this yields 158 nodes and 219 edges. Three hops explode to roughly 300 nodes; two hops is the useful entry → service → repository view.
+
+`transitiveFanOut` is computed exactly below 3000 callables; above that limit it falls back to direct fan-out. Large snapshots therefore rank roots by breadth, not exact reach.
+
 ## Centrality
 
 | Metric | Definition | Source / caveat |

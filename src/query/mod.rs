@@ -7,8 +7,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 
+mod entry;
 mod overview;
 
+pub use entry::{rank_entry_points, EntryPoint};
 pub use overview::{build_overview, file_slice, FileSlice, Overview};
 
 use crate::graph::{EdgeKind, GraphEdge, GraphNode};
@@ -18,6 +20,13 @@ use crate::store::Store;
 pub struct GraphSlice {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct EntrySlice {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -174,6 +183,71 @@ impl QueryService {
         let index = self.index(graph_id).await?;
         self.slice_from_keys(&index, graph_id, roots, depth, limit)
             .await
+    }
+
+    /// Outgoing call edges only. Entry-point roots must not pull in their
+    /// external callers through the reverse adjacency used by neighborhood
+    /// slices.
+    pub async fn entry_slice(
+        &self,
+        graph_id: i64,
+        roots: &[String],
+        depth: usize,
+        limit: usize,
+    ) -> Result<EntrySlice> {
+        let index = self.index(graph_id).await?;
+        let depth = depth.clamp(1, 8);
+        let limit = limit.clamp(1, 5000);
+        let mut visited: HashSet<usize> = HashSet::new();
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+        for root in roots {
+            if let Some(&node) = index.key_to_idx.get(root) {
+                if visited.insert(node) {
+                    queue.push_back((node, 0));
+                }
+            }
+        }
+        let mut truncated = false;
+        while let Some((node, distance)) = queue.pop_front() {
+            if distance >= depth {
+                continue;
+            }
+            for edge in &index.out_call[node] {
+                let next = index.edges[*edge].target;
+                if visited.contains(&next) {
+                    continue;
+                }
+                if visited.len() >= limit {
+                    truncated = true;
+                    continue;
+                }
+                visited.insert(next);
+                queue.push_back((next, distance + 1));
+            }
+        }
+        let keys: Vec<String> = visited
+            .iter()
+            .filter_map(|node| index.keys.get(*node).cloned())
+            .collect();
+        let mut edge_ids = HashSet::new();
+        for node in &visited {
+            for edge in &index.out_call[*node] {
+                let edge = &index.edges[*edge];
+                if visited.contains(&edge.target) {
+                    edge_ids.insert(edge.id);
+                }
+            }
+        }
+        let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
+        let edges = self
+            .store
+            .edges_by_ids(graph_id, &edge_ids.into_iter().collect::<Vec<_>>())
+            .await?;
+        Ok(EntrySlice {
+            nodes,
+            edges,
+            truncated,
+        })
     }
 
     async fn slice_from_keys(

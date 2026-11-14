@@ -19,7 +19,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::analysis::{self, analyze_with_progress, AnalyzeOptions};
 use crate::progress::{ProgressCallback, ProgressEvent, ProgressSink};
 use crate::query::{
-    build_overview, file_slice, EdgeFilter, GraphSlice, Overview, PathResult, QueryService,
+    build_overview, file_slice, rank_entry_points, EdgeFilter, EntryPoint, GraphSlice, Overview,
+    PathResult, QueryService,
 };
 use crate::store::{GraphSummary, Store};
 
@@ -179,6 +180,13 @@ struct NodesParams {
 }
 
 #[derive(Deserialize)]
+struct EntryParams {
+    roots: Option<usize>,
+    depth: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubgraphParams {
     roots: Option<String>,
@@ -215,6 +223,17 @@ struct FileResponse {
     nodes: Vec<crate::graph::GraphNode>,
     edges: Vec<crate::graph::GraphEdge>,
     total: usize,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EntryResponse {
+    nodes: Vec<crate::graph::GraphNode>,
+    edges: Vec<crate::graph::GraphEdge>,
+    roots: Vec<EntryPoint>,
+    total_roots: usize,
+    depth: usize,
     truncated: bool,
 }
 
@@ -294,6 +313,7 @@ pub async fn serve(
         .route("/graphs/{id}/overview", get(overview))
         .route("/graphs/{id}/file", get(file))
         .route("/graphs/{id}/nodes", get(nodes))
+        .route("/graphs/{id}/entry-points", get(entry_points))
         .route("/graphs/{id}/subgraph", get(subgraph))
         .route("/graphs/{id}/path", get(path))
         .route("/graphs/{id}/impact", get(impact))
@@ -447,6 +467,34 @@ async fn nodes(
     let mut nodes = state.store.all_nodes(graph_id).await?;
     nodes.truncate(params.limit.unwrap_or(20_000).clamp(1, 20_000));
     Ok(Json(nodes))
+}
+
+async fn entry_points(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Query(params): Query<EntryParams>,
+) -> Result<Json<EntryResponse>, ApiError> {
+    let graph_id = resolve_graph(&state.store, &id).await?;
+    let nodes = state.store.all_nodes(graph_id).await?;
+    let ranking = rank_entry_points(&nodes, params.roots.unwrap_or(8));
+    let root_ids: Vec<String> = ranking
+        .points
+        .iter()
+        .map(|point| point.id.clone())
+        .collect();
+    let depth = params.depth.unwrap_or(2).clamp(1, 8);
+    let slice = state
+        .query
+        .entry_slice(graph_id, &root_ids, depth, params.limit.unwrap_or(180))
+        .await?;
+    Ok(Json(EntryResponse {
+        nodes: slice.nodes,
+        edges: slice.edges,
+        roots: ranking.points,
+        total_roots: ranking.total,
+        depth,
+        truncated: slice.truncated,
+    }))
 }
 
 async fn subgraph(

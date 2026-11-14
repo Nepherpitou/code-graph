@@ -134,6 +134,22 @@ export interface FileSlice extends GraphSlice {
   truncated: boolean;
 }
 
+export interface EntryPoint {
+  id: string;
+  name: string;
+  file: string;
+  reach: number;
+  height: number;
+  fanOut: number;
+}
+
+export interface EntryGraph extends GraphSlice {
+  roots: EntryPoint[];
+  totalRoots: number;
+  depth: number;
+  truncated: boolean;
+}
+
 export interface OverviewNode {
   id: string;
   label: string;

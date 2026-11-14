@@ -85,6 +85,7 @@ code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 | `GET /graphs/{id}` | One snapshot (`latest` is accepted). |
 | `GET /graphs/{id}/overview?group=dir\|file` | Aggregated directory/file nodes and call edges. |
 | `GET /graphs/{id}/file?path=&group=dir\|file&limit=500` | Nodes and internal edges for one directory/file slice. |
+| `GET /graphs/{id}/entry-points?roots=8&depth=2&limit=180` | Outgoing-only graph for the heaviest entry points, plus the ranked root list. |
 | `GET /graphs/{id}/nodes?limit=20000` | Full node payloads for the client-side node table. |
 | `GET /graphs/{id}/bootstrap?limit=200` | Initial visible slice ranked by fan-in. |
 | `GET /graphs/{id}/search?q=&kind=&limit=` | FTS5/trigram node search. |
@@ -96,11 +97,12 @@ The graph store keeps normalized rows for filtering and full node/edge payloads 
 
 ### UI screens
 
-1. **Directories** — a list of aggregated directories with node/callable/constant counts, call volume, dead-code candidates, and cycle nodes. No graph canvas.
-2. **Files** — a list of files inside the selected directory, with the same counts.
-3. **Graph** — functions in the selected file, or the neighborhood of a node opened from the table. Each card shows the container name on one line and the member name on the next. Right-click opens actions: focus 2-hop, show callers, show callees, open containing file, copy ID, copy qualified name.
+1. **Entry points** (default) — the 8 heaviest roots, ranked by transitive fan-out (reachable callables). The API traverses outgoing calls two hops from those roots, merges shared callees, and caps the result at 180 nodes. Root cards carry a `root` chip; the sidebar shows the ranking and reach counts.
+2. **Directories** — a list of aggregated directories with node/callable/constant counts, call volume, dead-code candidates, and cycle nodes. No graph canvas.
+3. **Files** — a list of files inside the selected directory, with the same counts.
+4. **Graph** — functions in the selected file, the entry-point graph, or the neighborhood of a node opened from the table. Each card shows the container name on one line and the member name on the next. Right-click opens actions: focus 2-hop, show callers, show callees, open containing file, copy ID, copy qualified name.
 
-The directory and file screens are plain lists; only the third screen uses React Flow.
+The directory and file screens are plain lists; only the graph screens use React Flow.
 
 `up` binds the HTTP port first, then runs analysis on a dedicated runtime thread. Progress is printed to the terminal and exposed through `/status`; the SPA polls it, shows the current phase/message, and loads the snapshot automatically when it becomes `ready`. `serve` only exposes existing snapshots.
 
@@ -313,6 +315,7 @@ src/
     mod.rs             SQLite snapshots, FTS5 search, node/edge payloads
   query/
     mod.rs             per-snapshot CSR cache, slices, shortest path, impact
+    entry.rs           entry-point ranking, test filtering
     overview.rs        directory/file aggregation and bounded file slices
   api/
     mod.rs             axum routes, live analysis status, static SPA fallback
@@ -327,7 +330,7 @@ web/
       snapshot/         snapshot loading and static report fallback
       directories/      directory list screen
       files/            file list screen
-      graph/            React Flow canvas, cards, layout, sidebar
+      graph/            React Flow canvas, cards, layout, sidebar, entry panel
       nodes/            all-nodes table and context menu
     lib/api.ts          HTTP client
     shared/format.ts    formatting helpers

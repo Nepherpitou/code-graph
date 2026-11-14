@@ -405,6 +405,34 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .card-chip.danger { color: var(--danger); }
 .card-chip.warning, .card-chip.cycle { color: var(--warning); }
 .card-chip.success, .card-chip.entry { color: var(--success); }
+.card-chip.accent { color: var(--accent); }
+
+.node-card.entry-root {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.panel-note { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.entry-list { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 0; list-style: none; }
+.entry-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.entry-row:hover { background: var(--panel-2); border-color: var(--border); }
+.entry-rank { color: var(--muted); text-align: right; }
+.entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-reach { color: var(--accent); text-align: right; font-weight: 600; }
 
 .node-card.selected {
   border-color: var(--accent);

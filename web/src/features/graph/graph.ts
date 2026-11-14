@@ -30,6 +30,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   node: GraphNode;
   dimmed: boolean;
   highlighted: boolean;
+  entryPoint: boolean;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {
@@ -108,6 +109,7 @@ export function toFlowNodes(
   nodes: GraphNode[],
   selectedId: string | null,
   neighborIds: Set<string>,
+  entryIds: Set<string> | null,
 ): FlowNode[] {
   return nodes.map((node) => {
     const size = nodeSize(node);
@@ -122,6 +124,7 @@ export function toFlowNodes(
         node,
         dimmed: selectedId !== null && node.id !== selectedId && !neighborIds.has(node.id),
         highlighted: selectedId !== null && (node.id === selectedId || neighborIds.has(node.id)),
+        entryPoint: entryIds?.has(node.id) ?? false,
       },
     };
   });

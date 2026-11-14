@@ -29,16 +29,22 @@ export function App() {
   const [scopeLabel, setScopeLabel] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    if (!state.snapshot || !state.overview) return;
-    setScreen('directories');
+  const openEntryPoints = useCallback(async () => {
     setDirectory(null);
-    setScopeLabel(null);
-    state.setReport(null);
-    graph.resetGraphView();
-    // Reset only when a new snapshot arrives.
+    setScopeLabel('Entry points');
+    setScreen('graph');
+    await graph.openEntryPoints();
+  }, [graph.openEntryPoints]);
+
+  useEffect(() => {
+    if (!state.snapshot || !state.apiContext) return;
+    setDirectory(null);
+    setScopeLabel('Entry points');
+    setScreen('graph');
+    void graph.openEntryPoints();
+    // Load only when the snapshot identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.snapshot?.id, state.overview]);
+  }, [state.snapshot?.id, state.apiContext?.graphId]);
 
   const openDirectory = useCallback(async (next: OverviewNode) => {
     setDirectory(next);
@@ -165,6 +171,9 @@ export function App() {
           )}
         </div>
         <div className="actions">
+          {state.apiContext ? (
+            <button className="button" onClick={() => void openEntryPoints()}>Top entries</button>
+          ) : null}
           {screen !== 'directories' && state.overview ? (
             <button className="button" onClick={back}>{backLabel}</button>
           ) : null}

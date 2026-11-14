@@ -1,5 +1,6 @@
 import type {
   AnalysisStatus,
+  EntryGraph,
   FileSlice,
   GraphNode,
   GraphSlice,
@@ -60,6 +61,23 @@ export async function fetchFileSlice(
   const params = new URLSearchParams({ path, group, limit: String(limit) });
   return getJson<FileSlice>(
     `${normalizeBase(base)}/graphs/${encodeURIComponent(graphId)}/file?${params}`,
+  );
+}
+
+export async function fetchEntryPoints(
+  base: string,
+  graphId: string,
+  roots = 8,
+  depth = 2,
+  limit = 180,
+): Promise<EntryGraph> {
+  const params = new URLSearchParams({
+    roots: String(roots),
+    depth: String(depth),
+    limit: String(limit),
+  });
+  return getJson<EntryGraph>(
+    `${normalizeBase(base)}/graphs/${encodeURIComponent(graphId)}/entry-points?${params}`,
   );
 }
 
