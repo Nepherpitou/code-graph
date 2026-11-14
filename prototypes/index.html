@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>code-graph — 27 interface directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --panel: #11151a;
+    --panel-2: #171c23;
+    --line: #28313b;
+    --line-soft: #1b222a;
+    --fg: #edf1f4;
+    --muted: #8995a3;
+    --faint: #566270;
+    --accent: #a5e9c6;
+    --accent-ink: #082218;
+    color-scheme: dark;
+  }
+  body { background: radial-gradient(1200px 700px at 50% -20%, #18252a 0, transparent 60%), var(--bg); }
+  .wrap { width: min(1380px, calc(100% - 48px)); margin: 0 auto; padding: 44px 0 70px; }
+  .top { display: flex; align-items: center; gap: 13px; color: var(--muted); font-size: 11px; margin-bottom: 46px; }
+  .brand { display: flex; align-items: center; gap: 9px; color: var(--fg); font-weight: 700; font-size: 13px; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 12px; }
+  .top .spacer { flex: 1; }
+  .hero { max-width: 840px; }
+  .kicker { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
+  h1 { margin-top: 12px; font-size: clamp(38px, 5.5vw, 66px); line-height: .96; letter-spacing: -.06em; font-weight: 600; }
+  .lede { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 580px; margin-top: 18px; }
+  .lede b { color: var(--fg); font-weight: 500; }
+  .meta-strip { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+  .meta-strip .chip { background: var(--panel); border-color: var(--line); }
+  .controls { display: flex; align-items: center; gap: 6px; margin: 34px 0 15px; flex-wrap: wrap; }
+  .controls .search { width: 260px; height: 31px; }
+  .controls .search .input { font-size: 11px; }
+  .controls .chip { background: var(--panel); border-color: transparent; color: var(--muted); min-height: 27px; font-size: 10.5px; }
+  .controls .chip.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
+  .tile { position: relative; display: flex; flex-direction: column; min-height: 196px; padding: 16px; border: 1px solid var(--line-soft); border-radius: 12px; background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--fg); transition: border-color .15s, background .15s, transform .15s; overflow: hidden; }
+  .tile:hover { border-color: color-mix(in srgb, var(--tone, var(--accent)) 45%, var(--line)); background: var(--panel); transform: translateY(-2px); }
+  .tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .tile-num { font-family: var(--mono); color: var(--faint); font-size: 10px; letter-spacing: .08em; }
+  .tile-family { font-size: 9px; color: var(--faint); text-transform: uppercase; letter-spacing: .09em; }
+  .tile h2 { margin-top: 22px; font-size: 15px; letter-spacing: -.02em; font-weight: 550; }
+  .tile p { margin-top: 6px; color: var(--muted); font-size: 10.5px; line-height: 1.5; max-width: 300px; }
+  .tile-foot { margin-top: auto; display: flex; align-items: center; gap: 5px; padding-top: 15px; }
+  .tile-foot .tag { font-size: 8.5px; padding: 1px 6px; }
+  .tile .open { margin-left: auto; color: var(--faint); font-size: 12px; transition: color .15s, transform .15s; }
+  .tile:hover .open { color: var(--tone, var(--accent)); transform: translateX(2px); }
+  .tile::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 2px; background: linear-gradient(90deg, var(--tone, var(--accent)), transparent 70%); opacity: .55; }
+  .swatches { display: flex; gap: 3px; margin-top: 12px; }
+  .swatches i { width: 15px; height: 5px; border-radius: 2px; background: var(--tone, var(--accent)); opacity: .7; }
+  .swatches i:nth-child(2) { opacity: .42; } .swatches i:nth-child(3) { opacity: .2; }
+  .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--faint); font-size: 10px; line-height: 1.6; }
+  .footer a { color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  @media (max-width: 1050px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 680px) { .wrap { width: calc(100% - 28px); padding-top: 26px; } .grid { grid-template-columns: 1fr; } .controls .search { width: 100%; } .top { margin-bottom: 30px; } .footer { flex-direction: column; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <span class="faint">/</span><span>interface directions</span>
+    <span class="spacer"></span>
+    <span>27 prototypes · static HTML</span>
+  </header>
+
+  <section class="hero">
+    <div class="kicker">Design sprint · November 2026</div>
+    <h1>Twenty-seven ways<br>to enter a codebase.</h1>
+    <p class="lede">The current UI is a dense three-column console: everything is visible, nothing says <b>start here</b>. These prototypes test different answers to the same questions — where does the user land, how do they move, when does the graph appear, and how much chrome deserves to survive.</p>
+    <div class="meta-strip"><span class="chip">2,462 symbols</span><span class="chip">5,840 call edges</span><span class="chip">same data in every demo</span><span class="chip active">interactive</span></div>
+  </section>
+
+  <div class="controls">
+    <div class="search">⌕ <input class="input" id="filter" placeholder="Filter prototypes…"></div>
+    <button class="chip active" data-family="all">All 27</button>
+    <button class="chip" data-family="start">Starting point</button>
+    <button class="chip" data-family="navigate">Navigation</button>
+    <button class="chip" data-family="inspect">Inspect</button>
+    <button class="chip" data-family="visual">Visual language</button>
+    <button class="chip" data-family="workflow">Workflow</button>
+  </div>
+
+  <section class="grid" id="grid"></section>
+
+  <footer class="footer">
+    <div><b>Same content, different bets.</b><br>Every demo uses one realistic checkout-service graph. Click cards, tabs, rows, and overlays. Graph nodes are selectable.</div>
+    <div>Research anchors: <a href="https://www.nngroup.com/articles/progressive-disclosure/" target="_blank" rel="noreferrer">NN/g progressive disclosure</a> · <a href="https://uxpatterns.dev/patterns/advanced/command-palette" target="_blank" rel="noreferrer">command palette anatomy</a> · <a href="https://cambridge-intelligence.com/" target="_blank" rel="noreferrer">graph UX practice</a> · <a href="https://sourcegraph.com/" target="_blank" rel="noreferrer">code navigation</a></div>
+  </footer>
+</main>
+
+<script>
+  const demos = [
+    ['p01-command-center.html', 'Command center', 'start', 'Resume, search, or pick a starting point. Graph is a destination, not the home page.', ['#c7f36b', '#4c5b2a'], ['Linear', 'dashboard'], 'P01'],
+    ['p02-project-overview.html', 'Project overview', 'start', 'Vercel-style project home: health, risk, recent changes, one obvious way into the graph.', ['#3468ff', '#b8c6f0'], ['Vercel', 'overview'], 'P02'],
+    ['p03-graph-first.html', 'Graph first', 'navigate', 'Full-bleed canvas, floating chrome, inspector on demand. Maximum room for the graph.', ['#84e1c1', '#2f6255'], ['canvas', 'focus'], 'P03'],
+    ['p04-workspace.html', 'Workspace', 'navigate', 'VS Code-like shell: file tree, tabs, graph editor, outline. Familiar to engineers, dense.', ['#6cb6ff', '#335577'], ['IDE', 'workspace'], 'P04'],
+    ['p05-onboarding.html', 'Onboarding stepper', 'start', 'First-run path: connect, analyze, then choose a door. Explains the slow part once.', ['#d45b31', '#e6c2b0'], ['wizard', 'first-run'], 'P05'],
+    ['p06-triage.html', 'Triage inbox', 'workflow', 'Risk-first feed. Engineers review cycles, dead code, and hotspots without opening a graph.', ['#ffb86b', '#7a552b'], ['Linear', 'review'], 'P06'],
+    ['p07-launcher.html', 'Launcher', 'start', 'Keyboard-first empty state. One big search, grouped jumps, recent graphs. No sidebar.', ['#9ef0c0', '#356b53'], ['Raycast', 'search'], 'P07'],
+    ['p08-spaces.html', 'Spaces & tabs', 'navigate', 'Saved views as durable spaces, browser-like tabs, notes and members. Arc / Notion feel.', ['#6d56e8', '#b9a9f5'], ['Arc', 'spaces'], 'P08'],
+    ['p09-focus-context.html', 'Focus + context', 'inspect', 'Selected node stays central; 1-hop neighborhood bright, everything else recedes. Path strip above.', ['#7dd3fc', '#32647e'], ['focus', 'inspector'], 'P09'],
+    ['p10-path-story.html', 'Call path story', 'workflow', 'Trace one request step by step with play controls. The graph becomes a narrative, not a map.', ['#f1b36b', '#76552e'], ['timeline', 'path'], 'P10'],
+    ['p11-blast-radius.html', 'Blast radius', 'inspect', 'Reverse impact view: upstream callers in columns, risk score, test coverage. For “what breaks?”', ['#ff7b72', '#8b3935'], ['impact', 'analysis'], 'P11'],
+    ['p12-module-map.html', 'Module map', 'navigate', 'Start at module boundaries, drill into a cluster. Progressive disclosure from architecture to symbols.', ['#58d6a7', '#2b6650'], ['map', 'drill-down'], 'P12'],
+    ['p13-linked-table.html', 'Linked table + graph', 'inspect', 'A sortable function table is the primary surface; hovering a row brushes the graph. Dense and fast.', ['#b8a1ff', '#5c4b8a'], ['table', 'brushing'], 'P13'],
+    ['p14-command-palette.html', 'Command palette', 'navigate', 'The palette is the navigation layer: jump to symbols, actions, filters without leaving the graph.', ['#7dd3fc', '#315f75'], ['⌘K', 'overlay'], 'P14'],
+    ['p15-mobile-sheet.html', 'Mobile bottom sheet', 'navigate', 'A phone-sized graph with a bottom inspector sheet. Tests touch targets and narrow screens.', ['#6ee7a8', '#2e6b4d'], ['mobile', 'sheet'], 'P15'],
+    ['p16-pr-impact.html', 'PR impact review', 'workflow', 'Paste a PR or stack trace, get the changed functions, impacted paths, and a review checklist.', ['#f0a35e', '#75502d'], ['PR', 'diff'], 'P16'],
+    ['p17-editorial.html', 'Editorial light', 'visual', 'A calm, article-like explanation with an inline graph. For onboarding docs and architecture notes.', ['#b45309', '#e6ccb0'], ['editorial', 'docs'], 'P17'],
+    ['p18-terminal.html', 'Neo-brutalist terminal', 'visual', 'Monospace, hard borders, acid accent. Dense developer tool with zero decorative chrome.', ['#d7ff4f', '#52621f'], ['brutalist', 'CLI'], 'P18'],
+    ['p19-glass.html', 'Glass aurora', 'visual', 'Translucent floating panels over a soft gradient. Trendy, but tests whether hierarchy survives blur.', ['#c4b5fd', '#5b4b9a'], ['glass', 'trend'], 'P19'],
+    ['p20-swiss.html', 'Swiss monochrome', 'visual', 'Typography and grid carry the hierarchy. One red accent, no gradients, no decoration.', ['#e53935', '#7a2420'], ['Swiss', 'minimal'], 'P20'],
+    ['p21-blueprint.html', 'Blueprint', 'visual', 'Engineering drawing: graph paper, orthogonal edges, dimensions, module sheets. Literal and technical.', ['#60a5fa', '#2f5480'], ['blueprint', 'technical'], 'P21'],
+    ['p22-paper.html', 'Notion paper', 'visual', 'Warm paper, sticky notes, pastel tags. A graph that feels like a whiteboard, not a database.', ['#c08457', '#6b4b31'], ['Notion', 'warm'], 'P22'],
+    ['p23-dense.html', 'Dense Bloomberg', 'visual', 'Power-user table with tiny type, amber highlights, and a graph thumbnail. Information per pixel.', ['#f2b544', '#755927'], ['Bloomberg', 'dense'], 'P23'],
+    ['p24-spatial.html', 'Spatial / Apple', 'visual', 'Soft depth, rounded floating surfaces, segmented pills. Polished and calm, potentially less dense.', ['#a5b4fc', '#4f5889'], ['Apple', 'spatial'], 'P24'],
+    ['p25-stack-trace.html', 'Stack trace debugger', 'workflow', 'Drop a stack trace, parse frames, highlight the exact path. A task-first entry, not a graph-first one.', ['#fb7185', '#7d303c'], ['debug', 'trace'], 'P25'],
+    ['p26-architecture.html', 'Architecture review', 'workflow', 'Module clusters, cycle warnings, a risk matrix, review notes. For a scheduled architecture pass.', ['#34d399', '#1f6a4b'], ['review', 'modules'], 'P26'],
+    ['p27-search-first.html', 'Search-first', 'start', 'GitHub-style global search with result groups and a preview graph. The fastest known door.', ['#93c5fd', '#365a78'], ['search', 'results'], 'P27'],
+  ];
+
+  const grid = document.getElementById('grid');
+  const toneFor = (colors) => colors[0];
+  function render(filter = '', family = 'all') {
+    const q = filter.trim().toLowerCase();
+    grid.innerHTML = demos.filter(([slug, title, fam, desc]) => {
+      if (family !== 'all' && fam !== family) return false;
+      return !q || `${title} ${desc} ${fam} ${slug}`.toLowerCase().includes(q);
+    }).map(([slug, title, fam, desc, colors, tags, num]) => `
+      <a class="tile" href="${slug}" style="--tone:${toneFor(colors)}">
+        <div class="tile-top"><span class="tile-num">${num}</span><span class="tile-family">${fam}</span></div>
+        <h2>${title}</h2>
+        <p>${desc}</p>
+        <div class="swatches">${colors.map((color) => `<i style="background:${color}"></i>`).join('')}</div>
+        <div class="tile-foot">${tags.map((tag) => `<span class="tag" style="color:${toneFor(colors)};background:color-mix(in srgb,${toneFor(colors)} 12%,transparent)">${tag}</span>`).join('')}<span class="open">↗</span></div>
+      </a>`).join('');
+  }
+  let activeFamily = 'all';
+  document.querySelectorAll('[data-family]').forEach((button) => button.addEventListener('click', () => {
+    activeFamily = button.dataset.family;
+    document.querySelectorAll('[data-family]').forEach((chip) => chip.classList.toggle('active', chip === button));
+    render(document.getElementById('filter').value, activeFamily);
+  }));
+  document.getElementById('filter').addEventListener('input', (event) => render(event.target.value, activeFamily));
+  render();
+</script>
+</body>
+</html>

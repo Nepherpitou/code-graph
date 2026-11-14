@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P12 · Module map — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #eef1ed;
+    --panel: #fbfcfa;
+    --panel-2: #e7ece7;
+    --line: #d1d9d2;
+    --line-soft: #e1e7e1;
+    --fg: #1f2823;
+    --muted: #637068;
+    --faint: #95a099;
+    --accent: #2d7d5e;
+    --accent-ink: #ffffff;
+    --canvas: #f5f8f4;
+    --edge: #aebdb2;
+    --success: #2d7d5e;
+    --warm: #9a6b16;
+    --danger: #b8453a;
+    --violet: #6e5ac4;
+    --radius-lg: 11px;
+    color-scheme: light;
+  }
+  body { overflow: hidden; background: var(--bg); }
+  .app { height: 100vh; display: grid; grid-template-rows: 48px 36px minmax(0,1fr); }
+  .top { display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; }
+  .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 10px; }
+  .crumbs { font-size: 10.5px; color: var(--muted); }
+  .crumbs b { color: var(--fg); font-weight: 550; }
+  .top .spacer { flex: 1; }
+  .top .btn { height: 26px; font-size: 10px; background: var(--panel); border-color: var(--line); }
+  .avatar { background: #d3c8b8; color: #40362a; }
+  .scope { display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 10px; }
+  .scope .path { display: flex; align-items: center; gap: 5px; }
+  .scope .path b { color: var(--fg); font-weight: 550; }
+  .scope .sep { color: var(--faint); }
+  .scope .spacer { flex: 1; }
+  .scope .chip { min-height: 21px; font-size: 9px; background: var(--panel); border-color: transparent; }
+  .scope .chip.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+  .body { display: grid; grid-template-columns: 230px minmax(0,1fr) 300px; min-height: 0; }
+  .modules { border-right: 1px solid var(--line); background: var(--panel); padding: 12px 9px; overflow: auto; }
+  .modules h2 { padding: 0 8px 7px; color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; }
+  .module { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--fg); text-align: left; }
+  .module:hover { background: var(--panel-2); }
+  .module.active { background: color-mix(in srgb, var(--accent) 7%, transparent); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .module .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--tone, var(--accent)); }
+  .module b { display: block; font-family: var(--mono); font-size: 10px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .module span { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; }
+  .module .risk { color: var(--danger); font-family: var(--mono); font-size: 8px; }
+  .module-foot { margin: 15px 7px 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--faint); font-size: 9px; line-height: 1.5; background: var(--panel-2); }
+  .module-foot b { color: var(--muted); display: block; margin-bottom: 2px; }
+
+  .map { display: flex; flex-direction: column; min-width: 0; }
+  .map-head { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+  .map-head .title { font-size: 10.5px; font-weight: 600; }
+  .map-head .sub { color: var(--faint); font-size: 9px; }
+  .map-head .spacer { flex: 1; }
+  .map-head .btn { height: 24px; font-size: 9px; }
+  .graph-shell { flex: 1; min-height: 0; }
+  .g-cluster { background: color-mix(in srgb, var(--panel) 65%, transparent) !important; }
+  .g-cluster-label { font-size: 8px !important; }
+  .graph-toolbar { top: 9px; left: 9px; background: var(--panel); border-color: var(--line); }
+  .graph-toolbar button { color: var(--muted); }
+  .graph-legend { color: var(--faint); }
+  .map-foot { display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 9px; }
+  .map-foot .spacer { flex: 1; }
+
+  .module-detail { border-left: 1px solid var(--line); background: var(--panel); padding: 16px; overflow: auto; }
+  .module-detail .kicker { color: var(--accent); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+  .module-detail h1 { font-family: var(--mono); font-size: 16px; margin-top: 7px; }
+  .module-detail p { color: var(--muted); font-size: 10.5px; line-height: 1.55; margin-top: 8px; }
+  .md-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
+  .md-stat { padding: 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+  .md-stat b { display: block; font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .md-stat span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .md-section { margin-top: 16px; }
+  .md-section .section-title { margin-bottom: 6px; }
+  .md-node { display: flex; align-items: center; gap: 7px; padding: 5px 4px; border-bottom: 1px solid var(--line-soft); font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+  .md-node:last-child { border-bottom: 0; }
+  .md-node .rank { color: var(--faint); font-size: 8px; width: 13px; }
+  .md-node .badge { margin-left: auto; color: var(--faint); font-size: 8px; }
+  .md-node:hover { color: var(--fg); }
+  .md-actions { display: flex; flex-direction: column; gap: 3px; margin-top: 13px; }
+  .md-actions button { text-align: left; border: 0; background: transparent; color: var(--muted); font-size: 10px; padding: 6px 4px; border-radius: 5px; }
+  .md-actions button:hover { background: var(--panel-2); color: var(--fg); }
+  @media (max-width: 1000px) { .body { grid-template-columns: 200px minmax(0,1fr); } .module-detail { display: none; } }
+  @media (max-width: 700px) {
+    .body { grid-template-columns: minmax(0,1fr); overflow: hidden; }
+    .modules { display: none; }
+    .top .crumbs, .top .btn { display: none; }
+    .app { overflow: hidden; }
+    .body { display: block; width: 100vw; max-width: 100vw; min-width: 0; overflow: hidden; }
+    .map { display: flex; width: 100vw; max-width: 100vw; min-width: 0; height: calc(100vh - 84px); overflow: hidden; }
+    .map-head { overflow: hidden; min-width: 0; }
+    .map-head .chip, .map-head .btn { display: none; }
+    .graph-shell { min-width: 0; overflow: hidden; }
+    body { overflow-x: hidden; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <span class="faint">/</span><div class="crumbs">checkout-service <span class="faint">/</span> <b>module map</b></div>
+    <span class="spacer"></span><button class="btn sm">Architecture view</button><button class="btn sm">Export</button><span class="avatar">AR</span>
+  </header>
+
+  <div class="scope"><div class="path"><span>all modules</span><span class="sep">/</span><b>payments</b><span class="sep">/</span><span>authorize</span></div><span class="spacer"></span><span class="chip active">Dependencies</span><span class="chip">Cycles only</span><span class="chip">Changed</span><span class="chip">Hide tests</span></div>
+
+  <div class="body">
+    <aside class="modules">
+      <h2>Modules</h2>
+      <button class="module active" data-module="payments" style="--tone:#2d7d5e"><span class="dot"></span><span><b>src/payments</b><span>812 symbols · 2,104 edges</span></span><span class="risk">2 cycles</span></button>
+      <button class="module" data-module="domain" style="--tone:#6e5ac4"><span class="dot"></span><span><b>src/domain</b><span>1,204 symbols · 2,880 edges</span></span><span class="risk">1 cycle</span></button>
+      <button class="module" data-module="http" style="--tone:#4b87c4"><span class="dot"></span><span><b>src/http</b><span>388 symbols · 740 edges</span></span><span class="risk">0</span></button>
+      <button class="module" data-module="infra" style="--tone:#a36a15"><span class="dot"></span><span><b>src/infra</b><span>258 symbols · 416 edges</span></span><span class="risk">0</span></button>
+      <button class="module" data-module="lib" style="--tone:#7a8680"><span class="dot"></span><span><b>src/lib</b><span>64 symbols · 91 edges</span></span><span class="risk">0</span></button>
+      <div class="module-foot"><b>Drill-down model</b>Modules are boxes; nodes are symbols. Double-click a cluster to expand it, or choose a module here.</div>
+    </aside>
+
+    <main class="map">
+      <div class="map-head"><span class="title">Module dependencies</span><span class="sub">clusters · symbols · 20 shown</span><span class="spacer"></span><span class="chip active">All edges</span><span class="chip">Cross-module</span><button class="btn sm" id="expand">Expand selected ↗</button></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>module call<span class="line"></span>data</span></div></div>
+      <div class="map-foot"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--accent);display:inline-block"></span>HTTP → domain → payments <span class="spacer"></span><span>3 cross-module edges</span><span>·</span><span>2 cycles in payments</span></div>
+    </main>
+
+    <aside class="module-detail">
+      <div class="kicker">Selected module</div>
+      <h1>src/payments</h1>
+      <div class="tiny muted" style="margin-top:5px">selected <b data-selected-name style="color:var(--fg);font-family:var(--mono)">authorize</b></div>
+      <p>Payment authorization, capture, and webhook handling. The module has two cycles through RefundService.</p>
+      <div class="md-stats"><div class="md-stat"><b>812</b><span>symbols</span></div><div class="md-stat"><b>2,104</b><span>edges</span></div><div class="md-stat"><b>2</b><span>cycles</span></div><div class="md-stat"><b>18%</b><span>of repo</span></div></div>
+      <div class="md-section"><div class="section-title">Key symbols</div>
+        <div class="md-node"><span class="rank">01</span><span>PaymentGateway.authorize</span><span class="badge">fan-in 1</span></div>
+        <div class="md-node"><span class="rank">02</span><span>PaymentGateway.capture</span><span class="badge">fan-in 1</span></div>
+        <div class="md-node"><span class="rank">03</span><span>PaymentWebhook.handle</span><span class="badge">entry</span></div>
+        <div class="md-node"><span class="rank">04</span><span>PaymentRepository</span><span class="badge">external</span></div>
+      </div>
+      <div class="md-section"><div class="section-title">Incoming from</div><div class="md-node"><span>src/domain/OrderService.ts</span><span class="badge">4</span></div><div class="md-node"><span>src/http/CheckoutController.ts</span><span class="badge">2</span></div></div>
+      <div class="md-actions"><button>Open module graph ↗</button><button>Show cycles only</button><button>Compare with snapshot 9db2e11</button></div>
+    </aside>
+  </div>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P12</b><span class="sep">·</span>Module map</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'modules', clusters: true, selected: 'authorize', maxScale: 1 });
+  document.querySelectorAll('.module').forEach((button) => button.addEventListener('click', () => {
+    document.querySelectorAll('.module').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    const focus = { payments: 'authorize', domain: 'createOrder', http: 'checkout', infra: 'emitEvent', lib: 'log' }[button.dataset.module];
+    graph.select(focus);
+  }));
+  document.getElementById('expand').addEventListener('click', () => {
+    document.querySelector('.map')?.classList.toggle('expanded');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+</script>
+</body>
+</html>

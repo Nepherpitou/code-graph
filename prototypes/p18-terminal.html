@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P18 · Terminal — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #080907;
+    --panel: #0d0f0a;
+    --panel-2: #14170f;
+    --line: #343b24;
+    --line-soft: #202619;
+    --fg: #f1f5e6;
+    --muted: #8b9678;
+    --faint: #5d6650;
+    --accent: #d7ff4f;
+    --accent-ink: #101400;
+    --canvas: #090b07;
+    --edge: #4d5b3a;
+    --danger: #ff6b5f;
+    --warm: #ffc857;
+    --success: #8df2a8;
+    --violet: #c4a7ff;
+    --radius: 0;
+    --radius-lg: 0;
+    --font: var(--mono);
+  }
+  body { overflow: hidden; background: var(--bg); color: var(--fg); font-family: var(--mono); }
+  .app { height: 100vh; display: grid; grid-template-rows: 56px minmax(0,1fr) 30px; border: 1px solid var(--line); margin: 0; }
+  .top { display: flex; align-items: center; gap: 15px; padding: 0 16px; border-bottom: 2px solid var(--line); background: var(--panel); }
+  .logo { color: var(--accent); font-size: 15px; font-weight: 700; letter-spacing: -.04em; }
+  .logo span { color: var(--fg); }
+  .top .meta { color: var(--faint); font-size: 9px; border-left: 1px solid var(--line); padding-left: 14px; line-height: 1.5; }
+  .top .meta b { color: var(--muted); font-weight: 400; }
+  .top .spacer { flex: 1; }
+  .top .kbd { border-radius: 0; }
+  .top .btn { border-radius: 0; background: transparent; border: 1px solid var(--line); color: var(--muted); height: 25px; font-size: 9px; font-family: var(--mono); }
+  .top .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .top .status { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 9px; }
+
+  .body { display: grid; grid-template-columns: 168px minmax(0,1fr) 282px; min-height: 0; }
+  .nav { border-right: 2px solid var(--line); background: var(--panel); overflow: auto; }
+  .nav-block { border-bottom: 1px solid var(--line-soft); padding: 11px 10px; }
+  .nav-title { color: var(--faint); font-size: 8px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 7px; }
+  .nav-row { display: flex; align-items: center; gap: 5px; width: 100%; border: 0; background: transparent; color: var(--muted); padding: 5px 4px; text-align: left; font-size: 9.5px; }
+  .nav-row:hover { background: var(--panel-2); color: var(--fg); }
+  .nav-row.active { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .nav-row .num { color: var(--faint); }
+  .nav-row.active .num { color: var(--accent-ink); }
+  .nav-row .count { margin-left: auto; color: var(--faint); font-size: 8px; }
+  .nav-row.active .count { color: var(--accent-ink); }
+  .nav .section { margin-top: 3px; color: var(--faint); font-size: 8px; padding: 7px 4px 2px; }
+  .nav .tree { color: var(--faint); font-size: 9px; line-height: 1.9; white-space: pre; }
+  .nav .tree b { color: var(--muted); font-weight: 400; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+  .bar { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 9px; }
+  .bar .path { color: var(--muted); }
+  .bar .path b { color: var(--accent); font-weight: 400; }
+  .bar .spacer { flex: 1; }
+  .bar .chip { border-radius: 0; background: transparent; border: 1px solid var(--line); color: var(--faint); min-height: 20px; font-size: 8px; }
+  .bar .chip.active { border-color: var(--accent); color: var(--accent); }
+  .graph-shell { flex: 1; min-height: 0; }
+  .gnode { border-radius: 0; background: #10140c; border: 1px solid var(--line); box-shadow: none; }
+  .gnode::before { width: 2px; border-radius: 0; }
+  .gnode .g-title { font-size: 10px; }
+  .gnode .g-sub { font-size: 8px; }
+  .gnode.is-selected { border: 2px solid var(--accent); box-shadow: none; }
+  .graph-toolbar { top: 8px; left: 8px; border-radius: 0; background: var(--panel); border-color: var(--line); box-shadow: none; }
+  .graph-toolbar button { border-radius: 0; color: var(--muted); }
+  .graph-toolbar button:hover { background: var(--accent); color: var(--accent-ink); }
+  .graph-legend { color: var(--faint); font-size: 8px; }
+  .minimap { border-radius: 0; background: var(--panel); border-color: var(--line); box-shadow: none; }
+  .graph-foot { display: flex; gap: 14px; padding: 5px 10px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 8px; }
+  .graph-foot .spacer { flex: 1; }
+  .graph-foot b { color: var(--accent); font-weight: 400; }
+
+  .side { border-left: 2px solid var(--line); background: var(--panel); overflow: auto; }
+  .side-head { padding: 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8px; display: flex; justify-content: space-between; letter-spacing: .1em; }
+  .side-head b { color: var(--accent); font-weight: 400; }
+  .side-block { padding: 11px 10px; border-bottom: 1px solid var(--line-soft); }
+  .side-block .name { color: var(--accent); font-size: 12px; word-break: break-word; line-height: 1.3; }
+  .side-block .file { color: var(--faint); font-size: 8px; margin-top: 4px; word-break: break-all; }
+  .kv { display: grid; grid-template-columns: 70px 1fr; gap: 3px 8px; margin-top: 10px; color: var(--faint); font-size: 8.5px; }
+  .kv b { color: var(--fg); font-weight: 400; }
+  .side-title { color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 5px; }
+  .rel { display: flex; gap: 6px; padding: 3px 0; color: var(--muted); font-size: 8.5px; border-bottom: 1px dotted var(--line-soft); }
+  .rel:last-child { border-bottom: 0; }
+  .rel .arrow { color: var(--faint); }
+  .rel .meta { margin-left: auto; color: var(--faint); }
+  .side-actions { display: flex; flex-direction: column; gap: 3px; margin-top: 9px; }
+  .side-actions button { text-align: left; border: 1px solid transparent; background: transparent; color: var(--muted); padding: 4px 2px; font-size: 8.5px; }
+  .side-actions button:hover { color: var(--accent); border-color: var(--line); }
+  .side-actions .key { color: var(--faint); }
+  .output { color: var(--faint); font-size: 8px; line-height: 1.6; white-space: pre-wrap; }
+  .output b { color: var(--muted); font-weight: 400; }
+
+  .statusbar { display: flex; align-items: center; gap: 14px; padding: 0 10px; border-top: 2px solid var(--line); background: var(--panel); color: var(--faint); font-size: 8px; }
+  .statusbar .spacer { flex: 1; }
+  .statusbar .accent { color: var(--accent); }
+  .cmd { display: flex; align-items: center; gap: 5px; }
+  .cmd input { border: 0; outline: 0; background: transparent; color: var(--fg); font-family: var(--mono); font-size: 9px; width: 220px; }
+  @media (max-width: 900px) { .body { grid-template-columns: 148px minmax(0,1fr); } .side { display: none; } .logo span { display: none; } }
+  @media (max-width: 600px) { .body { grid-template-columns: 1fr; } .nav { display: none; } .top .meta { display: none; } .statusbar .cmd input { width: 120px; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="logo" href="index.html">cg<span>://</span>checkout-service</a>
+    <div class="meta"><b>snapshot a3f10c2</b><br>tsgo 5.9 · 6m ago · 2462 sym / 5840 edg</div>
+    <span class="spacer"></span><span class="status">● LOCAL</span><span class="kbd">⌘K</span><button class="btn">EXPORT</button><button class="btn">HELP</button>
+  </header>
+
+  <div class="body">
+    <nav class="nav">
+      <div class="nav-block"><div class="nav-title">views</div>
+        <button class="nav-row active"><span class="num">01</span>GRAPH<span class="count">20</span></button>
+        <button class="nav-row"><span class="num">02</span>ENTRIES<span class="count">24</span></button>
+        <button class="nav-row"><span class="num">03</span>QUEUE<span class="count">12</span></button>
+        <button class="nav-row"><span class="num">04</span>FILES<span class="count">148</span></button>
+        <button class="nav-row"><span class="num">05</span>SIGNALS<span class="count">12</span></button>
+      </div>
+      <div class="nav-block"><div class="nav-title">filters</div>
+        <button class="nav-row">fn / method</button><button class="nav-row">entry only</button><button class="nav-row">hide dead</button><button class="nav-row">cycles</button>
+      </div>
+      <div class="nav-block"><div class="nav-title">tree</div><div class="tree">src/<br>  http/<br>    <b>CheckoutController.ts</b><br>  domain/<br>    <b>OrderService.ts</b><br>    PricingService.ts<br>  payments/<br>    PaymentGateway.ts<br>  infra/<br></div></div>
+      <div class="nav-block"><div class="nav-title">keys</div><div class="output"><b>j/k</b> move<br><b>enter</b> focus<br><b>b</b> blast radius<br><b>f</b> fit<br><b>?</b> help</div></div>
+    </nav>
+
+    <main class="main">
+      <div class="bar"><span class="path">~/acme/checkout <span class="faint">/</span> <b>createOrder</b> <span class="faint">/</span> graph</span><span class="spacer"></span><button class="chip active">LAYERED</button><button class="chip">FOCUS</button><button class="chip">ALL KINDS</button><button class="chip">2-HOP</button></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>FIT</button><button>GRID</button><span class="graph-legend"><i></i>CALL<span class="line"></span>DATA</span></div><div class="minimap" id="minimap"></div></div>
+      <div class="graph-foot"><span>20 nodes</span><span>23 edges</span><span>selected <b data-selected-qname>OrderService.createOrder</b></span><span class="spacer"></span><span>zoom 0.8</span><span>local</span></div>
+    </main>
+
+    <aside class="side">
+      <div class="side-head"><span>INSPECT</span><b>1/1</b></div>
+      <div class="side-block"><div class="name" data-selected-qname>OrderService.createOrder</div><div class="file" data-selected-file>src/domain/OrderService.ts</div><div class="kv"><span>kind</span><b data-selected-kind>method</b><span>fan-in</span><b data-fanin>3</b><span>fan-out</span><b data-fanout>4</b><span>hotspot</span><b data-hotspot>88</b><span>reach</span><b>831</b></div></div>
+      <div class="side-block"><div class="side-title">callers</div><div class="rel"><span class="arrow">←</span><span>checkout</span><span class="meta">HTTP</span></div><div class="rel"><span class="arrow">←</span><span>validateCart</span><span class="meta">2</span></div><div class="rel"><span class="arrow">←</span><span>handleEvent</span><span class="meta">1</span></div></div>
+      <div class="side-block"><div class="side-title">callees</div><div class="rel"><span class="arrow">→</span><span>reserveInventory</span><span class="meta">I</span></div><div class="rel"><span class="arrow">→</span><span>authorize</span><span class="meta">P</span></div><div class="rel"><span class="arrow">→</span><span>finalizeOrder</span><span class="meta">D</span></div><div class="rel"><span class="arrow">→</span><span>emitEvent</span><span class="meta">I</span></div></div>
+      <div class="side-block"><div class="side-title">actions</div><div class="side-actions"><button><span class="key">f</span> focus neighborhood</button><button><span class="key">b</span> blast radius</button><button><span class="key">o</span> open file</button><button><span class="key">y</span> copy qname</button></div></div>
+      <div class="side-block"><div class="side-title">output</div><div class="output">&gt; selected OrderService.createOrder<br>&gt; 3 callers / 4 callees<br>&gt; hotspot p88<br><b>ready.</b></div></div>
+    </aside>
+  </div>
+
+  <footer class="statusbar"><span class="accent">● READY</span><div class="cmd"><span>&gt;</span><input id="cmd" placeholder=":focus authorize"><span class="kbd">↵</span></div><span class="spacer"></span><span>UTF-8</span><span>tsgo</span><span>8.4s</span><span>a3f10c2</span></footer>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P18</b><span class="sep">·</span>Terminal</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'createOrder', maxScale: 1 });
+  CG.minimap(document.getElementById('minimap'), 'layered');
+  const cmd = document.getElementById('cmd');
+  cmd.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    const id = cmd.value.replace(/^:focus\s+/, '').trim();
+    if (CG.byId[id]) graph.select(id);
+    cmd.value = '';
+  });
+  document.querySelectorAll('.nav-row').forEach((row) => row.addEventListener('click', () => {
+    document.querySelectorAll('.nav-row').forEach((item) => item.classList.remove('active'));
+    row.classList.add('active');
+  }));
+</script>
+</body>
+</html>

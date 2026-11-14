@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P06 · Triage inbox — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #0b0c0f;
+    --panel: #121418;
+    --panel-2: #181b20;
+    --line: #292d35;
+    --line-soft: #1c2027;
+    --fg: #eceef2;
+    --muted: #8a909c;
+    --faint: #575d69;
+    --accent: #ffb86b;
+    --accent-ink: #2c1a04;
+    --canvas: #0e1014;
+    --edge: #434955;
+    --danger: #ff7b72;
+    --warm: #ffb86b;
+    --success: #74d89b;
+    --violet: #b8a1ff;
+    --radius-lg: 12px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f7f7f6; --panel: #fff; --panel-2: #f1f1ef; --line: #dfe0dc; --line-soft: #ecece8; --fg: #1d1f22; --muted: #6d7279; --faint: #9ba0a6; --accent: #c25b12; --accent-ink: #fff; --canvas: #fbfbfa; --edge: #bcc0c5; --danger: #c53c32; --warm: #ad650d; --success: #237a4b; --violet: #6847c7; color-scheme: light; }
+  }
+  body { overflow: hidden; }
+  .app { display: grid; grid-template-columns: 196px 440px minmax(0, 1fr); grid-template-rows: 50px minmax(0, 1fr); height: 100vh; }
+  .topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 17px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 12px; }
+  .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+  .crumbs { color: var(--muted); font-size: 10.5px; }
+  .crumbs b { color: var(--fg); font-weight: 550; }
+  .topbar .spacer { flex: 1; }
+  .topbar .btn { background: var(--panel-2); border-color: var(--line); }
+  .avatar { background: color-mix(in srgb, var(--accent) 25%, var(--panel)); color: var(--accent); }
+
+  .nav { border-right: 1px solid var(--line); background: var(--panel); padding: 13px 9px; display: flex; flex-direction: column; gap: 17px; }
+  .nav-label { padding: 0 8px 6px; color: var(--faint); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; color: var(--muted); font-size: 11px; }
+  .nav-item:hover { background: var(--panel-2); color: var(--fg); }
+  .nav-item.active { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--fg); }
+  .nav-item .count { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 9px; }
+  .nav-item.active .count { color: var(--accent); }
+  .nav-foot { margin-top: auto; padding: 10px 8px 0; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 9px; line-height: 1.6; }
+
+  .queue { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-width: 0; }
+  .queue-head { padding: 16px 17px 11px; border-bottom: 1px solid var(--line); }
+  .queue-head h1 { font-size: 17px; letter-spacing: -.025em; font-weight: 650; }
+  .queue-head p { color: var(--muted); font-size: 10.5px; margin-top: 4px; }
+  .queue-tools { display: flex; gap: 5px; margin-top: 12px; }
+  .queue-tools .chip { min-height: 23px; font-size: 10px; background: var(--panel-2); border-color: transparent; }
+  .queue-tools .chip.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+  .queue-list { overflow: auto; flex: 1; padding: 6px 8px 24px; }
+  .group-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 8px 6px; color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+  .group-head span:last-child { font-family: var(--mono); font-weight: 400; }
+  .ticket { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 9px; width: 100%; padding: 10px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: left; color: var(--fg); }
+  .ticket:hover { background: var(--panel-2); border-color: var(--line); }
+  .ticket.active { background: var(--panel-2); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+  .ticket .severity { width: 4px; height: 34px; border-radius: 2px; background: var(--warm); margin-top: 2px; }
+  .ticket.high .severity { background: var(--danger); }
+  .ticket.info .severity { background: var(--violet); }
+  .ticket b { display: block; font-size: 11px; font-weight: 550; line-height: 1.35; }
+  .ticket .meta { display: block; color: var(--faint); font-family: var(--mono); font-size: 9px; margin-top: 4px; }
+  .ticket .tags { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+  .ticket .tag { font-size: 8.5px; padding: 0 5px; }
+  .ticket .age { color: var(--faint); font-size: 9px; white-space: nowrap; padding-top: 2px; }
+  .ticket-group-empty { padding: 15px 9px; color: var(--faint); font-size: 10px; }
+
+  .preview { background: var(--canvas); display: flex; flex-direction: column; min-width: 0; }
+  .preview-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .preview-head .title { font-size: 11px; font-weight: 550; }
+  .preview-head .crumbs { font-size: 9.5px; }
+  .preview-head .spacer { flex: 1; }
+  .preview-head .btn { height: 25px; font-size: 10px; }
+  .preview-body { flex: 1; display: flex; min-height: 0; }
+  .graph-shell { flex: 1; min-height: 0; }
+  .graph-toolbar { top: 9px; left: 9px; background: var(--panel); border-color: var(--line); }
+  .graph-legend { color: var(--faint); }
+  .minimap { width: 145px; height: 92px; right: 10px; bottom: 10px; }
+  .detail { width: 280px; border-left: 1px solid var(--line); background: var(--panel); padding: 15px; overflow: auto; }
+  .detail .section-title { margin-bottom: 7px; }
+  .detail h2 { font-family: var(--mono); font-size: 13px; margin-top: 8px; word-break: break-word; }
+  .detail .file { color: var(--faint); font-family: var(--mono); font-size: 9px; margin-top: 3px; }
+  .detail .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 13px 0; }
+  .detail .fact { border: 1px solid var(--line-soft); border-radius: 6px; padding: 7px; background: var(--panel-2); }
+  .detail .fact b { display: block; font-family: var(--mono); font-size: 12px; }
+  .detail .fact span { display: block; color: var(--faint); font-size: 8.5px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .detail .relation { font-size: 9.5px; }
+  .detail .actions { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+  .detail .actions button { text-align: left; border: 0; background: transparent; color: var(--muted); font-size: 10.5px; padding: 6px; border-radius: 5px; }
+  .detail .actions button:hover { background: var(--panel-2); color: var(--fg); }
+  @media (max-width: 1100px) { .app { grid-template-columns: 196px 380px minmax(0,1fr); } .detail { display: none; } }
+  @media (max-width: 850px) { .app { grid-template-columns: 1fr; } .nav, .preview { display: none; } .queue { border-right: 0; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <div class="crumbs">acme/checkout <span class="faint">/</span> <b>review queue</b></div>
+    <span class="spacer"></span>
+    <button class="btn sm">Re-analyze</button><button class="btn sm">Export</button><span class="avatar">AR</span>
+  </header>
+
+  <nav class="nav">
+    <div>
+      <div class="nav-label">Workspace</div>
+      <a class="nav-item active" href="#"><span>◈</span>Review queue<span class="count">12</span></a>
+      <a class="nav-item" href="#"><span>⌁</span>Call graph</a>
+      <a class="nav-item" href="#"><span>▤</span>Files</a>
+      <a class="nav-item" href="#"><span>↳</span>Entry points</a>
+    </div>
+    <div>
+      <div class="nav-label">Saved views</div>
+      <a class="nav-item" href="#"><span>◌</span>Payment flow</a>
+      <a class="nav-item" href="#"><span>◌</span>Pricing cycle</a>
+      <a class="nav-item" href="#"><span>◌</span>Dead code</a>
+    </div>
+    <div class="nav-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols / 5,840 edges</div>
+  </nav>
+
+  <section class="queue">
+    <div class="queue-head">
+      <h1>Review queue</h1>
+      <p>12 signals from the latest snapshot, ordered by blast radius.</p>
+      <div class="queue-tools"><button class="chip active">All 12</button><button class="chip">Risk</button><button class="chip">Cycles</button><button class="chip">Dead</button><button class="chip">New</button></div>
+    </div>
+    <div class="queue-list">
+      <div class="group-head"><span>Needs action</span><span>05</span></div>
+      <button class="ticket active high" data-select="priceCart"><span class="severity"></span><span><b>Pricing cycle reaches payment capture</b><span class="meta">priceCart → applyCoupon → taxFor → priceCart</span><span class="tags"><span class="tag danger">cycle</span><span class="tag">3 nodes</span></span></span><span class="age">2h</span></button>
+      <button class="ticket high" data-select="createOrder"><span class="severity"></span><span><b>createOrder is a new hotspot</b><span class="meta">OrderService.createOrder · 94th pct · 3 callers</span><span class="tags"><span class="tag warm">hotspot</span><span class="tag">+2 callers</span></span></span><span class="age">2h</span></button>
+      <button class="ticket" data-select="refund"><span class="severity"></span><span><b>Refund path has no retry guard</b><span class="meta">handlePaymentError → refund · 2 call sites</span><span class="tags"><span class="tag">async</span><span class="tag danger">uncovered</span></span></span><span class="age">1d</span></button>
+      <button class="ticket" data-select="authorize"><span class="severity"></span><span><b>authorize discards 41% of results</b><span class="meta">PaymentGateway.authorize · fan-out 2</span><span class="tags"><span class="tag warm">ignored return</span></span></span><span class="age">1d</span></button>
+      <button class="ticket info" data-select="handleEvent"><span class="severity"></span><span><b>Webhook fan-out grew by 2</b><span class="meta">PaymentWebhook.handleEvent</span><span class="tags"><span class="tag" style="color:var(--violet)">change</span></span></span><span class="age">3d</span></button>
+
+      <div class="group-head"><span>Clean up</span><span>04</span></div>
+      <button class="ticket" data-select="legacyRefund"><span class="severity"></span><span><b>legacyRefund is never called</b><span class="meta">RefundService.legacyRefund · 199 days</span><span class="tags"><span class="tag">dead code</span></span></span><span class="age">199d</span></button>
+      <button class="ticket" data-select="log"><span class="severity"></span><span><b>logger is imported by 2 dead paths</b><span class="meta">src/lib/logger.ts</span><span class="tags"><span class="tag">dead code</span></span></span><span class="age">34d</span></button>
+      <button class="ticket" data-select="taxFor"><span class="severity"></span><span><b>taxFor has 2 callers, both indirect</b><span class="meta">PricingService.taxFor</span><span class="tags"><span class="tag">coupling</span></span></span><span class="age">7d</span></button>
+      <button class="ticket" data-select="inventoryRepo"><span class="severity"></span><span><b>InventoryRepository is isolated</b><span class="meta">src/domain/InventoryRepository.ts</span><span class="tags"><span class="tag">isolated</span></span></span><span class="age">7d</span></button>
+
+      <div class="group-head"><span>Resolved</span><span>03</span></div>
+      <button class="ticket" data-select="finalizeOrder"><span class="severity"></span><span><b>finalizeOrder emits an event</b><span class="meta">OrderService.finalizeOrder</span><span class="tags"><span class="tag success">resolved</span></span></span><span class="age">4d</span></button>
+    </div>
+  </section>
+
+  <main class="preview">
+    <div class="preview-head">
+      <span class="title">Preview · Pricing cycle</span><span class="crumbs">src/domain/PricingService.ts</span>
+      <span class="spacer"></span>
+      <button class="btn sm">Focus neighborhood</button><button class="btn sm">Open full graph</button>
+    </div>
+    <div class="preview-body">
+      <div class="graph-shell" id="demo-graph">
+        <div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div>
+        <div class="minimap" id="minimap"></div>
+      </div>
+      <aside class="detail">
+        <div class="section-title">Selected signal</div>
+        <div class="tag danger">cycle</div>
+        <h2 data-selected-qname>PricingService.priceCart</h2>
+        <div class="file" data-selected-file>src/domain/PricingService.ts</div>
+        <div class="facts"><div class="fact"><span>fan-in</span><b data-fanin>4</b></div><div class="fact"><span>fan-out</span><b data-fanout>3</b></div><div class="fact"><span>hotspot</span><b data-hotspot>71</b></div><div class="fact"><span>reach</span><b>488</b></div></div>
+        <div class="section-title">Callers</div>
+        <div class="relation"><span class="mono">checkout</span><span class="arrow">→</span><span class="meta">HTTP</span></div>
+        <div class="relation"><span class="mono">validateCart</span><span class="arrow">→</span><span class="meta">1</span></div>
+        <div class="relation"><span class="mono">applyCoupon</span><span class="arrow">↺</span><span class="meta">cycle</span></div>
+        <div class="section-title" style="margin-top:13px">Suggested next step</div>
+        <div class="note">Break the cycle by moving coupon validation out of the tax path. Start by inspecting <b>applyCoupon</b>.</div>
+        <div class="actions"><button>Open in graph ↗</button><button>Show blast radius ←</button><button>Mark as reviewed</button></div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P06</b><span class="sep">·</span>Triage inbox</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'priceCart', maxScale: 1 });
+  CG.minimap(document.getElementById('minimap'), 'hub');
+  document.querySelectorAll('.ticket').forEach((ticket) => ticket.addEventListener('click', () => {
+    document.querySelectorAll('.ticket').forEach((item) => item.classList.remove('active'));
+    ticket.classList.add('active');
+    if (ticket.dataset.select) graph.select(ticket.dataset.select);
+  }));
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P24 · Spatial — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #eef0f5;
+    --panel: #ffffff;
+    --panel-2: #f3f5f9;
+    --line: #dfe3ec;
+    --line-soft: #eceff5;
+    --fg: #1f2330;
+    --muted: #6d7587;
+    --faint: #a0a7b8;
+    --accent: #5b6cff;
+    --accent-ink: #ffffff;
+    --canvas: #f7f8fc;
+    --edge: #b3b9cb;
+    --success: #2a7d56;
+    --warm: #a16c10;
+    --danger: #c9463d;
+    --violet: #7a63d8;
+    --radius-lg: 20px;
+    color-scheme: light;
+  }
+  body {
+    overflow: hidden;
+    background:
+      radial-gradient(800px 500px at 18% 0%, #dfe4ff, transparent 65%),
+      radial-gradient(700px 500px at 88% 10%, #ffe1ea, transparent 60%),
+      radial-gradient(600px 600px at 50% 100%, #dff6ec, transparent 65%),
+      var(--bg);
+  }
+  .app { height: 100vh; display: grid; grid-template-rows: 58px minmax(0,1fr); padding: 12px; gap: 10px; }
+  .top { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 6px; border-radius: 12px; background: rgba(255,255,255,.72); box-shadow: 0 4px 18px rgba(30,40,80,.07); font-size: 12px; font-weight: 650; }
+  .brand-mark { width: 25px; height: 25px; border-radius: 8px; background: var(--fg); color: #fff; display: grid; place-items: center; font-size: 11px; }
+  .crumbs { color: var(--muted); font-size: 10px; }
+  .crumbs b { color: var(--fg); font-weight: 550; }
+  .top .spacer { flex: 1; }
+  .top .btn { border-radius: 999px; background: rgba(255,255,255,.7); border-color: rgba(255,255,255,.85); box-shadow: 0 3px 12px rgba(30,40,80,.06); color: var(--muted); height: 29px; font-size: 10px; }
+  .top .btn:hover { color: var(--fg); border-color: var(--line); }
+  .top .avatar { background: #e6dfd4; color: #493c2d; border-radius: 50%; }
+
+  .body { display: grid; grid-template-columns: 216px minmax(0,1fr) 288px; gap: 10px; min-height: 0; }
+  .float { border: 1px solid rgba(255,255,255,.8); border-radius: 20px; background: rgba(255,255,255,.62); backdrop-filter: blur(24px) saturate(1.1); box-shadow: 0 14px 46px rgba(40,50,90,.10), inset 0 1px 0 rgba(255,255,255,.8); }
+  .sidebar { padding: 15px 11px; display: flex; flex-direction: column; gap: 18px; overflow: auto; }
+  .side-title { padding: 0 8px 6px; color: var(--faint); font-size: 8.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+  .nav-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); font-size: 11px; text-align: left; }
+  .nav-item:hover { background: rgba(255,255,255,.65); color: var(--fg); }
+  .nav-item.active { background: rgba(255,255,255,.9); border-color: rgba(255,255,255,.9); color: var(--fg); box-shadow: 0 3px 12px rgba(40,50,90,.06); }
+  .nav-item .ico { width: 16px; text-align: center; color: var(--faint); font-size: 10px; }
+  .nav-item.active .ico { color: var(--accent); }
+  .nav-item .count { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 8px; }
+  .side-foot { margin-top: auto; padding: 11px 8px 0; border-top: 1px solid rgba(255,255,255,.8); color: var(--faint); font-size: 8.5px; line-height: 1.6; }
+  .side-foot b { color: var(--muted); font-weight: 500; }
+
+  .canvas { position: relative; overflow: hidden; background: rgba(255,255,255,.5); }
+  .canvas .graph-shell { height: 100%; }
+  .top-pills { position: absolute; top: 13px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; gap: 2px; padding: 3px; border: 1px solid rgba(255,255,255,.85); border-radius: 999px; background: rgba(255,255,255,.72); backdrop-filter: blur(18px); box-shadow: 0 5px 18px rgba(40,50,90,.08); }
+  .top-pills button { border: 0; border-radius: 999px; background: transparent; color: var(--muted); padding: 5px 12px; font-size: 9.5px; }
+  .top-pills button.active { background: var(--fg); color: #fff; }
+  .graph-toolbar { top: 13px; left: 13px; border-radius: 999px; background: rgba(255,255,255,.72); border-color: rgba(255,255,255,.9); box-shadow: 0 5px 18px rgba(40,50,90,.08); padding: 3px; }
+  .graph-toolbar button { border-radius: 50%; color: var(--muted); }
+  .graph-toolbar button:hover { background: var(--panel-2); color: var(--fg); }
+  .graph-legend { color: var(--faint); }
+  .minimap { width: 158px; height: 96px; right: 13px; bottom: 13px; border-radius: 14px; background: rgba(255,255,255,.72); border-color: rgba(255,255,255,.9); box-shadow: 0 5px 18px rgba(40,50,90,.08); }
+  .bottom-dock { position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 11px; padding: 7px 12px; border: 1px solid rgba(255,255,255,.85); border-radius: 999px; background: rgba(255,255,255,.72); backdrop-filter: blur(18px); box-shadow: 0 5px 18px rgba(40,50,90,.08); color: var(--faint); font-size: 8.5px; }
+  .bottom-dock b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+  .inspector { padding: 18px 16px; overflow: auto; }
+  .ins-head .crumbs { color: var(--faint); font-size: 8.5px; }
+  .ins-head h2 { font-family: var(--mono); font-size: 15px; margin-top: 7px; }
+  .ins-head .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; word-break: break-all; }
+  .tag-row { display: flex; gap: 5px; margin-top: 10px; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 15px 0; }
+  .fact { padding: 9px; border: 1px solid rgba(255,255,255,.9); border-radius: 12px; background: rgba(255,255,255,.55); }
+  .fact b { display: block; font-family: var(--mono); font-size: 14px; font-weight: 500; }
+  .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .inspector .section-title { margin-bottom: 5px; }
+  .relation { border-bottom-color: var(--line-soft); font-size: 9.5px; }
+  .ins-actions { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; }
+  .ins-actions button { display: flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 10px; padding: 7px; text-align: left; }
+  .ins-actions button:hover { background: rgba(255,255,255,.65); color: var(--fg); }
+  .ins-actions .arrow { margin-left: auto; color: var(--faint); }
+  .ins-foot { color: var(--faint); font-size: 8px; display: flex; align-items: center; gap: 6px; margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.8); }
+  @media (max-width: 1000px) { .body { grid-template-columns: 190px minmax(0,1fr); } .inspector { display: none; } }
+  @media (max-width: 700px) { .body { grid-template-columns: 1fr; } .sidebar { display: none; } .top .crumbs { display: none; } .top-pills { display: none; } .bottom-dock { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <div class="crumbs">acme <span class="faint">/</span> checkout-service <span class="faint">/</span> <b>graph</b></div>
+    <span class="spacer"></span><button class="btn sm">Share</button><button class="btn sm">Export</button><span class="avatar">AR</span>
+  </header>
+
+  <div class="body">
+    <aside class="sidebar float">
+      <div><div class="side-title">Library</div>
+        <button class="nav-item active"><span class="ico">⌁</span>Call graph</button>
+        <button class="nav-item"><span class="ico">↳</span>Entry points</button>
+        <button class="nav-item"><span class="ico">◈</span>Signals<span class="count">12</span></button>
+        <button class="nav-item"><span class="ico">▤</span>Files</button>
+        <button class="nav-item"><span class="ico">↶</span>History</button>
+      </div>
+      <div><div class="side-title">Collections</div>
+        <button class="nav-item"><span class="ico">◌</span>Payment flow</button>
+        <button class="nav-item"><span class="ico">◌</span>Pricing cycle</button>
+        <button class="nav-item"><span class="ico">◌</span>Dead code</button>
+      </div>
+      <div class="side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols / 5,840 edges</div>
+    </aside>
+
+    <main class="canvas graph-shell float" id="demo-graph">
+      <div class="top-pills"><button class="active">Graph</button><button>Files</button><button>Signals</button><button>Impact</button></div>
+      <div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div>
+      <div class="minimap" id="minimap"></div>
+      <div class="bottom-dock"><span class="status-dot"></span><span>local snapshot</span><span>·</span><b data-selected-name>checkout</b><span>·</span><span>20 nodes / 23 edges</span></div>
+    </main>
+
+    <aside class="inspector float">
+      <div class="ins-head"><div class="crumbs">CheckoutController</div><h2 data-selected-name>checkout</h2><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="tag-row"><span class="tag">entry</span><span class="tag warm">hotspot</span></div></div>
+      <div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>1.8k</b><span>reach</span></div></div>
+      <div class="section-title">Callees</div>
+      <div class="relation"><span class="mono">validateCart</span><span class="meta">2</span></div><div class="relation"><span class="mono">createOrder</span><span class="meta">4</span></div><div class="relation"><span class="mono">priceCart</span><span class="meta">3</span></div>
+      <div class="ins-actions"><button>Focus 2-hop <span class="arrow">→</span></button><button>Show blast radius <span class="arrow">←</span></button><button>Open containing file <span class="arrow">↗</span></button></div>
+      <div class="ins-foot"><span class="status-dot"></span>local · immutable snapshot</div>
+    </aside>
+  </div>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P24</b><span class="sep">·</span>Spatial</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+  CG.minimap(document.getElementById('minimap'), 'layered');
+  document.querySelectorAll('.nav-item').forEach((item) => item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach((node) => node.classList.remove('active'));
+    item.classList.add('active');
+  }));
+</script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P09 · Focus + context — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #0a0d12;
+    --panel: #11161d;
+    --panel-2: #171e27;
+    --line: #27313d;
+    --line-soft: #1a222c;
+    --fg: #eaf0f6;
+    --muted: #8796a7;
+    --faint: #536272;
+    --accent: #7dd3fc;
+    --accent-ink: #052432;
+    --canvas: #0b1118;
+    --edge: #3d4e61;
+    --radius-lg: 12px;
+  }
+  body { overflow: hidden; }
+  .app { height: 100vh; display: grid; grid-template-rows: 46px 36px minmax(0,1fr); }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 0 17px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 650; }
+  .brand-mark { width: 21px; height: 21px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 10px; }
+  .crumbs { color: var(--muted); font-size: 10px; }
+  .crumbs b { color: var(--fg); font-weight: 500; }
+  .bar .spacer { flex: 1; }
+  .bar .btn { background: var(--panel-2); border-color: var(--line); height: 26px; font-size: 10px; }
+  .avatar { background: #d7c6ae; color: #3d2d1d; }
+
+  .path-strip { display: flex; align-items: center; gap: 4px; padding: 0 17px; border-bottom: 1px solid var(--line-soft); background: #0d1218; color: var(--faint); font-size: 9.5px; overflow-x: auto; }
+  .path-strip .label { color: var(--faint); text-transform: uppercase; letter-spacing: .09em; font-size: 8px; margin-right: 7px; flex: 0 0 auto; }
+  .path-item { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); white-space: nowrap; background: transparent; font-family: var(--mono); font-size: 9px; }
+  .path-item:hover { background: var(--panel-2); color: var(--fg); }
+  .path-item.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 32%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .path-item .n { color: var(--faint); font-size: 7.5px; }
+  .path-sep { color: var(--faint); font-size: 9px; }
+  .path-strip .spacer { flex: 1; }
+  .path-strip .count { color: var(--faint); font-size: 8.5px; }
+
+  .body { display: flex; min-height: 0; }
+  .canvas { position: relative; flex: 1; min-width: 0; background: var(--canvas); }
+  .canvas .graph-shell { height: 100%; }
+  .graph-toolbar { top: 12px; left: 13px; }
+  .graph-legend { color: var(--faint); }
+  .minimap { width: 166px; height: 100px; right: 13px; bottom: 13px; }
+  .focus-label { position: absolute; left: 14px; bottom: 14px; z-index: 8; display: flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--muted); font-size: 9px; }
+  .focus-label b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+  .focus-label .kbd { height: 15px; font-size: 8px; }
+
+  .inspector { width: 308px; flex: 0 0 auto; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; }
+  .ins-head { padding: 17px 17px 14px; border-bottom: 1px solid var(--line-soft); }
+  .ins-head .crumbs { font-size: 9px; }
+  .ins-head h2 { font-family: var(--mono); font-size: 16px; margin-top: 8px; }
+  .ins-head .file { font-family: var(--mono); color: var(--faint); font-size: 9px; margin-top: 3px; word-break: break-all; }
+  .ins-tabs { display: flex; gap: 14px; padding: 0 17px; border-bottom: 1px solid var(--line-soft); }
+  .ins-tab { padding: 9px 0; color: var(--muted); font-size: 9.5px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .ins-tab.active { color: var(--fg); border-color: var(--accent); }
+  .ins-body { padding: 14px 17px; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-bottom: 15px; }
+  .metric { padding: 8px 9px; background: var(--panel); }
+  .metric b { display: block; font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .metric span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .rel-title { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 5px; color: var(--faint); font-size: 8.5px; text-transform: uppercase; letter-spacing: .09em; font-weight: 650; }
+  .rel-title span { font-family: var(--mono); font-weight: 400; }
+  .relation { border-bottom: 1px solid var(--line-soft); padding: 6px 2px; }
+  .relation:last-child { border-bottom: 0; }
+  .relation .edge { color: var(--faint); }
+  .relation .meta { color: var(--faint); }
+  .ins-actions { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+  .ins-actions button { display: flex; align-items: center; gap: 7px; padding: 6px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); text-align: left; font-size: 10px; }
+  .ins-actions button:hover { background: var(--panel-2); color: var(--fg); }
+  .ins-actions .arrow { margin-left: auto; color: var(--faint); }
+  .ins-foot { padding: 12px 17px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 8.5px; }
+  @media (max-width: 850px) { .inspector { width: 250px; } .path-strip .count { display: none; } }
+  @media (max-width: 700px) {
+    .inspector { display: none; }
+    .path-strip { overflow-x: auto; max-width: 100%; }
+    .app { overflow: hidden; }
+    body { overflow-x: hidden; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <span class="faint">/</span><div class="crumbs">checkout-service <span class="faint">/</span> <b>focus</b> <span class="faint">/</span> createOrder</div>
+    <span class="spacer"></span>
+    <button class="btn sm">Layers</button><button class="btn sm">Export</button><button class="btn icon sm">⌘</button><span class="avatar">AR</span>
+  </header>
+
+  <div class="path-strip">
+    <span class="label">Path</span>
+    <button class="path-item" data-select="checkout">checkout <span class="n">1</span></button><span class="path-sep">→</span>
+    <button class="path-item" data-select="validateCart">validateCart <span class="n">2</span></button><span class="path-sep">→</span>
+    <button class="path-item" data-select="priceCart">priceCart <span class="n">3</span></button><span class="path-sep">→</span>
+    <button class="path-item active" data-select="createOrder">createOrder <span class="n">4</span></button><span class="path-sep">→</span>
+    <button class="path-item" data-select="authorize">authorize <span class="n">5</span></button><span class="path-sep">→</span>
+    <button class="path-item" data-select="capture">capture <span class="n">6</span></button>
+    <span class="spacer"></span><span class="count">2-hop context · 20 nodes · 23 edges</span>
+  </div>
+
+  <div class="body">
+    <section class="canvas graph-shell" id="demo-graph">
+      <div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><button>⌗</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div>
+      <div class="minimap" id="minimap"></div>
+      <div class="focus-label"><b data-selected-name>createOrder</b><span class="faint">selected</span><span class="kbd">esc</span><span class="faint">clear</span></div>
+    </section>
+    <aside class="inspector">
+      <div class="ins-head"><div class="crumbs">OrderService</div><h2 data-selected-name>createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div></div>
+      <div class="ins-tabs"><span class="ins-tab active">Overview</span><span class="ins-tab">Callers 3</span><span class="ins-tab">Callees 4</span></div>
+      <div class="ins-body">
+        <div class="metrics"><div class="metric"><b data-fanin>3</b><span>fan-in</span></div><div class="metric"><b data-fanout>4</b><span>fan-out</span></div><div class="metric"><b data-hotspot>88</b><span>hotspot</span></div><div class="metric"><b>831</b><span>reach</span></div></div>
+        <div class="rel-title">Context window <span>1-hop</span></div>
+        <div class="relation"><span class="edge">←</span><span class="mono">checkout</span><span class="meta" style="margin-left:auto">HTTP</span></div>
+        <div class="relation"><span class="edge">←</span><span class="mono">validateCart</span><span class="meta" style="margin-left:auto">2</span></div>
+        <div class="relation"><span class="edge">←</span><span class="mono">handleEvent</span><span class="meta" style="margin-left:auto">1</span></div>
+        <div class="rel-title">Next in path <span>callees</span></div>
+        <div class="relation"><span class="edge">→</span><span class="mono">reserveInventory</span><span class="meta" style="margin-left:auto">Inventory</span></div>
+        <div class="relation"><span class="edge">→</span><span class="mono">authorize</span><span class="meta" style="margin-left:auto">Payments</span></div>
+        <div class="ins-actions"><button>Focus 2-hop neighborhood <span class="arrow">→</span></button><button>Show blast radius <span class="arrow">←</span></button><button>Open containing file <span class="arrow">↗</span></button><button>Copy qualified name</button></div>
+      </div>
+      <div class="ins-foot"><span class="status-dot"></span> snapshot a3f10c2 · local · 6 min ago</div>
+    </aside>
+  </div>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P09</b><span class="sep">·</span>Focus + context</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'createOrder', maxScale: 1 });
+  CG.minimap(document.getElementById('minimap'), 'hub');
+  document.querySelectorAll('.path-item').forEach((item) => item.addEventListener('click', () => {
+    document.querySelectorAll('.path-item').forEach((node) => node.classList.remove('active'));
+    item.classList.add('active');
+    graph.select(item.dataset.select);
+  }));
+</script>
+</body>
+</html>

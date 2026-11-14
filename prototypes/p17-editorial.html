@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P17 · Editorial — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #f7f2e9;
+    --panel: #fffdf8;
+    --panel-2: #f1e9dc;
+    --line: #e2d6c4;
+    --line-soft: #eee5d8;
+    --fg: #2d2923;
+    --muted: #71685b;
+    --faint: #a39584;
+    --accent: #a84a24;
+    --accent-ink: #fff8f0;
+    --canvas: #faf6ee;
+    --edge: #c3b19c;
+    --success: #397657;
+    --warm: #9b6712;
+    --danger: #b24835;
+    --violet: #7557b8;
+    --radius-lg: 6px;
+    color-scheme: light;
+  }
+  body { background: var(--bg); color: var(--fg); }
+  .top { height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 70%, transparent); }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; }
+  .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--fg); color: #fff; display: grid; place-items: center; font-size: 10px; }
+  .top .crumbs { color: var(--faint); font-size: 10px; }
+  .top .spacer { flex: 1; }
+  .top .btn { height: 26px; background: var(--panel); border-color: var(--line); font-size: 10px; }
+  .avatar { background: #e0d1bd; color: #4b3a27; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 230px; max-width: 1080px; margin: 0 auto; padding: 50px 24px 80px; gap: 56px; }
+  .article { max-width: 680px; }
+  .kicker { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .15em; font-weight: 700; }
+  h1 { margin-top: 13px; font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-size: clamp(34px, 4.8vw, 52px); line-height: 1.02; letter-spacing: -.035em; font-weight: 400; }
+  .dek { color: var(--muted); font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-size: 16px; line-height: 1.55; margin-top: 15px; }
+  .byline { display: flex; align-items: center; gap: 9px; color: var(--faint); font-size: 10px; margin-top: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .article p { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-size: 15px; line-height: 1.72; color: #49433b; margin: 18px 0; }
+  .article h2 { font-family: var(--font); font-size: 13px; font-weight: 650; letter-spacing: -.01em; margin: 34px 0 4px; }
+  .article h2::before { content: "§ "; color: var(--accent); font-family: var(--mono); font-size: 11px; }
+  .figure { margin: 28px 0 10px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+  .figure-head { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border-bottom: 1px solid var(--line-soft); color: var(--faint); font-family: var(--mono); font-size: 8.5px; }
+  .figure-head b { color: var(--muted); font-weight: 500; }
+  .figure-head .spacer { flex: 1; }
+  .graph-shell { height: 360px; background: var(--canvas); }
+  .graph-toolbar { top: 8px; left: 8px; background: var(--panel); border-color: var(--line); }
+  .graph-toolbar button { color: var(--muted); }
+  .graph-legend { color: var(--faint); }
+  .figcaption { display: flex; gap: 9px; align-items: baseline; padding: 9px 11px; border-top: 1px solid var(--line-soft); font-family: var(--font); font-size: 10px; color: var(--muted); line-height: 1.45; }
+  .figcaption b { color: var(--accent); font-family: var(--mono); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
+  .pull { margin: 24px 0; padding: 13px 18px; border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 4%, transparent); font-family: Georgia, serif; font-size: 17px; line-height: 1.5; color: var(--fg); }
+  .aside { padding-top: 4px; }
+  .toc { position: sticky; top: 22px; }
+  .toc-title { color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
+  .toc a { display: block; padding: 5px 0; color: var(--muted); font-size: 10.5px; border-left: 1px solid var(--line); padding-left: 10px; margin-left: 1px; }
+  .toc a:hover, .toc a.active { color: var(--fg); border-color: var(--accent); }
+  .annotation { margin-top: 26px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  .annotation .section-title { font-size: 8px; margin-bottom: 6px; }
+  .annotation p { font-family: var(--font); font-size: 9.5px; line-height: 1.55; color: var(--muted); }
+  .annotation b { color: var(--fg); font-family: var(--mono); font-size: 9px; }
+  .annotation .metrics { display: flex; gap: 12px; color: var(--faint); font-size: 8.5px; margin-top: 8px; }
+  .annotation .metrics b { font-family: var(--mono); }
+  .related { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 13px; }
+  .related a { display: flex; align-items: baseline; gap: 7px; color: var(--muted); font-size: 10px; padding: 5px 0; }
+  .related a span { margin-left: auto; color: var(--faint); font-size: 8px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; gap: 28px; padding-top: 32px; } .aside { display: none; } .article { max-width: none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+  <span class="faint">/</span><span class="crumbs">checkout-service / notes / checkout flow</span>
+  <span class="spacer"></span><button class="btn sm">Share</button><button class="btn sm">Edit note</button><span class="avatar">AR</span>
+</header>
+
+<div class="layout">
+  <article class="article">
+    <div class="kicker">Architecture note · 8 min read</div>
+    <h1>How a checkout<br>becomes an order.</h1>
+    <p class="dek">A guided walk through the critical path of the checkout service — the functions that matter, the edges that carry risk, and the one place where the flow loops back on itself.</p>
+    <div class="byline"><span class="avatar mini">MK</span><span>Mira K.</span><span>·</span><span>updated 2h ago</span><span>·</span><span>snapshot a3f10c2</span></div>
+
+    <p>The checkout path begins at a single HTTP handler and ends at a payment capture. In between, five modules exchange calls. Most of the code is straightforward; the interesting part is where inventory reservation and payment authorization share a failure boundary.</p>
+
+    <h2 id="entry">The entry point</h2>
+    <p><span class="mono">CheckoutController.checkout</span> has one caller and five callees. It is deliberately thin: validate, price, create, and handle errors. The graph is small enough to follow at a glance, but the fan-out is where the first risk appears.</p>
+
+    <figure class="figure">
+      <div class="figure-head"><b>Figure 1</b><span>checkout path · 20 nodes</span><span class="spacer"></span><span>click a card</span></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div>
+      <figcaption><b>Figure 1</b><span>The selected card is <b data-selected-qname>CheckoutController.checkout</b> — fan-in <b data-fanin>1</b>, fan-out <b data-fanout>5</b>.</span></figcaption>
+    </figure>
+
+    <p>The first branch is validation. It is boring on purpose: reject malformed carts before spending money. The second branch prices the cart, which reads coupons and tax rules. The third creates an order, which reserves inventory and authorizes payment.</p>
+
+    <div class="pull">The graph is not the documentation. It is the index into the documentation.</div>
+
+    <h2 id="order">createOrder is the hinge</h2>
+    <p><span class="mono">OrderService.createOrder</span> is the highest-risk function in the path. It has three callers, four callees, and a failure path that must release inventory if authorization fails. In the current implementation, that release is guarded by a try/catch. The graph makes the guard visible; the code makes it correct.</p>
+
+    <h2 id="cycle">A cycle in pricing</h2>
+    <p>Pricing contains a small cycle: <span class="mono">priceCart → applyCoupon → taxFor → priceCart</span>. It is not necessarily a bug, but it makes the order of operations hard to reason about. A future refactor should move coupon validation out of the tax path.</p>
+
+    <h2 id="where">Where to go next</h2>
+    <p>Start at the entry point, follow the highlighted path, then open the blast radius for <span class="mono">createOrder</span>. The review queue has the cycle and the two untested call sites.</p>
+  </article>
+
+  <aside class="aside">
+    <div class="toc"><div class="toc-title">On this page</div><a class="active" href="#entry">The entry point</a><a href="#order">createOrder is the hinge</a><a href="#cycle">A cycle in pricing</a><a href="#where">Where to go next</a></div>
+    <div class="annotation"><div class="section-title">Selected node</div><p><b data-selected-name>checkout</b><br><span data-selected-file>src/http/CheckoutController.ts</span></p><div class="metrics"><span>fan-in <b data-fanin>1</b></span><span>fan-out <b data-fanout>5</b></span><span>hotspot <b data-hotspot>94</b></span></div></div>
+    <div class="related"><div class="section-title" style="margin-bottom:6px">Related notes</div><a href="#">Payment retry policy <span>7 min</span></a><a href="#">Inventory reservation <span>5 min</span></a><a href="#">Coupon stacking <span>4 min</span></a></div>
+  </aside>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P17</b><span class="sep">·</span>Editorial</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+  document.querySelectorAll('.toc a').forEach((link) => link.addEventListener('click', (event) => {
+    event.preventDefault();
+    document.querySelectorAll('.toc a').forEach((item) => item.classList.remove('active'));
+    link.classList.add('active');
+    document.querySelector(link.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+  }));
+</script>
+</body>
+</html>

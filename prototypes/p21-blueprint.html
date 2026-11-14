@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P21 · Blueprint — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #e8f0f8;
+    --panel: #f4f8fc;
+    --panel-2: #dfeaf5;
+    --line: #a9c4dd;
+    --line-soft: #c8dbea;
+    --fg: #16324c;
+    --muted: #5b7892;
+    --faint: #8ca7be;
+    --accent: #1f5f99;
+    --accent-ink: #ffffff;
+    --canvas: #eef5fb;
+    --edge: #7fa8c9;
+    --danger: #b64337;
+    --warm: #9a6a13;
+    --success: #27704d;
+    --radius: 0;
+    --radius-lg: 0;
+    color-scheme: light;
+  }
+  body {
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px),
+      linear-gradient(color-mix(in srgb, var(--line) 15%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--line) 15%, transparent) 1px, transparent 1px);
+    background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+    color: var(--fg);
+  }
+  .sheet { width: min(1220px, calc(100% - 36px)); margin: 18px auto; border: 2px solid var(--fg); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 4px 4px 0 color-mix(in srgb, var(--fg) 12%, transparent); }
+  .titleblock { display: grid; grid-template-columns: 1fr 280px; border-bottom: 2px solid var(--fg); }
+  .titleblock .main { padding: 16px 20px 14px; border-right: 1px solid var(--fg); }
+  .titleblock .kicker { font-family: var(--mono); font-size: 8px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+  .titleblock h1 { margin-top: 7px; font-size: 27px; text-transform: uppercase; letter-spacing: .02em; font-weight: 500; }
+  .titleblock h1 b { font-weight: 700; }
+  .titleblock .meta { display: flex; gap: 22px; margin-top: 9px; font-family: var(--mono); font-size: 8px; color: var(--muted); flex-wrap: wrap; }
+  .titleblock .meta b { color: var(--fg); font-weight: 500; }
+  .titleblock .stamp { padding: 12px 14px; display: flex; flex-direction: column; gap: 5px; font-family: var(--mono); font-size: 8px; color: var(--muted); }
+  .titleblock .stamp .row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line-soft); padding-bottom: 3px; }
+  .titleblock .stamp b { color: var(--fg); font-weight: 500; }
+  .topnav { display: flex; align-items: center; gap: 4px; padding: 5px 9px; border-bottom: 1px solid var(--fg); font-family: var(--mono); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
+  .topnav a { padding: 4px 8px; color: var(--muted); border: 1px solid transparent; }
+  .topnav a.active { color: var(--fg); border-color: var(--fg); }
+  .topnav .spacer { flex: 1; }
+  .topnav .status { color: var(--muted); }
+  .topnav .status b { color: var(--success); }
+
+  .plan { display: grid; grid-template-columns: minmax(0,1fr) 250px; }
+  .drawing { border-right: 1px solid var(--fg); padding: 10px; }
+  .drawing-head { display: flex; align-items: center; gap: 10px; padding: 4px 2px 8px; font-family: var(--mono); font-size: 8px; color: var(--muted); }
+  .drawing-head b { color: var(--fg); font-weight: 500; }
+  .drawing-head .spacer { flex: 1; }
+  .drawing-head .chip { border-radius: 0; border: 1px solid var(--line); min-height: 18px; padding: 0 5px; font-size: 7px; }
+  .drawing-head .chip.active { background: var(--fg); color: #fff; border-color: var(--fg); }
+  .frame { position: relative; border: 1px solid var(--fg); background: var(--canvas); }
+  .frame::before { content: "GRID 10mm"; position: absolute; left: 8px; top: 5px; z-index: 2; font-family: var(--mono); font-size: 7px; color: var(--faint); }
+  .graph-shell { height: 520px; }
+  .graph-toolbar { top: 19px; left: 8px; border-radius: 0; border-color: var(--fg); background: var(--panel); box-shadow: none; }
+  .graph-toolbar button { border-radius: 0; color: var(--muted); }
+  .graph-toolbar button:hover { background: var(--fg); color: #fff; }
+  .graph-legend { color: var(--muted); font-size: 7px; }
+  .g-cluster { background: color-mix(in srgb, var(--accent) 3%, transparent) !important; border-color: var(--line) !important; }
+  .gnode { border-radius: 0; border-color: var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 2px 2px 0 color-mix(in srgb, var(--fg) 9%, transparent); }
+  .gnode::before { width: 2px; border-radius: 0; }
+  .gnode.is-selected { border: 2px solid var(--accent); box-shadow: 3px 3px 0 color-mix(in srgb, var(--accent) 22%, transparent); }
+  .gnode .g-title { font-size: 10px; }
+  .gnode .g-sub { font-size: 8px; }
+  .dimension { position: absolute; z-index: 3; font-family: var(--mono); font-size: 7px; color: var(--muted); pointer-events: none; }
+  .dimension.x { left: 10%; right: 6%; bottom: 18px; border-top: 1px solid var(--muted); padding-top: 3px; display: flex; justify-content: space-between; }
+  .dimension.y { top: 8%; bottom: 10%; right: 15px; border-left: 1px solid var(--muted); padding-left: 3px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; }
+  .note { margin: 8px 2px 0; padding: 7px 9px; border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: 8px; }
+  .note b { color: var(--fg); }
+  .spec { padding: 10px; }
+  .spec-block { border: 1px solid var(--fg); margin-bottom: 8px; }
+  .spec-block h2 { padding: 5px 7px; border-bottom: 1px solid var(--fg); font-family: var(--mono); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; font-weight: 500; display: flex; justify-content: space-between; }
+  .spec-block h2 span { color: var(--muted); font-weight: 400; }
+  .spec-body { padding: 8px 7px; font-family: var(--mono); font-size: 9px; }
+  .kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dotted var(--line); color: var(--muted); }
+  .kv:last-child { border-bottom: 0; }
+  .kv b { color: var(--fg); font-weight: 500; }
+  .part { display: flex; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+  .part:last-child { border-bottom: 0; }
+  .part .id { color: var(--faint); width: 24px; }
+  .part .badge { margin-left: auto; color: var(--faint); font-size: 7px; }
+  .legend { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 8px; color: var(--muted); }
+  .legend i { display: inline-block; width: 16px; border-top: 1px solid var(--muted); margin-right: 5px; vertical-align: middle; }
+  .legend i.dash { border-top-style: dashed; }
+  .legend i.dot { width: 5px; height: 5px; border: 0; border-radius: 50%; background: var(--accent); }
+  .spec .actions { display: flex; flex-direction: column; gap: 3px; }
+  .spec .actions button { border: 1px solid var(--fg); background: transparent; font-family: var(--mono); font-size: 8px; text-transform: uppercase; text-align: left; padding: 6px 7px; color: var(--fg); }
+  .spec .actions button:hover { background: var(--fg); color: #fff; }
+  .stampfoot { display: flex; justify-content: space-between; border-top: 2px solid var(--fg); padding: 6px 10px; font-family: var(--mono); font-size: 7px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  @media (max-width: 900px) { .titleblock { grid-template-columns: 1fr; } .titleblock .main { border-right: 0; border-bottom: 1px solid var(--fg); } .titleblock .stamp { display: none; } .plan { grid-template-columns: 1fr; } .drawing { border-right: 0; } .spec { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .spec-block { margin: 0; } }
+  @media (max-width: 600px) { .sheet { width: calc(100% - 16px); margin: 8px auto; } .titleblock h1 { font-size: 20px; } .graph-shell { height: 380px; } .spec { grid-template-columns: 1fr; } .dimension { display: none; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header class="titleblock">
+    <div class="main"><div class="kicker">Dependency drawing · sheet 01 of 04</div><h1><b>checkout-service</b> / call graph</h1><div class="meta"><span>PROJECT <b>ACME-CHECKOUT</b></span><span>REV <b>A3F10C2</b></span><span>LANG <b>TYPESCRIPT</b></span><span>SCALE <b>1:1</b></span><span>DATE <b>2026-11-14</b></span></div></div>
+    <div class="stamp"><div class="row"><span>DRAWN BY</span><b>tsgo 5.9</b></div><div class="row"><span>CHECKED</span><b>6 min ago</b></div><div class="row"><span>SYMBOLS</span><b>2,462</b></div><div class="row"><span>EDGES</span><b>5,840</b></div><div class="row"><span>STATUS</span><b style="color:var(--success)">ISSUED</b></div></div>
+  </header>
+  <nav class="topnav"><a href="index.html">◉ index</a><a class="active" href="#">DRAWING</a><a href="#">SCHEDULE</a><a href="#">DETAILS</a><a href="#">NOTES</a><span class="spacer"></span><span class="status">SNAP <b>a3f10c2</b> · LOCAL</span></nav>
+
+  <div class="plan">
+    <section class="drawing">
+      <div class="drawing-head"><b>DWG 01</b><span>ENTRY POINTS / 2-HOP</span><span class="spacer"></span><span class="chip active">LAYERED</span><span class="chip">ORTHO</span><span class="chip">DATA EDGES</span></div>
+      <div class="frame"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>FIT</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div><div class="dimension x"><span>0</span><span>1,000 px</span></div><div class="dimension y"><span>0</span><span>600 px</span></div></div>
+      <div class="note"><b>NOTE 01:</b> edges are directed calls; dashed lines carry data. Selected node is <b data-selected-qname>CheckoutController.checkout</b>. Dimensions are nominal; layout is deterministic for this snapshot.</div>
+      <div class="frame" style="margin-top:8px;padding:8px 10px;background:var(--panel)"><div class="legend"><span><i></i>Call edge (source → target)</span><span><i class="dash"></i>Data edge (value flow)</span><span><i class="dot"></i>Selected symbol</span><span><i></i>Module boundary</span></div></div>
+    </section>
+
+    <aside class="spec">
+      <div class="spec-block"><h2>SYMBOL SCHEDULE <span>01</span></h2><div class="spec-body"><div class="kv"><span>fan-in</span><b data-fanin>1</b></div><div class="kv"><span>fan-out</span><b data-fanout>5</b></div><div class="kv"><span>hotspot</span><b data-hotspot>94</b></div><div class="kv"><span>reach</span><b>1,842</b></div><div class="kv"><span>file</span><b style="font-size:7px" data-selected-file>CheckoutController.ts</b></div></div></div>
+      <div class="spec-block"><h2>PARTS LIST <span>20 ITEMS</span></h2><div class="spec-body"><div class="part"><span class="id">01</span><span>CheckoutController.checkout</span><span class="badge">ENTRY</span></div><div class="part"><span class="id">02</span><span>OrderService.createOrder</span><span class="badge">HOT</span></div><div class="part"><span class="id">03</span><span>PricingService.priceCart</span><span class="badge">CYCLE</span></div><div class="part"><span class="id">04</span><span>PaymentGateway.authorize</span><span class="badge">ASYNC</span></div><div class="part"><span class="id">05</span><span>PaymentWebhook.handle</span><span class="badge">ENTRY</span></div><div class="part"><span class="id">06</span><span>RefundService.refund</span><span class="badge">2 IN</span></div></div></div>
+      <div class="spec-block"><h2>REVISION <span>NOTES</span></h2><div class="spec-body"><div class="kv"><span>09db2e11</span><b>−38 edges</b></div><div class="kv"><span>71c8aa</span><b>+12 edges</b></div><div class="kv"><span>a3f10c2</span><b>current</b></div></div></div>
+      <div class="spec actions"><button>Open full drawing ↗</button><button>Export PDF</button><button>Compare revisions</button></div>
+    </aside>
+  </div>
+  <footer class="stampfoot"><span>Code-graph · drawing 21 · generated from local snapshot</span><span>Do not scale from this drawing</span></footer>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P21</b><span class="sep">·</span>Blueprint</a>
+<script src="assets/proto.js"></script>
+<script>
+  CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+</script>
+</body>
+</html>

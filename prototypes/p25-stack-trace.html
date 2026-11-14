@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P25 · Stack trace debugger — code-graph directions</title>
+<link rel="stylesheet" href="assets/proto.css">
+<style>
+  :root {
+    --bg: #0d0b0f;
+    --panel: #151218;
+    --panel-2: #1d1820;
+    --line: #332a38;
+    --line-soft: #241e29;
+    --fg: #f4eef3;
+    --muted: #9b8c9c;
+    --faint: #675b69;
+    --accent: #fb7185;
+    --accent-ink: #2e0a10;
+    --canvas: #100d13;
+    --edge: #4f3d54;
+    --danger: #fb7185;
+    --warm: #ffc778;
+    --success: #75d6a5;
+    --violet: #c4a7ff;
+    --radius-lg: 12px;
+  }
+  body { overflow: hidden; background: var(--bg); }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+  .top { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; }
+  .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 10px; }
+  .crumbs { color: var(--muted); font-size: 10px; }
+  .crumbs b { color: var(--fg); font-weight: 500; }
+  .top .spacer { flex: 1; }
+  .top .btn { height: 26px; font-size: 10px; background: var(--panel-2); border-color: var(--line); }
+  .avatar { background: #dccdb9; color: #3e2f20; }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 330px minmax(0,1fr) 300px; }
+  .input-pane { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .pane-head { display: flex; align-items: center; gap: 8px; padding: 13px 14px 10px; border-bottom: 1px solid var(--line-soft); }
+  .pane-head h1 { font-size: 12px; font-weight: 600; }
+  .pane-head .sub { color: var(--faint); font-size: 8.5px; }
+  .pane-head .spacer { flex: 1; }
+  .pane-head .btn { height: 23px; font-size: 9px; }
+  .trace-input { margin: 11px 12px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #0d0b10; font-family: var(--mono); font-size: 8.5px; line-height: 1.65; color: var(--muted); white-space: pre-wrap; overflow: auto; flex: 0 0 auto; max-height: 220px; }
+  .trace-input .err { color: var(--accent); }
+  .trace-input .file { color: var(--faint); }
+  .parse-row { display: flex; align-items: center; gap: 7px; margin: 0 12px 10px; color: var(--faint); font-size: 9px; }
+  .parse-row .spacer { flex: 1; }
+  .frames-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 13px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
+  .frames { overflow: auto; padding: 4px 6px 20px; }
+  .frame { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; gap: 7px; width: 100%; padding: 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); text-align: left; font-size: 9px; }
+  .frame:hover { background: var(--panel-2); color: var(--fg); }
+  .frame.active { background: color-mix(in srgb, var(--accent) 9%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
+  .frame .n { color: var(--faint); font-family: var(--mono); font-size: 8px; text-align: right; }
+  .frame b { display: block; font-family: var(--mono); font-size: 9.5px; font-weight: 500; }
+  .frame span { display: block; color: var(--faint); font-size: 8px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frame .rel { color: var(--accent); font-family: var(--mono); font-size: 8px; align-self: center; }
+  .graph-pane { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+  .graph-head { height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 13px; border-bottom: 1px solid var(--line-soft); background: var(--panel); color: var(--muted); font-size: 9px; }
+  .graph-head .spacer { flex: 1; }
+  .graph-head .chip { background: var(--panel-2); border-color: transparent; font-size: 8.5px; min-height: 21px; }
+  .graph-head .chip.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .graph-shell { flex: 1; min-height: 0; }
+  .graph-toolbar { top: 9px; left: 9px; background: var(--panel); border-color: var(--line); }
+  .graph-toolbar button { color: var(--muted); }
+  .graph-legend { color: var(--faint); }
+  .minimap { width: 148px; height: 92px; right: 9px; bottom: 9px; background: var(--panel); }
+  .graph-foot { height: 30px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 8.5px; }
+  .graph-foot .spacer { flex: 1; }
+  .graph-foot b { color: var(--accent); font-family: var(--mono); font-weight: 500; }
+  .detail { border-left: 1px solid var(--line); background: var(--panel); padding: 16px; overflow: auto; }
+  .detail .crumbs { color: var(--faint); font-size: 8.5px; }
+  .detail h2 { font-family: var(--mono); font-size: 14px; margin-top: 8px; word-break: break-word; }
+  .detail .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; }
+  .detail .section-title { margin-top: 16px; margin-bottom: 5px; }
+  .detail .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+  .detail .fact { padding: 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+  .detail .fact b { display: block; font-family: var(--mono); font-size: 12px; font-weight: 500; }
+  .detail .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  .detail .relation { border-bottom-color: var(--line-soft); font-size: 9px; }
+  .log { margin-top: 13px; padding: 9px; border: 1px solid var(--line-soft); border-radius: 6px; background: #0c0a0e; font-family: var(--mono); font-size: 8px; line-height: 1.6; color: var(--faint); white-space: pre-wrap; }
+  .log b { color: var(--accent); font-weight: 400; }
+  .actions { display: flex; flex-direction: column; gap: 3px; margin-top: 13px; }
+  .actions button { text-align: left; border: 0; background: transparent; color: var(--muted); font-size: 9.5px; padding: 6px; border-radius: 5px; }
+  .actions button:hover { background: var(--panel-2); color: var(--fg); }
+  @media (max-width: 1050px) { .body { grid-template-columns: 290px minmax(0,1fr) 260px; } }
+  @media (max-width: 850px) { .body { grid-template-columns: 1fr; } .detail { display: none; } .input-pane { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="brand" href="index.html"><span class="brand-mark">◉</span><span>code-graph</span></a>
+    <span class="faint">/</span><div class="crumbs">checkout-service <span class="faint">/</span> <b>debug a stack trace</b></div>
+    <span class="spacer"></span><button class="btn sm">Upload trace</button><button class="btn sm">Open issue</button><span class="avatar">AR</span>
+  </header>
+
+  <div class="body">
+    <section class="input-pane">
+      <div class="pane-head"><div><h1>Stack trace</h1><div class="sub">pasted from Sentry · 12:41:08</div></div><span class="spacer"></span><button class="btn">Parse</button></div>
+      <div class="trace-input"><span class="err">PaymentError: card_declined</span>
+    at <span class="file">PaymentGateway.authorize</span> (src/payments/PaymentGateway.ts:41:18)
+    at <span class="file">OrderService.createOrder</span> (src/domain/OrderService.ts:45:20)
+    at <span class="file">CheckoutController.checkout</span> (src/http/CheckoutController.ts:78:5)
+    at <span class="file">router.post</span> (src/http/routes.ts:24:3)</div>
+      <div class="parse-row"><span class="status-dot"></span><span>4 frames mapped to 20-node graph</span><span class="spacer"></span><span class="tag success">parse ok</span></div>
+      <div class="frames-head"><span>Frames</span><span>4 / 4 mapped</span></div>
+      <div class="frames">
+        <button class="frame active" data-id="authorize"><span class="n">0</span><span><b>PaymentGateway.authorize</b><span>src/payments/PaymentGateway.ts:41</span></span><span class="rel">target</span></button>
+        <button class="frame" data-id="createOrder"><span class="n">1</span><span><b>OrderService.createOrder</b><span>src/domain/OrderService.ts:45</span></span><span class="rel">caller</span></button>
+        <button class="frame" data-id="checkout"><span class="n">2</span><span><b>CheckoutController.checkout</b><span>src/http/CheckoutController.ts:78</span></span><span class="rel">caller</span></button>
+        <button class="frame" data-id="webhook"><span class="n">3</span><span><b>router.post</b><span>src/http/routes.ts:24</span></span><span class="rel">entry</span></button>
+      </div>
+    </section>
+
+    <main class="graph-pane">
+      <div class="graph-head"><span>Execution path</span><span class="faint">·</span><span>4 frames · 1-hop context</span><span class="spacer"></span><span class="chip active">Path</span><span class="chip">Show callers</span><span class="chip">Data edges</span></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div>
+      <div class="graph-foot"><span>frame <b data-selected-qname>PaymentGateway.authorize</b></span><span class="spacer"></span><span>error <b>card_declined</b></span><span>·</span><span>snapshot a3f10c2</span></div>
+    </main>
+
+    <aside class="detail">
+      <div class="crumbs">src/payments/PaymentGateway.ts</div><h2 data-selected-name>authorize</h2><div class="file" data-selected-file>src/payments/PaymentGateway.ts</div>
+      <div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>2</b><span>fan-out</span></div><div class="fact"><b data-hotspot>68</b><span>hotspot</span></div><div class="fact"><b>312</b><span>reach</span></div></div>
+      <div class="section-title">Frame context</div>
+      <div class="relation"><span class="mono">createOrder</span><span class="arrow">→</span><span class="meta">caller</span></div>
+      <div class="relation"><span class="mono">capture</span><span class="arrow">→</span><span class="meta">callee</span></div>
+      <div class="relation"><span class="mono">log</span><span class="arrow">→</span><span class="meta">callee</span></div>
+      <div class="section-title">Runtime</div>
+      <div class="log"><b>error</b> card_declined
+retry 1/3 · 240ms
+idempotency key stable
+<b>outcome</b> throw PaymentError
+<b>handler</b> handlePaymentError</div>
+      <div class="actions"><button>Focus error path →</button><button>Show blast radius ←</button><button>Open file at line 41 ↗</button><button>Copy trace + graph link</button></div>
+    </aside>
+  </div>
+</div>
+
+<a class="proto-badge" href="index.html"><b>P25</b><span class="sep">·</span>Stack trace</a>
+<script src="assets/proto.js"></script>
+<script>
+  const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'authorize', maxScale: 1 });
+  CG.minimap(document.getElementById('minimap'), 'layered');
+  document.querySelectorAll('.frame').forEach((frame) => frame.addEventListener('click', () => {
+    document.querySelectorAll('.frame').forEach((item) => item.classList.remove('active'));
+    frame.classList.add('active');
+    graph.select(frame.dataset.id);
+  }));
+</script>
+</body>
+</html>
