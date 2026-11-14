@@ -36,7 +36,7 @@ On a served API root the SPA probes `/api/v1/status` and uses the API automatica
 | Language | Server | Notes |
 |---|---|---|
 | Rust | `rust-analyzer` | Waits for analyzer quiescence before crawling. |
-| TypeScript/JavaScript | `typescript-language-server --stdio` | Needs `typescript` 5.x (the 7.x package has no `tsserver.js`). A local `node_modules/.bin` is discovered automatically. |
+| TypeScript/JavaScript | `typescript-language-server --stdio` | Needs `typescript` 5.x (the 7.x package has no `tsserver.js`). If `tsgo` or `tsrs` exists in `node_modules/.bin` or `PATH`, it is preferred automatically; `--server-cmd` overrides the choice. |
 | C/C++ | `clangd` | Best effort without `compile_commands.json`. |
 | Python | `pyright-langserver --stdio` | Adapter is present but untested in this prototype. |
 
@@ -50,18 +50,20 @@ npm install --no-save typescript@5.9.3 typescript-language-server@4.4.0
 
 ### Native TypeScript 7 servers
 
-The default adapter still uses TypeScript 5 `tsserver` because it is the most compatible baseline. TypeScript 7's native LSP can be selected explicitly with `--server-cmd`:
+TypeScript 5 `tsserver` remains the fallback, but the analyzer now auto-detects a native server in the project's `node_modules/.bin` or on `PATH`: `tsgo` first, then `tsrs`, then `typescript-language-server`. `--server-cmd` always overrides detection.
 
 ```bash
-# Go implementation (official TypeScript 7)
+# Go implementation (official TypeScript 7): selected automatically when installed
 npm install --no-save @typescript/native-preview
-./target/release/code-graph analyze . \
-  --server-cmd 'node_modules/.bin/tsgo --lsp --stdio' -o /tmp/tsgo.json
+./target/release/code-graph analyze . -o /tmp/tsgo.json
 
-# Rust implementation (tsrs, experimental)
+# Rust implementation (tsrs, experimental): selected if tsgo is absent
 npm install --no-save tsrs
+./target/release/code-graph analyze . -o /tmp/tsrs.json
+
+# Explicit override, including a binary outside the project
 ./target/release/code-graph analyze . \
-  --server-cmd 'node_modules/.bin/tsrs --lsp -stdio' -o /tmp/tsrs.json
+  --server-cmd '/tmp/tsgo/node_modules/.bin/tsgo --lsp --stdio' -o /tmp/tsgo.json
 ```
 
 Both speak the TypeScript 7 language-server protocol. The client omits absent optional `detail` fields because both servers reject `detail: null`.

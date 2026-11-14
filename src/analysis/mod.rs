@@ -5,7 +5,7 @@ mod options;
 mod summaries;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -133,6 +133,9 @@ pub async fn analyze_with_progress(
         let mut parts = custom.split_whitespace();
         let command = parts.next().unwrap_or(custom).to_string();
         (command, parts.map(str::to_string).collect())
+    } else if adapter.id == LanguageId::TypeScript {
+        resolve_typescript_server(&root)
+            .unwrap_or_else(|| resolve_server_command(adapter.server, adapter.args, &root))
     } else {
         resolve_server_command(adapter.server, adapter.args, &root)
     };
@@ -355,6 +358,44 @@ pub async fn analyze_with_progress(
         top,
         warnings,
     })
+}
+
+fn resolve_typescript_server(root: &Path) -> Option<(String, Vec<String>)> {
+    // Prefer the official Go implementation. `tsrs` is faster but beta, so it
+    // is only selected when `tsgo` is absent.
+    for (name, args) in [
+        ("tsgo", ["--lsp", "--stdio"]),
+        ("tsrs", ["--lsp", "-stdio"]),
+    ] {
+        if let Some(path) = find_executable(name, root) {
+            return Some((
+                path.to_string_lossy().to_string(),
+                args.iter().map(|arg| arg.to_string()).collect(),
+            ));
+        }
+    }
+    None
+}
+
+fn find_executable(name: &str, root: &Path) -> Option<PathBuf> {
+    let mut executors: Vec<PathBuf> = vec![root.join("node_modules/.bin/").join(name)];
+    if let Ok(cwd) = std::env::current_dir() {
+        executors.push(cwd.join("node_modules/.bin/").join(name));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(Path::to_path_buf);
+        for _ in 0..4 {
+            let Some(current) = dir else { break };
+            executors.push(current.join("node_modules/.bin/").join(name));
+            dir = current.parent().map(Path::to_path_buf);
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            executors.push(dir.join(name));
+        }
+    }
+    executors.into_iter().find(|candidate| candidate.is_file())
 }
 
 fn resolve_server_command(command: &str, args: &[&str], root: &Path) -> (String, Vec<String>) {
