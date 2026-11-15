@@ -198,6 +198,12 @@ export function useGraphView({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setFilters((current) => (current.search === searchText ? current : { ...current, search: searchText }));
+      if (searchText.trim()) {
+        // A filtered graph is a new result set; keeping a selection outside it
+        // would dim every match and leave an unrelated inspector open.
+        setSelectedId(null);
+        setFocusIds(null);
+      }
     }, 180);
     return () => window.clearTimeout(timer);
   }, [searchText]);

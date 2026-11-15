@@ -33,6 +33,7 @@ export interface Filters {
 
 export interface FlowNodeData extends Record<string, unknown> {
   node: GraphNode;
+  selected: boolean;
   dimmed: boolean;
   highlighted: boolean;
   entryPoint: boolean;
@@ -127,6 +128,7 @@ export function toFlowNodes(
       style: { width: `${size.width}px`, height: `${size.height}px` },
       data: {
         node,
+        selected: node.id === selectedId,
         dimmed: selectedId !== null && node.id !== selectedId && !neighborIds.has(node.id),
         highlighted: selectedId !== null && (node.id === selectedId || neighborIds.has(node.id)),
         entryPoint: entryIds?.has(node.id) ?? false,

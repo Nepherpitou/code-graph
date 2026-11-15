@@ -8,12 +8,13 @@ function fileBase(file: string): string {
 
 export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<FlowNode>) {
   const { node, dimmed, highlighted, entryPoint } = data;
+  const isSelected = selected || data.selected;
   const metrics = node.metrics;
   const dead = metrics.deadCodeCandidate && !entryPoint;
   const classes = [
     'node-card',
     `kind-${node.kind}`,
-    selected ? 'selected' : '',
+    isSelected ? 'selected' : '',
     highlighted ? 'highlighted' : '',
     dimmed ? 'dimmed' : '',
     dead ? 'dead' : '',

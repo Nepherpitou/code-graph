@@ -761,3 +761,13 @@ kbd {
   .sidebar.left { grid-row: 2; }
   .canvas { grid-row: 2; }
 }
+
+@media (max-width: 700px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr) 320px; }
+  header { gap: 10px; overflow-x: auto; scrollbar-width: none; }
+  header .tag, header .meta { display: none; }
+  header .actions { flex: 0 0 auto; }
+  .sidebar.left { display: none; }
+  .canvas { grid-column: 1; grid-row: 2; min-width: 0; }
+  .sidebar.right { grid-column: 1; grid-row: 3; min-width: 0; border-left: none; border-top: 1px solid var(--border); }
+}
