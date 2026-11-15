@@ -4,17 +4,16 @@ import {
   useReactFlow,
   useStore,
   useViewport,
-  type Node,
 } from '@xyflow/react';
 
-import { KIND_COLORS, type FlowNodeData } from './graph';
+import { KIND_COLORS, type AnyFlowNode, type FlowNodeData } from './graph';
 
 const WIDTH = 180;
 const HEIGHT = 120;
 const PADDING = 6;
 
 interface Props {
-  nodes: Node<FlowNodeData, 'card'>[];
+  nodes: AnyFlowNode[];
 }
 
 interface Projection {
@@ -66,6 +65,7 @@ export function CanvasMiniMap({ nodes }: Props) {
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, WIDTH, HEIGHT);
     for (const node of nodes) {
+      if (!('node' in node.data)) continue;
       const data = node.data as FlowNodeData;
       const [x, y] = point(projection, node.position.x, node.position.y);
       const width = Math.max((node.width ?? 0) * projection.scale, 1.5);

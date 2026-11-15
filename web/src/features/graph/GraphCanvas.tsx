@@ -4,6 +4,7 @@ import {
   Controls,
   Panel,
   ReactFlow,
+  type EdgeTypes,
   type NodeMouseHandler,
   type NodeTypes,
 } from '@xyflow/react';
@@ -16,9 +17,12 @@ import {
   type FlowNodeData,
 } from './graph';
 import { NodeCard } from './NodeCard';
+import { GhostNode } from './GhostNode';
+import { GhostEdge } from './GhostEdge';
 import type { GraphView } from './useGraphView';
 
-const nodeTypes = { card: NodeCard } as unknown as NodeTypes;
+const nodeTypes = { card: NodeCard, ghost: GhostNode } as unknown as NodeTypes;
+const edgeTypes = { ghost: GhostEdge } as unknown as EdgeTypes;
 
 interface Props {
   view: GraphView;
@@ -37,6 +41,7 @@ export function GraphCanvas({ view, onContextMenu }: Props) {
       nodes={view.flowNodes}
       edges={view.flowEdges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       fitView={false}
       minZoom={MIN_READABLE_ZOOM}
       maxZoom={2}
