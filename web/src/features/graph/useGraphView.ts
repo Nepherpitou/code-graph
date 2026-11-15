@@ -173,8 +173,12 @@ export function useGraphView({
   );
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {
-    setEntryRoots([]);
-    setEntryInfo(null);
+    // A focused slice is a new scope; a plain selection only adds that node's
+    // immediate relations to the current entry-point view.
+    if (focus) {
+      setEntryRoots([]);
+      setEntryInfo(null);
+    }
     setReport((current) => {
       const base = current ?? (snapshot ? {
         meta: snapshot.meta,
@@ -251,20 +255,29 @@ export function useGraphView({
     if (Object.keys(positions).length === 0 || centeredPositions.current === positions) return;
     centeredPositions.current = positions;
 
+    const selected = selectedId
+      ? flowNodes.find((node) => node.id === selectedId)
+      : null;
     const rootId = entryRoots[0]?.id;
     const root = rootId ? flowNodes.find((node) => node.id === rootId) : null;
-    const center = root
+    const target = selected ?? root;
+    const center = target
       ? {
-          x: root.position.x + Number(root.width ?? 0) / 2,
-          y: root.position.y + Number(root.height ?? 0) / 2,
+          x: target.position.x + Number(target.width ?? 0) / 2,
+          y: target.position.y + Number(target.height ?? 0) / 2,
         }
       : denseCenter(flowNodes);
     if (!center) return;
     void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
-  }, [positions, flowNodes, entryRoots, reactFlow]);
+  }, [positions, flowNodes, entryRoots, selectedId, reactFlow]);
 
   const selectAndCenter = useCallback((id: string) => {
     setSelectedId(id);
+    // Selecting a search hit should reveal its neighborhood instead of
+    // leaving an isolated card whose details look like it has no calls.
+    setSearchText('');
+    setFilters((current) => (current.search ? { ...current, search: '' } : current));
+
     const node = flowNodes.find((entry) => entry.id === id);
     if (node) {
       const width = Number(node.width ?? 0);
@@ -274,14 +287,15 @@ export function useGraphView({
         node.position.y + height / 2,
         { zoom: Math.max(reactFlow.getZoom(), 0.7), duration: 350 },
       );
-      return;
     }
-    if (apiContext) {
-      void fetchSubgraph(apiContext.base, apiContext.graphId, [id], 1, 300)
-        .then((slice) => mergeSlice(slice, new Set(slice.nodes.map((node) => node.id))))
-        .catch((caught: Error) => setError(caught.message));
-    }
-  }, [flowNodes, reactFlow, apiContext, mergeSlice, setError]);
+    if (!apiContext) return;
+    // DetailsPanel reads report.edges. Entry and search slices are partial, so
+    // fetch the selected node's full 1-hop relations even when the card is
+    // already on screen.
+    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], 1, 300)
+      .then((slice) => mergeSlice(slice, null))
+      .catch((caught: Error) => setError(caught.message));
+  }, [flowNodes, reactFlow, apiContext, mergeSlice, setError, setFilters, setSearchText]);
 
   const focusNode = useCallback((id: string) => {
     if (!report) return;
@@ -289,7 +303,13 @@ export function useGraphView({
     setFilters((current) => ({ ...current, search: '' }));
     setFocusIds(neighborhood(report, id, 2));
     setSelectedId(id);
-  }, [report, setFilters, setFocusIds, setSelectedId, setSearchText]);
+    if (!apiContext) return;
+    // The in-memory neighborhood is limited to the current slice; expand it
+    // from the server so focus mode cannot hide real callers/callees.
+    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], 2, 500)
+      .then((slice) => mergeSlice(slice, new Set(slice.nodes.map((node) => node.id))))
+      .catch((caught: Error) => setError(caught.message));
+  }, [report, apiContext, mergeSlice, setError, setFilters, setFocusIds, setSelectedId, setSearchText]);
 
   const clearFocus = useCallback(() => {
     setFocusIds(null);
@@ -310,6 +330,8 @@ export function useGraphView({
   }, [mergeSlice, setFilters, setSelectedId, setSearchText]);
 
   const openNeighborhood = useCallback(async (node: GraphNode) => {
+    setSearchText('');
+    setFilters((current) => (current.search ? { ...current, search: '' } : current));
     if (!apiContext) {
       if (!report) return;
       setSelectedId(node.id);
@@ -323,7 +345,7 @@ export function useGraphView({
     } catch (caught) {
       setError(`Neighborhood failed: ${(caught as Error).message}`);
     }
-  }, [apiContext, report, mergeSlice, setError, setFocusIds, setSelectedId]);
+  }, [apiContext, report, mergeSlice, setError, setFilters, setFocusIds, setSelectedId, setSearchText]);
 
   const openEntryPoints = useCallback(async () => {
     if (!apiContext || !snapshot) return;
@@ -397,7 +419,7 @@ export function useGraphView({
   }, [flowNodes]);
 
   const onNodeClick: NodeMouseHandler = (_event, node) => {
-    setSelectedId(node.id);
+    selectAndCenter(node.id);
   };
   const onNodeDoubleClick: NodeMouseHandler = (_event, node) => {
     focusNode(node.id);
