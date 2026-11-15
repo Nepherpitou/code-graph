@@ -3,141 +3,153 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>code-graph — 27 interface directions</title>
+<title>code-graph — 30 next interface directions</title>
 <link rel="stylesheet" href="assets/proto.css">
 <style>
   :root {
-    --bg: #0a0c0f;
-    --panel: #11151a;
-    --panel-2: #171c23;
-    --line: #28313b;
-    --line-soft: #1b222a;
-    --fg: #edf1f4;
-    --muted: #8995a3;
-    --faint: #566270;
+    --bg: #080b0f;
+    --panel: #11161c;
+    --panel-2: #171e26;
+    --line: #28333d;
+    --line-soft: #1a222b;
+    --fg: #eef3f7;
+    --muted: #8a98a6;
+    --faint: #566575;
     --accent: #a5e9c6;
     --accent-ink: #082218;
     color-scheme: dark;
   }
-  body { background: radial-gradient(1200px 700px at 50% -20%, #18252a 0, transparent 60%), var(--bg); }
-  .wrap { width: min(1380px, calc(100% - 48px)); margin: 0 auto; padding: 44px 0 70px; }
-  .top { display: flex; align-items: center; gap: 13px; color: var(--muted); font-size: 11px; margin-bottom: 46px; }
+  body { background: radial-gradient(1200px 700px at 50% -20%, #182a2c 0, transparent 60%), var(--bg); }
+  .wrap { width: min(1380px, calc(100% - 48px)); margin: 0 auto; padding: 42px 0 70px; }
+  .top { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 11px; margin-bottom: 42px; }
   .brand { display: flex; align-items: center; gap: 9px; color: var(--fg); font-weight: 700; font-size: 13px; }
   .brand-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 12px; }
   .top .spacer { flex: 1; }
-  .hero { max-width: 840px; }
+  .hero { max-width: 900px; }
   .kicker { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
-  h1 { margin-top: 12px; font-size: clamp(38px, 5.5vw, 66px); line-height: .96; letter-spacing: -.06em; font-weight: 600; }
-  .lede { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 580px; margin-top: 18px; }
+  h1 { margin-top: 12px; font-size: clamp(40px, 5.8vw, 72px); line-height: .92; letter-spacing: -.065em; font-weight: 600; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 650px; margin-top: 18px; }
   .lede b { color: var(--fg); font-weight: 500; }
-  .meta-strip { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+  .meta-strip { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
   .meta-strip .chip { background: var(--panel); border-color: var(--line); }
-  .controls { display: flex; align-items: center; gap: 6px; margin: 34px 0 15px; flex-wrap: wrap; }
+  .controls { display: flex; align-items: center; gap: 6px; margin: 31px 0 14px; flex-wrap: wrap; }
   .controls .search { width: 260px; height: 31px; }
   .controls .search .input { font-size: 11px; }
   .controls .chip { background: var(--panel); border-color: transparent; color: var(--muted); min-height: 27px; font-size: 10.5px; }
   .controls .chip.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
-  .tile { position: relative; display: flex; flex-direction: column; min-height: 196px; padding: 16px; border: 1px solid var(--line-soft); border-radius: 12px; background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--fg); transition: border-color .15s, background .15s, transform .15s; overflow: hidden; }
+  .tile { position: relative; display: flex; flex-direction: column; min-height: 206px; padding: 16px; border: 1px solid var(--line-soft); border-radius: 12px; background: color-mix(in srgb, var(--panel) 82%, transparent); color: var(--fg); transition: border-color .15s, background .15s, transform .15s; overflow: hidden; }
   .tile:hover { border-color: color-mix(in srgb, var(--tone, var(--accent)) 45%, var(--line)); background: var(--panel); transform: translateY(-2px); }
   .tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .tile-num { font-family: var(--mono); color: var(--faint); font-size: 10px; letter-spacing: .08em; }
   .tile-family { font-size: 9px; color: var(--faint); text-transform: uppercase; letter-spacing: .09em; }
-  .tile h2 { margin-top: 22px; font-size: 15px; letter-spacing: -.02em; font-weight: 550; }
-  .tile p { margin-top: 6px; color: var(--muted); font-size: 10.5px; line-height: 1.5; max-width: 300px; }
-  .tile-foot { margin-top: auto; display: flex; align-items: center; gap: 5px; padding-top: 15px; }
+  .tile h2 { margin-top: 20px; font-size: 15px; letter-spacing: -.02em; font-weight: 550; }
+  .tile p { margin-top: 6px; color: var(--muted); font-size: 10.5px; line-height: 1.5; max-width: 320px; }
+  .tile-foot { margin-top: auto; display: flex; align-items: center; gap: 5px; padding-top: 14px; flex-wrap: wrap; }
   .tile-foot .tag { font-size: 8.5px; padding: 1px 6px; }
+  .tile-foot .source { font-size: 8.5px; color: var(--faint); font-family: var(--mono); }
   .tile .open { margin-left: auto; color: var(--faint); font-size: 12px; transition: color .15s, transform .15s; }
   .tile:hover .open { color: var(--tone, var(--accent)); transform: translateX(2px); }
-  .tile::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 2px; background: linear-gradient(90deg, var(--tone, var(--accent)), transparent 70%); opacity: .55; }
-  .swatches { display: flex; gap: 3px; margin-top: 12px; }
+  .tile::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 2px; background: linear-gradient(90deg, var(--tone, var(--accent)), transparent 70%); opacity: .6; }
+  .swatches { display: flex; gap: 3px; margin-top: 11px; }
   .swatches i { width: 15px; height: 5px; border-radius: 2px; background: var(--tone, var(--accent)); opacity: .7; }
-  .swatches i:nth-child(2) { opacity: .42; } .swatches i:nth-child(3) { opacity: .2; }
-  .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--faint); font-size: 10px; line-height: 1.6; }
+  .swatches i:nth-child(2) { opacity: .4; } .swatches i:nth-child(3) { opacity: .18; }
+  .empty { grid-column: 1 / -1; padding: 40px; border: 1px dashed var(--line); border-radius: 12px; color: var(--faint); text-align: center; font-size: 11px; }
+  .footer { display: flex; justify-content: space-between; gap: 18px; margin-top: 36px; color: var(--faint); font-size: 10px; line-height: 1.65; }
+  .footer b { color: var(--muted); }
   .footer a { color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
   @media (max-width: 1050px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 680px) { .wrap { width: calc(100% - 28px); padding-top: 26px; } .grid { grid-template-columns: 1fr; } .controls .search { width: 100%; } .top { margin-bottom: 30px; } .footer { flex-direction: column; } }
+  @media (max-width: 680px) { .wrap { width: calc(100% - 28px); padding-top: 26px; } .grid { grid-template-columns: 1fr; } .controls .search { width: 100%; } .top { margin-bottom: 28px; } .footer { flex-direction: column; } }
 </style>
 </head>
 <body>
 <main class="wrap">
   <header class="top">
     <a class="brand" href="#"><span class="brand-mark">◉</span><span>code-graph</span></a>
-    <span class="faint">/</span><span>interface directions</span>
-    <span class="spacer"></span>
-    <span>27 prototypes · static HTML</span>
+    <span class="faint">/</span><span>next interface directions</span>
+    <span class="spacer"></span><span>30 prototypes · second cut</span>
   </header>
 
   <section class="hero">
-    <div class="kicker">Design sprint · November 2026</div>
-    <h1>Twenty-seven ways<br>to enter a codebase.</h1>
-    <p class="lede">The current UI is a dense three-column console: everything is visible, nothing says <b>start here</b>. These prototypes test different answers to the same questions — where does the user land, how do they move, when does the graph appear, and how much chrome deserves to survive.</p>
-    <div class="meta-strip"><span class="chip">2,462 symbols</span><span class="chip">5,840 call edges</span><span class="chip">same data in every demo</span><span class="chip active">interactive</span></div>
+    <div class="kicker">Design sprint · November 2026 · second cut</div>
+    <h1>Thirty next cuts.<br><em>Ten proven bets.</em></h1>
+    <p class="lede">The previous gallery answered “what could this be?”. This cut starts from the ten directions you kept — project overview, graph first, triage, launcher, focus, path story, blast radius, linked table, glass, spatial — and composes them into <b>thirty new, interactive choices</b>. Same checkout graph in every page, no frameworks, no build step.</p>
+    <div class="meta-strip"><span class="chip active">P02 + P03 + P06 + P07</span><span class="chip">P09 + P10 + P11</span><span class="chip">P13 + P19 + P24</span><span class="chip">2,462 symbols · 5,840 edges</span></div>
   </section>
 
   <div class="controls">
-    <div class="search">⌕ <input class="input" id="filter" placeholder="Filter prototypes…"></div>
-    <button class="chip active" data-family="all">All 27</button>
-    <button class="chip" data-family="start">Starting point</button>
-    <button class="chip" data-family="navigate">Navigation</button>
-    <button class="chip" data-family="inspect">Inspect</button>
-    <button class="chip" data-family="visual">Visual language</button>
-    <button class="chip" data-family="workflow">Workflow</button>
+    <div class="search">⌕ <input class="input" id="filter" placeholder="Filter prototypes, sources, ideas…"></div>
+    <button class="chip active" data-family="all">All 30</button>
+    <button class="chip" data-family="start">Start</button>
+    <button class="chip" data-family="graph">Graph</button>
+    <button class="chip" data-family="task">Task</button>
+    <button class="chip" data-family="table">Table</button>
+    <button class="chip" data-family="visual">Visual</button>
+    <button class="chip" data-family="adaptive">Adaptive</button>
   </div>
 
   <section class="grid" id="grid"></section>
 
   <footer class="footer">
-    <div><b>Same content, different bets.</b><br>Every demo uses one realistic checkout-service graph. Click cards, tabs, rows, and overlays. Graph nodes are selectable.</div>
-    <div>Research anchors: <a href="https://www.nngroup.com/articles/progressive-disclosure/" target="_blank" rel="noreferrer">NN/g progressive disclosure</a> · <a href="https://uxpatterns.dev/patterns/advanced/command-palette" target="_blank" rel="noreferrer">command palette anatomy</a> · <a href="https://cambridge-intelligence.com/" target="_blank" rel="noreferrer">graph UX practice</a> · <a href="https://sourcegraph.com/" target="_blank" rel="noreferrer">code navigation</a></div>
+    <div><b>What to look for.</b><br>Every page is a complete interaction: click cards, rows, tabs, path steps, filters, and overlays. The ten winning directions are tagged on each card so you can see which ideas were combined.</div>
+    <div><b>Research anchors.</b><br><a href="https://www.nngroup.com/articles/progressive-disclosure/" target="_blank" rel="noreferrer">NN/g progressive disclosure</a> · <a href="https://uxpatterns.dev/patterns/advanced/command-palette" target="_blank" rel="noreferrer">command palette anatomy</a> · <a href="https://cambridge-intelligence.com/" target="_blank" rel="noreferrer">graph UX practice</a> · <a href="https://sourcegraph.com/docs/code-navigation" target="_blank" rel="noreferrer">Sourcegraph code navigation</a></div>
   </footer>
 </main>
 
 <script>
   const demos = [
-    ['p01-command-center.html', 'Command center', 'start', 'Resume, search, or pick a starting point. Graph is a destination, not the home page.', ['#c7f36b', '#4c5b2a'], ['Linear', 'dashboard'], 'P01'],
-    ['p02-project-overview.html', 'Project overview', 'start', 'Vercel-style project home: health, risk, recent changes, one obvious way into the graph.', ['#3468ff', '#b8c6f0'], ['Vercel', 'overview'], 'P02'],
-    ['p03-graph-first.html', 'Graph first', 'navigate', 'Full-bleed canvas, floating chrome, inspector on demand. Maximum room for the graph.', ['#84e1c1', '#2f6255'], ['canvas', 'focus'], 'P03'],
-    ['p04-workspace.html', 'Workspace', 'navigate', 'VS Code-like shell: file tree, tabs, graph editor, outline. Familiar to engineers, dense.', ['#6cb6ff', '#335577'], ['IDE', 'workspace'], 'P04'],
-    ['p05-onboarding.html', 'Onboarding stepper', 'start', 'First-run path: connect, analyze, then choose a door. Explains the slow part once.', ['#d45b31', '#e6c2b0'], ['wizard', 'first-run'], 'P05'],
-    ['p06-triage.html', 'Triage inbox', 'workflow', 'Risk-first feed. Engineers review cycles, dead code, and hotspots without opening a graph.', ['#ffb86b', '#7a552b'], ['Linear', 'review'], 'P06'],
-    ['p07-launcher.html', 'Launcher', 'start', 'Keyboard-first empty state. One big search, grouped jumps, recent graphs. No sidebar.', ['#9ef0c0', '#356b53'], ['Raycast', 'search'], 'P07'],
-    ['p08-spaces.html', 'Spaces & tabs', 'navigate', 'Saved views as durable spaces, browser-like tabs, notes and members. Arc / Notion feel.', ['#6d56e8', '#b9a9f5'], ['Arc', 'spaces'], 'P08'],
-    ['p09-focus-context.html', 'Focus + context', 'inspect', 'Selected node stays central; 1-hop neighborhood bright, everything else recedes. Path strip above.', ['#7dd3fc', '#32647e'], ['focus', 'inspector'], 'P09'],
-    ['p10-path-story.html', 'Call path story', 'workflow', 'Trace one request step by step with play controls. The graph becomes a narrative, not a map.', ['#f1b36b', '#76552e'], ['timeline', 'path'], 'P10'],
-    ['p11-blast-radius.html', 'Blast radius', 'inspect', 'Reverse impact view: upstream callers in columns, risk score, test coverage. For “what breaks?”', ['#ff7b72', '#8b3935'], ['impact', 'analysis'], 'P11'],
-    ['p12-module-map.html', 'Module map', 'navigate', 'Start at module boundaries, drill into a cluster. Progressive disclosure from architecture to symbols.', ['#58d6a7', '#2b6650'], ['map', 'drill-down'], 'P12'],
-    ['p13-linked-table.html', 'Linked table + graph', 'inspect', 'A sortable function table is the primary surface; hovering a row brushes the graph. Dense and fast.', ['#b8a1ff', '#5c4b8a'], ['table', 'brushing'], 'P13'],
-    ['p14-command-palette.html', 'Command palette', 'navigate', 'The palette is the navigation layer: jump to symbols, actions, filters without leaving the graph.', ['#7dd3fc', '#315f75'], ['⌘K', 'overlay'], 'P14'],
-    ['p15-mobile-sheet.html', 'Mobile bottom sheet', 'navigate', 'A phone-sized graph with a bottom inspector sheet. Tests touch targets and narrow screens.', ['#6ee7a8', '#2e6b4d'], ['mobile', 'sheet'], 'P15'],
-    ['p16-pr-impact.html', 'PR impact review', 'workflow', 'Paste a PR or stack trace, get the changed functions, impacted paths, and a review checklist.', ['#f0a35e', '#75502d'], ['PR', 'diff'], 'P16'],
-    ['p17-editorial.html', 'Editorial light', 'visual', 'A calm, article-like explanation with an inline graph. For onboarding docs and architecture notes.', ['#b45309', '#e6ccb0'], ['editorial', 'docs'], 'P17'],
-    ['p18-terminal.html', 'Neo-brutalist terminal', 'visual', 'Monospace, hard borders, acid accent. Dense developer tool with zero decorative chrome.', ['#d7ff4f', '#52621f'], ['brutalist', 'CLI'], 'P18'],
-    ['p19-glass.html', 'Glass aurora', 'visual', 'Translucent floating panels over a soft gradient. Trendy, but tests whether hierarchy survives blur.', ['#c4b5fd', '#5b4b9a'], ['glass', 'trend'], 'P19'],
-    ['p20-swiss.html', 'Swiss monochrome', 'visual', 'Typography and grid carry the hierarchy. One red accent, no gradients, no decoration.', ['#e53935', '#7a2420'], ['Swiss', 'minimal'], 'P20'],
-    ['p21-blueprint.html', 'Blueprint', 'visual', 'Engineering drawing: graph paper, orthogonal edges, dimensions, module sheets. Literal and technical.', ['#60a5fa', '#2f5480'], ['blueprint', 'technical'], 'P21'],
-    ['p22-paper.html', 'Notion paper', 'visual', 'Warm paper, sticky notes, pastel tags. A graph that feels like a whiteboard, not a database.', ['#c08457', '#6b4b31'], ['Notion', 'warm'], 'P22'],
-    ['p23-dense.html', 'Dense Bloomberg', 'visual', 'Power-user table with tiny type, amber highlights, and a graph thumbnail. Information per pixel.', ['#f2b544', '#755927'], ['Bloomberg', 'dense'], 'P23'],
-    ['p24-spatial.html', 'Spatial / Apple', 'visual', 'Soft depth, rounded floating surfaces, segmented pills. Polished and calm, potentially less dense.', ['#a5b4fc', '#4f5889'], ['Apple', 'spatial'], 'P24'],
-    ['p25-stack-trace.html', 'Stack trace debugger', 'workflow', 'Drop a stack trace, parse frames, highlight the exact path. A task-first entry, not a graph-first one.', ['#fb7185', '#7d303c'], ['debug', 'trace'], 'P25'],
-    ['p26-architecture.html', 'Architecture review', 'workflow', 'Module clusters, cycle warnings, a risk matrix, review notes. For a scheduled architecture pass.', ['#34d399', '#1f6a4b'], ['review', 'modules'], 'P26'],
-    ['p27-search-first.html', 'Search-first', 'start', 'GitHub-style global search with result groups and a preview graph. The fastest known door.', ['#93c5fd', '#365a78'], ['search', 'results'], 'P27'],
+    ['n01-project-pulse.html', 'Project pulse', 'start', 'P02 + P06', 'Health, risk, and recent changes as the home page. One door into the graph.', ['#2e6b4f', '#96c9ab'], ['overview', 'risk'], 'N01'],
+    ['n02-command-home.html', 'Command home', 'start', 'P07 + P02', 'Keyboard-first search with grouped jumps, recent views, and a project pulse.', ['#9ef0c0', '#356b53'], ['search', 'recent'], 'N02'],
+    ['n03-resume-desk.html', 'Resume desk', 'start', 'P07 + P02 + P09', 'Continue where you left off: session notes, recent graphs, and a next action.', ['#2d5f73', '#a8c9d6'], ['resume', 'session'], 'N03'],
+    ['n04-intent-launcher.html', 'Intent launcher', 'start', 'P07 + P06', 'Pick the question first — what breaks, how it works, what is dead — then see results.', ['#f3b35f', '#8a5c1d'], ['intent', 'triage'], 'N04'],
+    ['n05-saved-spaces.html', 'Saved spaces', 'start', 'P24 + P07', 'Durable views with soft cards, mini maps, and a “new space” door.', ['#5266e8', '#b9c2f5'], ['spaces', 'spatial'], 'N05'],
+    ['n06-focus-lens.html', 'Focus lens', 'graph', 'P03 + P09', 'Full-bleed canvas, path strip, and an inspector that appears only on demand.', ['#7dd3fc', '#32647e'], ['focus', 'canvas'], 'N06'],
+    ['n07-route-theater.html', 'Route theater', 'graph', 'P09 + P10', 'The graph as a stage: play the entry → exit route, step by step.', ['#f1b36b', '#76552e'], ['route', 'playback'], 'N07'],
+    ['n08-canvas-command.html', 'Canvas command', 'graph', 'P03 + P07', 'A full canvas with a floating ⌘K palette: jump, act, and filter without leaving.', ['#84e1c1', '#2f6255'], ['palette', 'canvas'], 'N08'],
+    ['n09-semantic-zoom.html', 'Semantic zoom', 'graph', 'P03 + P02', 'Architecture, modules, functions: one graph at three readable scales.', ['#64e3c2', '#2a6f60'], ['zoom', 'architecture'], 'N09'],
+    ['n10-pinned-context.html', 'Pinned context', 'graph', 'P09 + P13', 'Pin two functions and compare their context without losing the first.', ['#c4b5fd', '#5b4b9a'], ['pin', 'compare'], 'N10'],
+    ['n11-triage-board.html', 'Triage board', 'task', 'P06 + P11', 'Risk-first queue with blast-radius facts in the preview.', ['#ffb86b', '#7a552b'], ['inbox', 'impact'], 'N11'],
+    ['n12-path-story.html', 'Path story', 'task', 'P10 + P09', 'A guided reading of one request, with code and keyboard playback.', ['#f0a35e', '#75502d'], ['story', 'path'], 'N12'],
+    ['n13-blast-radius.html', 'Blast radius', 'task', 'P11 + P13', 'Reverse callers, risk score, coverage, and affected table in one question.', ['#c94c3d', '#9c6a62'], ['impact', 'coverage'], 'N13'],
+    ['n14-incident-trace.html', 'Incident trace', 'task', 'P10 + P11', 'Paste an incident, trace frames on the route, mark the suspect.', ['#fb7185', '#7d303c'], ['incident', 'trace'], 'N14'],
+    ['n15-change-checklist.html', 'Change checklist', 'task', 'P06 + P11', 'Review a PR by blast radius, with a checklist and live progress.', ['#6be0b0', '#2e6b55'], ['PR', 'checklist'], 'N15'],
+    ['n16-linked-table.html', 'Linked table', 'table', 'P13 + P09', 'Table primary; hover brushes the graph, click keeps the selection.', ['#b8a1ff', '#5c4b8a'], ['table', 'brush'], 'N16'],
+    ['n17-impact-matrix.html', 'Impact matrix', 'table', 'P13 + P11', 'Sortable risk, reach, and coverage; a graph preview for the selected row.', ['#ff8a8a', '#8d4b4b'], ['matrix', 'risk'], 'N17'],
+    ['n18-path-ledger.html', 'Path ledger', 'table', 'P13 + P10', 'Every route step is a ledger row; the graph follows the ledger.', ['#f2b568', '#7a5726'], ['ledger', 'path'], 'N18'],
+    ['n19-function-index.html', 'Function index', 'table', 'P13 + P07', 'Search-first function table with a small context preview.', ['#4f63e5', '#aeb8f2'], ['search', 'table'], 'N19'],
+    ['n20-review-sheet.html', 'Review sheet', 'table', 'P13 + P06', 'A table as a review checklist with progress and graph context.', ['#7dd3fc', '#32647e'], ['review', 'progress'], 'N20'],
+    ['n21-glass-focus.html', 'Glass focus', 'visual', 'P19 + P09', 'Aurora glass panels around a focused canvas; blur stays on overlays.', ['#c4b5fd', '#5b4b9a'], ['glass', 'focus'], 'N21'],
+    ['n22-spatial-home.html', 'Spatial home', 'visual', 'P24 + P02', 'Soft floating surfaces for project health, entry points, and recent maps.', ['#5b6cff', '#b7c0ff'], ['spatial', 'home'], 'N22'],
+    ['n23-glass-triage.html', 'Glass triage', 'visual', 'P19 + P06', 'An aurora inbox: signals, preview, and risk detail under glass.', ['#c4b5fd', '#5b4b9a'], ['glass', 'triage'], 'N23'],
+    ['n24-spatial-route.html', 'Spatial route', 'visual', 'P24 + P10', 'A soft floating path player with code and entry/exit endpoints.', ['#5b6cff', '#b7c0ff'], ['spatial', 'route'], 'N24'],
+    ['n25-editorial-brief.html', 'Editorial brief', 'visual', 'P02 + P11', 'A calm, article-like reading of the graph with evidence and a risk box.', ['#9a4c2d', '#c8a18e'], ['editorial', 'brief'], 'N25'],
+    ['n26-mobile-focus.html', 'Mobile focus', 'adaptive', 'P09 + P24', '390 px graph with a bottom inspector sheet; touch-sized controls.', ['#7dd3fc', '#32647e'], ['mobile', 'sheet'], 'N26'],
+    ['n27-split-workspace.html', 'Split workspace', 'adaptive', 'P03 + P13', 'A draggable table/graph split with keyboard-friendly selection.', ['#84e1c1', '#2f6255'], ['split', 'workspace'], 'N27'],
+    ['n28-overview-inspector.html', 'Overview inspector', 'adaptive', 'P02 + P13', 'Overview first, then details on demand: map, table, and inspector together.', ['#3d6df0', '#a8b9f3'], ['overview', 'inspector'], 'N28'],
+    ['n29-command-review.html', 'Command review', 'adaptive', 'P07 + P06', 'Keyboard-only review: filter, arrow through signals, open in the graph.', ['#9ef0c0', '#356b53'], ['keyboard', 'review'], 'N29'],
+    ['n30-shareable-brief.html', 'Shareable brief', 'adaptive', 'P10 + P11', 'A read-only route + impact artifact with copy/export actions.', ['#3d6df0', '#a8b9f3'], ['share', 'brief'], 'N30'],
   ];
 
   const grid = document.getElementById('grid');
   const toneFor = (colors) => colors[0];
   function render(filter = '', family = 'all') {
     const q = filter.trim().toLowerCase();
-    grid.innerHTML = demos.filter(([slug, title, fam, desc]) => {
+    const matches = demos.filter(([slug, title, fam, source, desc, colors, tags]) => {
       if (family !== 'all' && fam !== family) return false;
-      return !q || `${title} ${desc} ${fam} ${slug}`.toLowerCase().includes(q);
-    }).map(([slug, title, fam, desc, colors, tags, num]) => `
+      return !q || `${title} ${desc} ${fam} ${slug} ${source} ${tags.join(' ')}`.toLowerCase().includes(q);
+    });
+    if (!matches.length) {
+      grid.innerHTML = '<div class="empty">No prototype matches this filter. Clear the search or choose another family.</div>';
+      return;
+    }
+    grid.innerHTML = matches.map(([slug, title, fam, source, desc, colors, tags, num]) => `
       <a class="tile" href="${slug}" style="--tone:${toneFor(colors)}">
         <div class="tile-top"><span class="tile-num">${num}</span><span class="tile-family">${fam}</span></div>
         <h2>${title}</h2>
         <p>${desc}</p>
         <div class="swatches">${colors.map((color) => `<i style="background:${color}"></i>`).join('')}</div>
-        <div class="tile-foot">${tags.map((tag) => `<span class="tag" style="color:${toneFor(colors)};background:color-mix(in srgb,${toneFor(colors)} 12%,transparent)">${tag}</span>`).join('')}<span class="open">↗</span></div>
+        <div class="tile-foot"><span class="source">${source}</span>${tags.map((tag) => `<span class="tag" style="color:${toneFor(colors)};background:color-mix(in srgb,${toneFor(colors)} 12%,transparent)">${tag}</span>`).join('')}<span class="open">↗</span></div>
       </a>`).join('');
   }
   let activeFamily = 'all';

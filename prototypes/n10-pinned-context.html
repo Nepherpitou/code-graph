@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N10 · Pinned context — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0d0b14;
+  --panel: #171321;
+  --panel-2: #211a30;
+  --line: #352b48;
+  --line-soft: #261f35;
+  --fg: #f4effc;
+  --muted: #a699b8;
+  --faint: #6f6481;
+  --accent: #c4b5fd;
+  --accent-ink: #211441;
+  --canvas: #100d19;
+  --edge: #55486f;
+  --danger: #ff8a9b;
+  --warm: #ffc878;
+  --success: #75e0b0;
+  --violet: #c4b5fd;
+}
+
+body { overflow: hidden; background: radial-gradient(650px 420px at 8% 0%, color-mix(in srgb, var(--violet) 10%, transparent), transparent 65%), var(--bg); }
+.nx-body { min-height: 0; }
+.pin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.pin-stage { flex: 1; min-height: 0; position: relative; background: var(--canvas); }
+.pin-stage .graph-shell { height: 100%; }
+.pin-stage .graph-toolbar { top: 12px; left: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent); border-color: var(--line); backdrop-filter: blur(16px); }
+.pin-stage .graph-toolbar button { color: var(--muted); }
+.pin-stage .minimap { width: 150px; height: 94px; right: 12px; bottom: 12px; }
+.pin-stage-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--muted); font-size: 9px; }
+.pin-stage-foot b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.pin-panel { width: 336px; flex: 0 0 auto; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 16px 14px; }
+.pin-panel h1 { font-size: 17px; letter-spacing: -.025em; font-weight: 600; }
+.pin-panel .nx-kicker { margin-bottom: 4px; }
+.pin-section { margin-top: 17px; }
+.pin-card { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); margin-top: 6px; }
+.pin-card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.pin-card-head { display: flex; align-items: center; gap: 6px; }
+.pin-card-head b { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--fg); }
+.pin-card-head .nx-grow { flex: 1; }
+.pin-card-head button { border: 0; background: transparent; color: var(--faint); font-size: 11px; }
+.pin-card-head button:hover { color: var(--danger); }
+.pin-card .file { color: var(--faint); font-family: var(--mono); font-size: 8px; margin-top: 3px; word-break: break-all; }
+.pin-card .facts { display: flex; gap: 9px; margin-top: 6px; color: var(--faint); font-size: 8px; }
+.pin-card .facts b { color: var(--muted); font-family: var(--mono); font-weight: 500; }
+.pin-empty { padding: 12px; border: 1px dashed var(--line); border-radius: 8px; color: var(--faint); font-size: 9.5px; text-align: center; margin-top: 6px; }
+.pin-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 9px; margin-top: 5px; }
+.pin-table th { padding: 6px 5px; color: var(--faint); font-size: 7.5px; text-align: left; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
+.pin-table td { padding: 7px 5px; border-bottom: 1px solid var(--line-soft); color: var(--muted); cursor: pointer; }
+.pin-table tr:hover td, .pin-table tr.active td { color: var(--fg); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.pin-table .name { color: var(--fg); }
+.pin-actions { display: flex; gap: 5px; margin-top: 12px; }
+@media (max-width: 1050px) { .pin-panel { width: 300px; } }
+@media (max-width: 800px) {
+  .pin-panel { display: none; }
+  .nx-body { display: block; }
+  .pin-main { height: calc(100vh - 52px); }
+  .pin-stage { height: calc(100vh - 52px - 69px); min-height: 420px; }
+  .pin-stage-foot { flex-wrap: wrap; }
+  .pin-stage-foot .nx-grow { display: none; }
+}
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>pinned</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <main class="pin-main">
+    <div class="pin-stage"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div></div>
+    <div class="pin-stage-foot"><span class="status-dot"></span><b data-selected-qname>CheckoutController.checkout</b><span>·</span><span>fan-in <b data-fanin>1</b></span><span>·</span><span>fan-out <b data-fanout>5</b></span><span class="nx-grow"></span><button class="btn sm" id="pin-current">Pin selection</button><button class="btn sm">Blast radius ←</button></div>
+  </main>
+  <aside class="pin-panel">
+    <div class="nx-kicker">Pinned context</div><h1>Keep the comparison.</h1>
+    <div class="pin-section"><div class="nx-label">Pinned</div><div id="pins"></div></div>
+    <div class="pin-section"><div class="nx-label">Nearby functions</div>
+      <table class="pin-table"><thead><tr><th>Function</th><th>in</th><th>out</th><th>hot</th></tr></thead><tbody id="nearby">
+        <tr data-select="validateCart"><td class="name">validateCart</td><td>3</td><td>2</td><td>38</td></tr>
+        <tr data-select="priceCart"><td class="name">priceCart</td><td>4</td><td>3</td><td>71</td></tr>
+        <tr data-select="createOrder"><td class="name">createOrder</td><td>3</td><td>4</td><td>88</td></tr>
+        <tr data-select="authorize"><td class="name">authorize</td><td>1</td><td>2</td><td>68</td></tr>
+        <tr data-select="refund"><td class="name">refund</td><td>2</td><td>1</td><td>56</td></tr>
+      </tbody></table>
+    </div>
+    <div class="pin-section"><div class="nx-label">Why pin?</div><p class="nx-tiny nx-muted" style="line-height:1.5;margin-top:4px">Compare two functions without losing the first one. Pins are local to this view, not a saved space.</p></div>
+    <div class="pin-actions"><button class="btn sm" id="clear-pins">Clear pins</button><button class="btn sm">Export view</button></div>
+  </aside>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N10</b><span class="sep">·</span>graph <span class="sep">/</span> P09 + P13</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+let pins = ['checkout', 'createOrder'];
+function renderPins() {
+  const wrap = document.getElementById('pins');
+  if (!pins.length) { wrap.innerHTML = '<div class="pin-empty">Pin a node to compare it here.</div>'; return; }
+  wrap.innerHTML = pins.map((id) => {
+    const node = CG.byId[id];
+    return `<div class="pin-card" data-select="${id}"><div class="pin-card-head"><b>${node.cls}.${node.name}</b><span class="nx-grow"></span><button data-unpin="${id}" title="Unpin">×</button></div><div class="file">${node.file}</div><div class="facts"><span>in <b>${node.fanIn}</b></span><span>out <b>${node.fanOut}</b></span><span>hot <b>${node.hotspot}</b></span></div></div>`;
+  }).join('');
+  wrap.querySelectorAll('.pin-card').forEach((card) => card.addEventListener('click', (event) => {
+    if (event.target.closest('[data-unpin]')) return;
+    graph.select(card.dataset.select);
+  }));
+  wrap.querySelectorAll('[data-unpin]').forEach((button) => button.addEventListener('click', () => {
+    pins = pins.filter((id) => id !== button.dataset.unpin); renderPins();
+  }));
+}
+document.querySelectorAll('#nearby tr').forEach((row) => row.addEventListener('click', () => {
+  document.querySelectorAll('#nearby tr').forEach((item) => item.classList.remove('active'));
+  row.classList.add('active'); graph.select(row.dataset.select);
+}));
+document.getElementById('pin-current').addEventListener('click', () => {
+  const id = document.querySelector('.gnode.is-selected')?.dataset.id || 'checkout';
+  const node = CG.byId[id];
+  if (node && !pins.includes(node.id)) { pins.push(node.id); renderPins(); }
+});
+document.getElementById('clear-pins').addEventListener('click', () => { pins = []; renderPins(); });
+renderPins();
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N11 · Triage board — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0b0c0f;
+  --panel: #121418;
+  --panel-2: #181b20;
+  --line: #292d35;
+  --line-soft: #1c2027;
+  --fg: #eceef2;
+  --muted: #8a909c;
+  --faint: #575d69;
+  --accent: #ffb86b;
+  --accent-ink: #2c1a04;
+  --canvas: #0e1014;
+  --edge: #434955;
+  --danger: #ff7b72;
+  --warm: #ffb86b;
+  --success: #74d89b;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; background: var(--bg); }
+.nx-body { min-height: 0; }
+.triage-wrap { flex: 1; min-width: 0; display: flex; min-height: 0; }
+.triage-nav { width: 196px; flex: 0 0 auto; border-right: 1px solid var(--line); background: var(--panel); padding: 13px 9px; }
+.triage-queue { width: 382px; flex: 0 0 auto; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.queue-head { padding: 16px 16px 10px; border-bottom: 1px solid var(--line); }
+.queue-head h1 { font-size: 19px; letter-spacing: -.03em; font-weight: 650; }
+.queue-head p { color: var(--muted); font-size: 10px; line-height: 1.4; margin-top: 4px; }
+.queue-tools { display: flex; gap: 4px; margin-top: 11px; flex-wrap: wrap; }
+.queue-tools .nx-pill { min-height: 22px; font-size: 9px; background: var(--panel-2); border-color: transparent; }
+.queue-tools .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.queue-list { overflow: auto; flex: 1; padding: 6px 8px 24px; }
+.ticket { display: grid; grid-template-columns: 4px minmax(0,1fr) auto; gap: 9px; width: 100%; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; color: var(--fg); }
+.ticket:hover { background: var(--panel-2); border-color: var(--line); }
+.ticket.active { background: var(--panel-2); border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); }
+.ticket .severity { border-radius: 99px; background: var(--warm); height: 32px; margin-top: 2px; }
+.ticket.high .severity { background: var(--danger); }
+.ticket.info .severity { background: var(--violet); }
+.ticket b { display: block; font-size: 10.5px; font-weight: 550; line-height: 1.35; }
+.ticket small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8.5px; line-height: 1.4; margin-top: 4px; }
+.ticket .tags { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+.ticket .tag { font-size: 8px; }
+.ticket .age { color: var(--faint); font-size: 8.5px; white-space: nowrap; padding-top: 2px; }
+.triage-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.preview-head { display: flex; align-items: center; gap: 9px; padding: 11px 15px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 10px; }
+.preview-head .title { color: var(--fg); font-size: 11px; font-weight: 600; }
+.preview-head .nx-pill { background: var(--panel-2); border-color: transparent; }
+.preview-graph { flex: 1; min-height: 0; position: relative; background: var(--canvas); }
+.preview-graph .graph-shell { height: 100%; }
+.preview-graph .graph-toolbar { top: 9px; left: 9px; background: var(--panel); border-color: var(--line); }
+.preview-graph .minimap { width: 145px; height: 92px; }
+.preview-detail { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 240px; border-top: 1px solid var(--line); background: var(--panel); min-height: 150px; }
+.preview-detail .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); padding: 0; border-right: 1px solid var(--line); }
+.preview-detail .fact { padding: 11px 12px; background: var(--panel); }
+.preview-detail .fact b { display: block; font-family: var(--mono); font-size: 15px; }
+.preview-detail .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.preview-detail .why { padding: 11px 13px; border-right: 1px solid var(--line); }
+.preview-detail .why h2 { font-size: 10px; }
+.preview-detail .why p { color: var(--muted); font-size: 9.5px; line-height: 1.5; margin-top: 5px; }
+.preview-detail .actions { padding: 11px 12px; display: flex; flex-direction: column; gap: 3px; }
+.preview-detail .actions button { text-align: left; border: 0; background: transparent; color: var(--muted); font-size: 9.5px; padding: 5px; border-radius: 5px; }
+.preview-detail .actions button:hover { background: var(--panel-2); color: var(--fg); }
+@media (max-width: 1150px) { .triage-nav { width: 170px; } .triage-queue { width: 340px; } .preview-detail { grid-template-columns: 1fr 220px; } .preview-detail .why { display: none; } }
+@media (max-width: 900px) { .triage-nav { display: none; } .tripreview-detail { display: none; } }
+@media (max-width: 760px) { .triage-wrap { display: block; overflow: auto; } .triage-queue { width: 100%; max-height: 48vh; border-right: 0; } .triage-preview { min-height: 48vh; } .preview-detail { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme/checkout</span><span class="faint">/</span><b>review queue</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Re-analyze</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="triage-wrap">
+    <aside class="triage-nav">
+      <div class="nx-label">Workspace</div>
+      <nav class="nx-nav"><a class="nx-nav-item active" href="#"><span class="ico">◈</span>Review queue<span class="count">12</span></a><a class="nx-nav-item" href="#"><span class="ico">⌁</span>Call graph</a><a class="nx-nav-item" href="#"><span class="ico">▤</span>Files</a></nav>
+      <div class="nx-label" style="margin-top:18px">Saved views</div>
+      <nav class="nx-nav"><a class="nx-nav-item" href="#"><span class="ico">◌</span>Payment flow</a><a class="nx-nav-item" href="#"><span class="ico">◌</span>Pricing cycle</a><a class="nx-nav-item" href="#"><span class="ico">◌</span>Dead code</a></nav>
+      <div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols · 5,840 edges</div>
+    </aside>
+    <section class="triage-queue">
+      <div class="queue-head"><div class="nx-kicker">Triage board</div><h1>Review queue</h1><p>12 signals, ordered by blast radius. Pick one and the graph explains it.</p><div class="queue-tools" id="queue-tools"><button class="nx-pill active" data-filter="all">All 12</button><button class="nx-pill" data-filter="risk">Risk</button><button class="nx-pill" data-filter="cycles">Cycles</button><button class="nx-pill" data-filter="dead">Dead</button></div></div>
+      <div class="queue-list" id="tickets">
+        <button class="ticket high active" data-select="priceCart" data-kind="cycles"><i class="severity"></i><span><b>Pricing cycle reaches payment capture</b><small>priceCart → applyCoupon → taxFor → priceCart</small><span class="tags"><span class="tag danger">cycle</span><span class="tag">3 nodes</span></span></span><span class="age">2h</span></button>
+        <button class="ticket high" data-select="createOrder" data-kind="risk"><i class="severity"></i><span><b>createOrder is a new hotspot</b><small>OrderService.createOrder · 94th pct · 3 callers</small><span class="tags"><span class="tag warm">hotspot</span><span class="tag">+2 callers</span></span></span><span class="age">2h</span></button>
+        <button class="ticket" data-select="refund" data-kind="risk"><i class="severity"></i><span><b>Refund path has no retry guard</b><small>handlePaymentError → refund · 2 sites</small><span class="tags"><span class="tag danger">uncovered</span><span class="tag">async</span></span></span><span class="age">1d</span></button>
+        <button class="ticket info" data-select="authorize" data-kind="risk"><i class="severity"></i><span><b>authorize discards 41% of results</b><small>PaymentGateway.authorize · fan-out 2</small><span class="tags"><span class="tag warm">ignored return</span></span></span><span class="age">1d</span></button>
+        <div class="nx-hairline" style="margin:7px 4px"></div>
+        <button class="ticket" data-select="legacyRefund" data-kind="dead"><i class="severity" style="background:var(--faint)"></i><span><b>legacyRefund is never called</b><small>RefundService.legacyRefund · 199 days</small><span class="tags"><span class="tag">dead code</span></span></span><span class="age">199d</span></button>
+        <button class="ticket" data-select="taxFor" data-kind="dead"><i class="severity" style="background:var(--faint)"></i><span><b>taxFor has 2 callers, both indirect</b><small>PricingService.taxFor</small><span class="tags"><span class="tag">coupling</span></span></span><span class="age">7d</span></button>
+      </div>
+    </section>
+    <main class="triage-preview">
+      <div class="preview-head"><span class="title">Preview · Pricing cycle</span><span>src/domain/PricingService.ts</span><span class="nx-grow"></span><span class="nx-pill">hub</span><button class="btn sm">Focus neighborhood</button><button class="btn sm">Open graph</button></div>
+      <div class="preview-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div></div>
+      <div class="preview-detail">
+        <div class="facts"><div class="fact"><b data-fanin>4</b><span>fan-in</span></div><div class="fact"><b data-fanout>3</b><span>fan-out</span></div><div class="fact"><b data-hotspot>71</b><span>hotspot</span></div><div class="fact"><b>78</b><span>risk</span></div></div>
+        <div class="why"><h2 data-selected-qname>PricingService.priceCart</h2><p>Break the cycle by moving coupon validation out of the tax path. Start with <b>applyCoupon</b>.</p></div>
+        <div class="actions"><button>Open full graph ↗</button><button>Show blast radius ←</button><button>Mark reviewed</button></div>
+      </div>
+    </main>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N11</b><span class="sep">·</span>task <span class="sep">/</span> P06 + P11</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'priceCart', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+NX.bindSelect('.ticket', graph);
+document.querySelectorAll('#queue-tools .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('#queue-tools .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  const filter = button.dataset.filter;
+  document.querySelectorAll('.ticket').forEach((ticket) => {
+    ticket.style.display = filter === 'all' || ticket.dataset.kind === filter ? '' : 'none';
+  });
+}));
+document.querySelector('.preview-detail .actions button:last-child').addEventListener('click', () => NX.toast('Signal marked reviewed.'));
+</script>
+</body>
+</html>

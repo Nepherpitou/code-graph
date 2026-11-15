@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N16 · Linked table — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0c0f13;
+  --panel: #12171d;
+  --panel-2: #182129;
+  --line: #293540;
+  --line-soft: #1c252e;
+  --fg: #e9eff5;
+  --muted: #8b99a8;
+  --faint: #566575;
+  --accent: #b8a1ff;
+  --accent-ink: #1a102b;
+  --canvas: #0f141a;
+  --edge: #405164;
+  --danger: #ff7b72;
+  --warm: #f1b36b;
+  --success: #6ee7a8;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; flex-direction: column; }
+.linked-body { flex: 1; min-height: 0; }
+.linked-toolbar { display: flex; align-items: center; gap: 7px; padding: 9px 15px; border-bottom: 1px solid var(--line); background: #0e1319; }
+.linked-toolbar .nx-search { height: 28px; width: 250px; background: var(--panel); border-color: var(--line); }
+.linked-toolbar .nx-pill { min-height: 23px; font-size: 9px; background: var(--panel); border-color: transparent; }
+.linked-toolbar .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.linked-toolbar .count { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+.linked-body { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); min-height: 0; }
+.linked-table { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+.linked-table-head { display: flex; align-items: center; gap: 7px; padding: 10px 13px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.linked-table-head h1 { font-size: 11px; font-weight: 600; }
+.linked-table-scroll { flex: 1; overflow: auto; min-width: 0; }
+.linked-table .nx-table { font-size: 9.5px; }
+.linked-table .nx-table td { padding: 7px 10px; }
+.linked-table .heat { display: inline-block; width: 28px; height: 4px; border-radius: 99px; background: var(--line); vertical-align: middle; }
+.linked-table .heat i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.linked-table .flag { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--line); margin-right: 3px; }
+.linked-table .flag.entry { background: var(--accent); } .linked-table .flag.dead { background: var(--warm); } .linked-table .flag.hot { background: var(--danger); }
+.linked-graph { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+.linked-graph-head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.linked-graph-head .nx-pill { background: var(--panel-2); border-color: transparent; font-size: 8.5px; min-height: 21px; }
+.linked-graph .graph-shell { flex: 1; min-height: 0; }
+.linked-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.linked-graph-foot { padding: 10px 13px; border-top: 1px solid var(--line-soft); background: var(--panel); min-height: 92px; }
+.linked-graph-foot h2 { font-family: var(--mono); font-size: 12px; }
+.linked-graph-foot .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; }
+.linked-graph-foot .facts { display: flex; gap: 14px; margin-top: 8px; color: var(--faint); font-size: 8.5px; }
+.linked-graph-foot .facts b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+@media (max-width: 1080px) { .linked-body { grid-template-columns: 1fr; } .linked-graph { display: none; } }
+@media (max-width: 560px) { .linked-toolbar { flex-wrap: wrap; } .linked-toolbar .nx-search { flex-basis: 100%; width: 100%; } }
+@media (max-width: 600px) { .linked-toolbar .nx-pill:nth-of-type(n+3) { display: none; } .linked-toolbar .nx-search { width: 160px; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>functions</b><span class="faint">/</span><span class="muted">linked view</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Export CSV</button><button class="btn sm">Open graph ↗</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="linked-toolbar"><div class="nx-search">⌕ <input id="search" placeholder="Filter functions, files, kinds…"></div><button class="nx-pill active" data-filter="all">All 20</button><button class="nx-pill" data-filter="hot">Hotspots</button><button class="nx-pill" data-filter="dead">Dead</button><button class="nx-pill" data-filter="entry">Entry</button><span class="nx-grow"></span><span class="count" id="count">20 / 2,462</span></div>
+  <div class="linked-body">
+    <section class="linked-table"><div class="linked-table-head"><h1>Functions</h1><span class="nx-faint nx-tiny">sorted by hotspot</span><span class="nx-grow"></span><button class="btn sm">Columns</button></div><div class="linked-table-scroll"><table class="nx-table" id="table"><thead><tr><th>Function</th><th class="num">fan-in</th><th class="num">fan-out</th><th class="num">reach</th><th>hotspot</th><th>flags</th></tr></thead><tbody>
+      <tr class="active" data-id="checkout" data-flags="entry"><td><div class="name">checkout</div><div class="sub">CheckoutController.ts</div></td><td class="num">1</td><td class="num">5</td><td class="num">1.8k</td><td><span class="heat"><i style="width:94%"></i></span></td><td><span class="flag entry"></span>entry</td></tr>
+      <tr data-id="createOrder" data-flags="hot"><td><div class="name">createOrder</div><div class="sub">OrderService.ts</div></td><td class="num">3</td><td class="num">4</td><td class="num">831</td><td><span class="heat"><i style="width:88%"></i></span></td><td><span class="flag hot"></span>hot</td></tr>
+      <tr data-id="priceCart" data-flags="hot"><td><div class="name">priceCart</div><div class="sub">PricingService.ts</div></td><td class="num">4</td><td class="num">3</td><td class="num">488</td><td><span class="heat"><i style="width:71%"></i></span></td><td><span class="flag hot"></span>cycle</td></tr>
+      <tr data-id="authorize" data-flags="hot"><td><div class="name">authorize</div><div class="sub">PaymentGateway.ts</div></td><td class="num">1</td><td class="num">2</td><td class="num">312</td><td><span class="heat"><i style="width:68%"></i></span></td><td><span class="flag hot"></span>async</td></tr>
+      <tr data-id="webhook" data-flags="entry"><td><div class="name">handle</div><div class="sub">PaymentWebhook.ts</div></td><td class="num">0</td><td class="num">2</td><td class="num">922</td><td><span class="heat"><i style="width:61%"></i></span></td><td><span class="flag entry"></span>entry</td></tr>
+      <tr data-id="refund" data-flags=""><td><div class="name">refund</div><div class="sub">RefundService.ts</div></td><td class="num">2</td><td class="num">1</td><td class="num">611</td><td><span class="heat"><i style="width:56%"></i></span></td><td></td></tr>
+      <tr data-id="handleEvent" data-flags=""><td><div class="name">handleEvent</div><div class="sub">PaymentWebhook.ts</div></td><td class="num">1</td><td class="num">2</td><td class="num">447</td><td><span class="heat"><i style="width:47%"></i></span></td><td></td></tr>
+      <tr data-id="validateCart" data-flags=""><td><div class="name">validateCart</div><div class="sub">CheckoutController.ts</div></td><td class="num">3</td><td class="num">2</td><td class="num">220</td><td><span class="heat"><i style="width:38%"></i></span></td><td></td></tr>
+      <tr data-id="reserveInventory" data-flags=""><td><div class="name">reserveInventory</div><div class="sub">InventoryService.ts</div></td><td class="num">1</td><td class="num">1</td><td class="num">140</td><td><span class="heat"><i style="width:35%"></i></span></td><td></td></tr>
+      <tr data-id="capture" data-flags=""><td><div class="name">capture</div><div class="sub">PaymentGateway.ts</div></td><td class="num">1</td><td class="num">1</td><td class="num">96</td><td><span class="heat"><i style="width:29%"></i></span></td><td></td></tr>
+      <tr data-id="finalizeOrder" data-flags=""><td><div class="name">finalizeOrder</div><div class="sub">OrderService.ts</div></td><td class="num">1</td><td class="num">1</td><td class="num">82</td><td><span class="heat"><i style="width:31%"></i></span></td><td></td></tr>
+      <tr data-id="applyCoupon" data-flags="hot"><td><div class="name">applyCoupon</div><div class="sub">PricingService.ts</div></td><td class="num">1</td><td class="num">1</td><td class="num">40</td><td><span class="heat"><i style="width:22%"></i></span></td><td><span class="flag hot"></span>cycle</td></tr>
+      <tr data-id="taxFor" data-flags=""><td><div class="name">taxFor</div><div class="sub">PricingService.ts</div></td><td class="num">2</td><td class="num">0</td><td class="num">14</td><td><span class="heat"><i style="width:14%"></i></span></td><td></td></tr>
+      <tr data-id="legacyRefund" data-flags="dead"><td><div class="name">legacyRefund</div><div class="sub">RefundService.ts</div></td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="heat"><i style="width:2%"></i></span></td><td><span class="flag dead"></span>dead</td></tr>
+    </tbody></table></div><div class="nx-card-foot"><span>Hover a row to brush the graph; click to inspect.</span><span class="nx-grow"></span><span>14 shown</span></div></section>
+    <section class="linked-graph"><div class="linked-graph-head"><span class="nx-tiny" style="font-weight:600">Selection context</span><span class="nx-faint nx-tiny">1-hop · 20 nodes</span><span class="nx-grow"></span><button class="nx-pill active">1-hop</button><button class="nx-pill">2-hop</button></div><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div><div class="linked-graph-foot"><div class="nx-row"><h2 data-selected-qname>CheckoutController.checkout</h2><span class="tag">entry</span><span class="nx-grow"></span><button class="btn sm">Open ↗</button></div><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="facts"><span>fan-in <b data-fanin>1</b></span><span>fan-out <b data-fanout>5</b></span><span>hotspot <b data-hotspot>94</b></span><span>reach <b>1,842</b></span></div></div></section>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N16</b><span class="sep">·</span>table <span class="sep">/</span> P13 + P09</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+const rows = [...document.querySelectorAll('#table tbody tr')];
+NX.bindHover('#table tbody tr', graph);
+NX.bindSelect('#table tbody tr', graph);
+NX.bindFilter(document.getElementById('search'), '#table tbody tr', document.getElementById('count'), 2462);
+document.querySelectorAll('.linked-toolbar .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.linked-toolbar .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  const filter = button.dataset.filter;
+  rows.forEach((row) => { row.style.display = filter === 'all' || row.dataset.flags.includes(filter) ? '' : 'none'; });
+}));
+</script>
+</body>
+</html>

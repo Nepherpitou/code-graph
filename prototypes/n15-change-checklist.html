@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N15 · Change checklist — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0f14;
+  --panel: #111a21;
+  --panel-2: #17242d;
+  --line: #2a3a45;
+  --line-soft: #1b2a34;
+  --fg: #edf5f8;
+  --muted: #879ca6;
+  --faint: #566d78;
+  --accent: #6be0b0;
+  --accent-ink: #06251a;
+  --canvas: #0c141a;
+  --edge: #3d5662;
+  --danger: #ff8178;
+  --warm: #f2b568;
+  --success: #6be0b0;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; }
+.change-wrap { flex: 1; min-width: 0; display: grid; grid-template-columns: 320px minmax(0,1fr) 290px; min-height: 0; }
+.change-list { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.change-head { padding: 15px 15px 10px; border-bottom: 1px solid var(--line); }
+.change-head h1 { font-size: 18px; letter-spacing: -.03em; margin-top: 5px; }
+.change-head p { color: var(--muted); font-size: 9.5px; margin-top: 4px; }
+.change-items { overflow: auto; flex: 1; padding: 6px 8px 20px; }
+.change-item { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 8px; align-items: start; width: 100%; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); text-align: left; }
+.change-item:hover { background: var(--panel-2); color: var(--fg); }
+.change-item.active { border-color: color-mix(in srgb, var(--accent) 26%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--fg); }
+.change-item input { margin: 2px 0 0; accent-color: var(--accent); }
+.change-item b { display: block; color: var(--fg); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.change-item small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; margin-top: 2px; line-height: 1.4; }
+.change-item .risk { color: var(--warm); font-family: var(--mono); font-size: 8px; }
+.change-graph { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+.change-graph .graph-shell { flex: 1; min-height: 0; }
+.change-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.change-graph .minimap { width: 145px; height: 92px; }
+.change-graph-foot { display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 9px; }
+.change-graph-foot b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.change-panel { border-left: 1px solid var(--line); background: var(--panel); padding: 16px 14px; overflow: auto; }
+.change-panel h2 { font-size: 17px; letter-spacing: -.025em; margin-top: 4px; }
+.progress { margin-top: 12px; height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.progress i { display: block; height: 100%; width: 25%; border-radius: inherit; background: var(--accent); transition: width .2s; }
+.progress-text { display: flex; justify-content: space-between; margin-top: 5px; color: var(--faint); font-size: 8.5px; }
+.checklist { display: flex; flex-direction: column; gap: 7px; margin-top: 15px; }
+.check { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.check input { margin-top: 2px; accent-color: var(--accent); }
+.check.done { color: var(--faint); text-decoration: line-through; }
+.change-panel .note { margin-top: 14px; font-size: 9.5px; }
+.change-panel .actions { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; }
+.change-panel .actions .btn { border-color: var(--line); background: var(--panel-2); justify-content: flex-start; font-size: 9.5px; }
+@media (max-width: 1050px) { .change-wrap { grid-template-columns: 280px minmax(0,1fr); } .change-panel { display: none; } }
+@media (max-width: 760px) { .change-wrap { grid-template-columns: 1fr; } .change-graph { min-height: 50vh; } .change-list { max-height: 48vh; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme/checkout</span><span class="faint">/</span><b>change review</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Merge later</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="change-wrap">
+    <section class="change-list"><div class="change-head"><div class="nx-kicker">Change review · PR #482</div><h1>Changed functions</h1><p>Review the diff by blast radius, not by file order.</p></div><div class="change-items" id="changed">
+      <button class="change-item active" data-select="createOrder"><input type="checkbox" checked><span><b>OrderService.createOrder</b><small>src/domain/OrderService.ts · +18 −4</small></span><span class="risk">78</span></button>
+      <button class="change-item" data-select="authorize"><input type="checkbox"><span><b>PaymentGateway.authorize</b><small>src/payments/PaymentGateway.ts · +12 −2</small></span><span class="risk">68</span></button>
+      <button class="change-item" data-select="finalizeOrder"><input type="checkbox" checked><span><b>OrderService.finalizeOrder</b><small>src/domain/OrderService.ts · +6 −1</small></span><span class="risk">31</span></button>
+      <button class="change-item" data-select="emitEvent"><input type="checkbox"><span><b>EventBus.emitEvent</b><small>src/infra/EventBus.ts · +3 −0</small></span><span class="risk">11</span></button>
+      <button class="change-item" data-select="refund"><input type="checkbox"><span><b>RefundService.refund</b><small>src/domain/RefundService.ts · +9 −5</small></span><span class="risk">56</span></button>
+    </div></section>
+    <main class="change-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div><div class="change-graph-foot"><span class="status-dot"></span><b data-selected-qname>OrderService.createOrder</b><span>·</span><span>risk <b>78</b></span><span class="nx-grow"></span><span>affected 21 · untested 2</span></div></main>
+    <aside class="change-panel"><div class="nx-kicker">Review checklist</div><h2>Before merge</h2><div class="progress"><i id="progress-bar"></i></div><div class="progress-text"><span id="progress-label">1 of 4 complete</span><span>PR #482</span></div>
+      <div class="checklist" id="checklist">
+        <label class="check done"><input type="checkbox" checked>Read the changed entry point.</label>
+        <label class="check"><input type="checkbox">Check the two untested call sites.</label>
+        <label class="check"><input type="checkbox">Confirm inventory release on failure.</label>
+        <label class="check"><input type="checkbox">Run the blast-radius review.</label>
+      </div>
+      <div class="note">Changing <b>createOrder</b> reaches 21 functions. The graph highlights upstream context while the checklist keeps the review honest.</div>
+      <div class="actions"><button class="btn sm" id="complete">Mark review complete</button><button class="btn sm">Copy PR brief</button><button class="btn sm">Compare snapshot</button></div>
+    </aside>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N15</b><span class="sep">·</span>task <span class="sep">/</span> P06 + P11</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'createOrder', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'layered');
+NX.bindSelect('.change-item', graph);
+document.querySelectorAll('#checklist input').forEach((input) => input.addEventListener('change', () => {
+  const checks = [...document.querySelectorAll('#checklist input')];
+  const done = checks.filter((item) => item.checked).length;
+  document.getElementById('progress-label').textContent = `${done} of ${checks.length} complete`;
+  document.getElementById('progress-bar').style.width = `${(done / checks.length) * 100}%`;
+  input.closest('.check').classList.toggle('done', input.checked);
+}));
+document.getElementById('complete').addEventListener('click', () => {
+  document.querySelectorAll('#checklist input').forEach((input) => { input.checked = true; input.closest('.check').classList.add('done'); });
+  document.getElementById('progress-label').textContent = '4 of 4 complete';
+  document.getElementById('progress-bar').style.width = '100%';
+  NX.toast('Review complete — ready to merge.');
+});
+</script>
+</body>
+</html>

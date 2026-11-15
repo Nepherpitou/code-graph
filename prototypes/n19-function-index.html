@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N19 · Function index — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --panel-2: #eef2f7;
+  --line: #dce2ea;
+  --line-soft: #edf1f5;
+  --fg: #1f2530;
+  --muted: #6f7a8a;
+  --faint: #9da7b5;
+  --accent: #4f63e5;
+  --accent-ink: #ffffff;
+  --canvas: #fafbfe;
+  --edge: #b7c0d0;
+  --danger: #c54a3e;
+  --warm: #a66d16;
+  --success: #2a7c56;
+  --violet: #735bc8;
+  color-scheme: light;
+}
+
+body { background: var(--bg); overflow: hidden; }
+.nx-body { min-height: 0; }
+.index-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.index-hero { padding: 18px 24px 13px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.index-hero h1 { font-size: 23px; letter-spacing: -.035em; font-weight: 620; margin-top: 4px; }
+.index-hero .nx-search { margin-top: 12px; max-width: 620px; }
+.index-toolbar { display: flex; align-items: center; gap: 5px; padding: 8px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.index-toolbar .nx-pill { background: var(--panel-2); border-color: transparent; font-size: 9px; }
+.index-toolbar .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.index-toolbar .nx-grow { flex: 1; }
+.index-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) 330px; }
+.index-table-scroll { overflow: auto; border-right: 1px solid var(--line); }
+.index-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 9.5px; }
+.index-table th { position: sticky; top: 0; z-index: 2; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8px; text-align: left; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.index-table td { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.index-table tr:hover td, .index-table tr.active td { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--fg); }
+.index-table tr.active td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.index-table .name { color: var(--fg); font-size: 10.5px; }
+.index-table .sub { color: var(--faint); font-size: 8px; }
+.index-table .num { text-align: right; }
+.index-table .flag { width: 5px; height: 5px; border-radius: 50%; background: var(--line); display: inline-block; margin-right: 3px; }
+.index-table .flag.entry { background: var(--accent); } .index-table .flag.dead { background: var(--warm); } .index-table .flag.hot { background: var(--danger); }
+.index-preview { display: flex; flex-direction: column; min-height: 0; background: var(--canvas); }
+.index-preview .graph-shell { height: 320px; flex: 0 0 auto; background: var(--canvas); }
+.index-preview .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.index-preview-info { padding: 15px; border-top: 1px solid var(--line-soft); background: var(--panel); overflow: auto; }
+.index-preview-info h2 { font-family: var(--mono); font-size: 14px; margin-top: 5px; }
+.index-preview-info .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; word-break: break-all; }
+.index-preview-info .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.index-preview-info .fact { padding: 7px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+.index-preview-info .fact b { display: block; font-family: var(--mono); font-size: 12px; }
+.index-preview-info .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+@media (max-width: 1000px) { .index-body { grid-template-columns: 1fr; } .index-preview { display: none; } }
+@media (max-width: 600px) { .index-hero { padding-left: 14px; padding-right: 14px; } .index-toolbar { padding-left: 14px; padding-right: 14px; } .index-toolbar .nx-pill:nth-of-type(n+4) { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>function index</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Export CSV</button><button class="btn sm">Open graph ↗</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <main class="index-main">
+    <div class="index-hero"><div class="nx-kicker">Function index</div><h1>Search is the table.</h1><div class="nx-search">⌕ <input id="search" placeholder="Filter functions, files, kinds…"><span class="kbd">/</span></div></div>
+    <div class="index-toolbar"><button class="nx-pill active" data-filter="all">All 20</button><button class="nx-pill" data-filter="hot">Hotspots</button><button class="nx-pill" data-filter="dead">Dead</button><button class="nx-pill" data-filter="entry">Entry</button><span class="nx-grow"></span><span class="nx-faint nx-tiny" id="count">20 / 2,462</span></div>
+    <div class="index-body"><div class="index-table-scroll"><table class="index-table" id="index"><thead><tr><th>Function</th><th class="num">in</th><th class="num">out</th><th class="num">reach</th><th>hotspot</th><th>flags</th></tr></thead><tbody>
+      <tr class="active" data-id="checkout" data-flags="entry"><td><span class="name">checkout</span><span class="sub"> · CheckoutController.ts</span></td><td class="num">1</td><td class="num">5</td><td class="num">1.8k</td><td>94</td><td><span class="flag entry"></span>entry</td></tr>
+      <tr data-id="createOrder" data-flags="hot"><td><span class="name">createOrder</span><span class="sub"> · OrderService.ts</span></td><td class="num">3</td><td class="num">4</td><td class="num">831</td><td>88</td><td><span class="flag hot"></span>hot</td></tr>
+      <tr data-id="priceCart" data-flags="hot"><td><span class="name">priceCart</span><span class="sub"> · PricingService.ts</span></td><td class="num">4</td><td class="num">3</td><td class="num">488</td><td>71</td><td><span class="flag hot"></span>cycle</td></tr>
+      <tr data-id="authorize" data-flags="hot"><td><span class="name">authorize</span><span class="sub"> · PaymentGateway.ts</span></td><td class="num">1</td><td class="num">2</td><td class="num">312</td><td>68</td><td><span class="flag hot"></span>async</td></tr>
+      <tr data-id="webhook" data-flags="entry"><td><span class="name">handle</span><span class="sub"> · PaymentWebhook.ts</span></td><td class="num">0</td><td class="num">2</td><td class="num">922</td><td>61</td><td><span class="flag entry"></span>entry</td></tr>
+      <tr data-id="refund"><td><span class="name">refund</span><span class="sub"> · RefundService.ts</span></td><td class="num">2</td><td class="num">1</td><td class="num">611</td><td>56</td><td></td></tr>
+      <tr data-id="handleEvent"><td><span class="name">handleEvent</span><span class="sub"> · PaymentWebhook.ts</span></td><td class="num">1</td><td class="num">2</td><td class="num">447</td><td>47</td><td></td></tr>
+      <tr data-id="validateCart"><td><span class="name">validateCart</span><span class="sub"> · CheckoutController.ts</span></td><td class="num">3</td><td class="num">2</td><td class="num">220</td><td>38</td><td></td></tr>
+      <tr data-id="reserveInventory"><td><span class="name">reserveInventory</span><span class="sub"> · InventoryService.ts</span></td><td class="num">1</td><td class="num">1</td><td class="num">140</td><td>35</td><td></td></tr>
+      <tr data-id="capture"><td><span class="name">capture</span><span class="sub"> · PaymentGateway.ts</span></td><td class="num">1</td><td class="num">1</td><td class="num">96</td><td>29</td><td></td></tr>
+      <tr data-id="finalizeOrder"><td><span class="name">finalizeOrder</span><span class="sub"> · OrderService.ts</span></td><td class="num">1</td><td class="num">1</td><td class="num">82</td><td>31</td><td></td></tr>
+      <tr data-id="legacyRefund" data-flags="dead"><td><span class="name">legacyRefund</span><span class="sub"> · RefundService.ts</span></td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td>2</td><td><span class="flag dead"></span>dead</td></tr>
+    </tbody></table></div>
+    <aside class="index-preview"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div></div><div class="index-preview-info"><div class="nx-kicker">Preview</div><h2 data-selected-qname>CheckoutController.checkout</h2><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>1.8k</b><span>reach</span></div></div></div></aside></div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N19</b><span class="sep">·</span>table <span class="sep">/</span> P13 + P07</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+NX.bindHover('#index tbody tr', graph);
+NX.bindSelect('#index tbody tr', graph);
+NX.bindFilter(document.getElementById('search'), '#index tbody tr', document.getElementById('count'), 2462);
+document.querySelectorAll('.index-toolbar .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.index-toolbar .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  const filter = button.dataset.filter;
+  document.querySelectorAll('#index tbody tr').forEach((row) => { row.style.display = filter === 'all' || (row.dataset.flags || '').includes(filter) ? '' : 'none'; });
+}));
+document.addEventListener('keydown', (event) => { if (event.key === '/' && document.activeElement !== document.getElementById('search')) { event.preventDefault(); document.getElementById('search').focus(); } });
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N21 · Glass focus — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0b0716;
+  --panel: #171226;
+  --panel-2: #211a34;
+  --line: #3b3157;
+  --line-soft: #2a2341;
+  --fg: #f6f1ff;
+  --muted: #b2a5cb;
+  --faint: #776b92;
+  --accent: #c4b5fd;
+  --accent-ink: #211441;
+  --canvas: #0e0a1d;
+  --edge: #5a4d78;
+  --danger: #ff8a9b;
+  --warm: #ffc878;
+  --success: #75e0b0;
+  --violet: #c4b5fd;
+}
+
+body { overflow: hidden; background: radial-gradient(700px 500px at 16% 18%, rgba(118,77,255,.38), transparent 65%), radial-gradient(800px 600px at 82% 6%, rgba(255,101,180,.25), transparent 60%), radial-gradient(600px 500px at 70% 92%, rgba(56,189,248,.18), transparent 65%), #0b0716; }
+body::before { content: ""; position: fixed; inset: 0; background: linear-gradient(115deg, rgba(255,255,255,.03), transparent 35%, rgba(255,255,255,.02)); pointer-events: none; }
+.nx-top { border-bottom: 1px solid rgba(255,255,255,.09); background: rgba(20,15,35,.45); backdrop-filter: blur(22px); }
+.nx-body { min-height: 0; padding: 12px 14px 14px; gap: 10px; display: flex; background: transparent; }
+.glass { border: 1px solid rgba(255,255,255,.12); border-radius: 18px; background: rgba(20,15,35,.55); backdrop-filter: blur(26px) saturate(1.25); box-shadow: 0 24px 70px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.07); }
+.glass-side { width: 220px; flex: 0 0 auto; padding: 14px 10px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+.glass-side .nx-nav-item.active { border: 1px solid rgba(196,181,253,.25); background: rgba(196,181,253,.1); }
+.glass-side .nx-nav-item .ico { color: var(--faint); }
+.glass-canvas { flex: 1; min-width: 0; position: relative; overflow: hidden; background: rgba(12,8,24,.45); }
+.glass-canvas .graph-shell { height: 100%; }
+.glass-canvas .graph-toolbar { top: 12px; left: 12px; background: rgba(20,15,35,.62); border-color: rgba(255,255,255,.12); backdrop-filter: blur(18px); }
+.glass-canvas .graph-toolbar button { color: var(--muted); }
+.glass-canvas .minimap { right: 12px; bottom: 12px; background: rgba(20,15,35,.6); border-color: rgba(255,255,255,.12); backdrop-filter: blur(16px); }
+.glass-pills { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; gap: 3px; padding: 3px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(20,15,35,.55); backdrop-filter: blur(18px); }
+.glass-pills button { border: 0; border-radius: 7px; background: transparent; color: var(--muted); padding: 5px 10px; font-size: 9.5px; }
+.glass-pills button.active { background: rgba(255,255,255,.1); color: var(--fg); }
+.glass-ins { width: 300px; flex: 0 0 auto; overflow: auto; padding: 18px 16px; }
+.glass-ins h2 { font-family: var(--mono); font-size: 15px; margin-top: 7px; line-height: 1.25; }
+.glass-ins .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 4px; word-break: break-all; }
+.glass-ins .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 15px 0; }
+.glass-ins .fact { padding: 9px; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; background: rgba(255,255,255,.035); }
+.glass-ins .fact b { display: block; font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.glass-ins .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .07em; margin-top: 2px; }
+.glass-ins .relation { border-bottom-color: rgba(255,255,255,.07); font-size: 9.5px; }
+.glass-ins .actions { display: flex; flex-direction: column; gap: 2px; margin-top: 13px; }
+.glass-ins .actions button { display: flex; align-items: center; gap: 7px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; padding: 7px; text-align: left; }
+.glass-ins .actions button:hover { background: rgba(255,255,255,.07); color: var(--fg); }
+.glass-ins .actions .arrow { margin-left: auto; color: var(--faint); }
+.glass-ins .foot { display: flex; align-items: center; gap: 7px; margin-top: 16px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,.08); color: var(--faint); font-size: 8px; }
+@media (max-width: 1050px) { .glass-side { width: 190px; } .glass-ins { width: 260px; } }
+@media (max-width: 850px) { .glass-side { display: none; } .glass-ins { display: none; } .nx-body { padding: 8px; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme / checkout-service</span><span class="faint">/</span><b>graph</b></div>
+  <span class="nx-grow"></span>
+  <span class="status-dot"></span><span class="nx-tiny nx-muted">local snapshot</span><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <aside class="glass-side glass">
+    <div><div class="nx-label">Workspace</div><nav class="nx-nav"><button class="nx-nav-item active"><span class="ico">⌁</span>Call graph</button><button class="nx-nav-item"><span class="ico">↳</span>Entry points</button><button class="nx-nav-item"><span class="ico">◈</span>Signals<span class="count">12</span></button><button class="nx-nav-item"><span class="ico">▤</span>Files</button><button class="nx-nav-item"><span class="ico">↶</span>History</button></nav></div>
+    <div><div class="nx-label">Saved views</div><nav class="nx-nav"><button class="nx-nav-item"><span class="ico">◌</span>Payment flow</button><button class="nx-nav-item"><span class="ico">◌</span>Pricing cycle</button><button class="nx-nav-item"><span class="ico">◌</span>Dead code</button></nav></div>
+    <div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols · 5,840 edges</div>
+  </aside>
+  <main class="glass-canvas glass"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div><div class="glass-pills"><button class="active">Layered</button><button>Focus</button><button>Impact</button><button>Route</button></div></div></main>
+  <aside class="glass-ins glass"><div class="nx-kicker">Selected node</div><h2 data-selected-qname>CheckoutController.checkout</h2><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="nx-row" style="margin-top:9px"><span class="tag">entry</span><span class="tag warm">hotspot</span></div><div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>1.8k</b><span>reach</span></div></div><div class="nx-label">Callees</div><div class="relation"><span class="mono">validateCart</span><span class="meta">2</span></div><div class="relation"><span class="mono">createOrder</span><span class="meta">4</span></div><div class="relation"><span class="mono">priceCart</span><span class="meta">3</span></div><div class="actions"><button>Show entry → exit route <span class="arrow">→</span></button><button>Focus 2-hop <span class="arrow">→</span></button><button>Show blast radius <span class="arrow">←</span></button><button>Open containing file <span class="arrow">↗</span></button></div><div class="foot"><span class="status-dot"></span>local · immutable snapshot</div></aside>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N21</b><span class="sep">·</span>visual <span class="sep">/</span> P19 + P09</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'layered');
+document.querySelectorAll('.glass-side .nx-nav-item').forEach((item) => item.addEventListener('click', () => {
+  document.querySelectorAll('.glass-side .nx-nav-item').forEach((node) => node.classList.remove('active'));
+  item.classList.add('active');
+}));
+document.querySelectorAll('.glass-pills button').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.glass-pills button').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  if (button.textContent === 'Route') graph.route(CG.checkoutPath, 'createOrder');
+}));
+document.querySelector('.glass-ins .actions button').addEventListener('click', () => graph.route(CG.checkoutPath, 'createOrder'));
+</script>
+</body>
+</html>

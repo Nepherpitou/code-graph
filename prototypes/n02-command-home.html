@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N02 · Command home — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0d0c;
+  --panel: #111613;
+  --panel-2: #18201b;
+  --line: #2b3830;
+  --line-soft: #1d2822;
+  --fg: #edf5ef;
+  --muted: #8a9d90;
+  --faint: #596c60;
+  --accent: #9ef0c0;
+  --accent-ink: #06251a;
+  --canvas: #0d1310;
+  --edge: #405348;
+  --danger: #ff8b7f;
+  --warm: #f1b36b;
+  --success: #9ef0c0;
+  --violet: #b8a1ff;
+}
+
+body { background: radial-gradient(900px 520px at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%), var(--bg); overflow-x: hidden; }
+.nx-body { display: block; }
+.nx-main { overflow: auto; }
+.cmd-wrap { width: min(920px, calc(100% - 40px)); margin: 0 auto; padding: 7vh 0 50px; }
+.cmd-hero { text-align: center; max-width: 700px; margin: 0 auto; }
+.cmd-hero h1 { font-size: clamp(36px, 5.2vw, 66px); line-height: .95; letter-spacing: -.06em; font-weight: 600; }
+.cmd-hero h1 em { font-style: normal; color: var(--accent); }
+.cmd-hero p { color: var(--muted); max-width: 470px; margin: 15px auto 0; font-size: 12px; line-height: 1.6; }
+.cmd-search { margin: 25px auto 0; }
+.cmd-hints { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; margin-top: 9px; color: var(--faint); font-size: 9px; }
+.cmd-hints .kbd { font-size: 8px; height: 16px; }
+.cmd-results { margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.cmd-result { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; color: var(--muted); }
+.cmd-result:hover { background: var(--panel-2); color: var(--fg); }
+.cmd-result .ico { width: 24px; height: 24px; border-radius: 6px; background: var(--panel-2); color: var(--accent); display: grid; place-items: center; font-family: var(--mono); font-size: 8px; flex: 0 0 auto; }
+.cmd-result b { display: block; color: var(--fg); font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+.cmd-result small { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; }
+.cmd-result .kind { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 8.5px; }
+.cmd-result .enter { opacity: 0; color: var(--accent); }
+.cmd-result:hover .enter, .cmd-result.active .enter { opacity: 1; }
+.cmd-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 25px; }
+.cmd-panel { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.cmd-panel h2 { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.cmd-recent { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.cmd-recent button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); text-align: left; font-size: 10.5px; }
+.cmd-recent button:hover { background: var(--panel-2); color: var(--fg); }
+.cmd-recent .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+.cmd-recent .dot.on { background: var(--accent); }
+.cmd-recent b { display: block; font-size: 10.5px; font-weight: 500; }
+.cmd-recent small { display: block; color: var(--faint); font-size: 8.5px; margin-top: 1px; }
+.cmd-recent .time { margin-left: auto; color: var(--faint); font-size: 8.5px; }
+.cmd-preview { display: none; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.cmd-preview.on { display: block; }
+.cmd-preview-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 10px; }
+.cmd-preview-head b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.cmd-preview .graph-shell { height: 330px; background: var(--canvas); }
+.cmd-preview .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.cmd-preview .graph-toolbar button { color: var(--muted); }
+.cmd-foot { text-align: center; color: var(--faint); font-size: 9px; line-height: 1.6; margin-top: 24px; }
+@media (max-width: 760px) { .cmd-wrap { width: calc(100% - 26px); padding-top: 5vh; } .cmd-groups { grid-template-columns: 1fr; } .cmd-hero h1 { font-size: 40px; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme</span><span class="faint">/</span><b>checkout-service</b><span class="faint">/</span><span class="muted">command home</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Re-analyze</button>
+  <span class="avatar">AR</span>
+</header>
+<main class="nx-main">
+  <div class="cmd-wrap">
+    <div class="cmd-hero">
+      <div class="nx-kicker">Command home · snapshot a3f10c2</div>
+      <h1>Ask the codebase<br><em>anything.</em></h1>
+      <p>Search a symbol, name a task, or resume a saved view. No permanent sidebar, no graph-first setup.</p>
+      <div class="nx-search big cmd-search">⌕ <input id="search" autofocus type="search" placeholder="Try “checkout”, “payment”, or “refund”…"><span class="kbd">⌘</span><span class="kbd">K</span><button class="btn primary sm" id="open">Open</button></div>
+      <div class="cmd-hints"><span>quick jumps</span><button class="nx-pill" data-q="checkout">checkout</button><button class="nx-pill" data-q="payment">payment</button><button class="nx-pill" data-q="refund">refund</button><span>·</span><span>press <span class="kbd">/</span> to focus</span></div>
+    </div>
+    <section class="cmd-results">
+      <div class="nx-command-group"><div class="nx-command-title">Entry points</div>
+        <button class="cmd-result" data-open="checkout"><span class="ico">EP</span><span><b>CheckoutController.checkout</b><small>src/http/CheckoutController.ts · reach 1.8k</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+        <button class="cmd-result" data-open="createOrder"><span class="ico">EP</span><span><b>OrderService.createOrder</b><small>src/domain/OrderService.ts · reach 1.1k</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+        <button class="cmd-result" data-open="webhook"><span class="ico">EP</span><span><b>PaymentWebhook.handle</b><small>src/payments/PaymentWebhook.ts · reach 922</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+      </div>
+      <div class="nx-command-group"><div class="nx-command-title">Functions</div>
+        <button class="cmd-result" data-open="priceCart"><span class="ico">fn</span><span><b>PricingService.priceCart</b><small>src/domain/PricingService.ts · 4 callers</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+        <button class="cmd-result" data-open="authorize"><span class="ico">fn</span><span><b>PaymentGateway.authorize</b><small>src/payments/PaymentGateway.ts · async</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+        <button class="cmd-result" data-open="refund"><span class="ico">fn</span><span><b>RefundService.refund</b><small>src/domain/RefundService.ts · 2 callers</small></span><span class="kind">method</span><span class="enter">↵</span></button>
+      </div>
+    </section>
+    <div class="cmd-groups">
+      <section class="cmd-panel"><h2><span>Recent</span><span class="nx-mono nx-faint">today</span></h2>
+        <div class="cmd-recent">
+          <button data-open="createOrder"><span class="dot on"></span><span><b>createOrder neighborhood</b><small>24 nodes · focus</small></span><span class="time">2h</span></button>
+          <button data-open="webhook"><span class="dot"></span><span><b>Webhook fan-out</b><small>18 nodes · layered</small></span><span class="time">yesterday</span></button>
+          <button data-open="priceCart"><span class="dot"></span><span><b>Pricing cycle</b><small>6 nodes · cycle view</small></span><span class="time">yesterday</span></button>
+        </div>
+      </section>
+      <section class="cmd-panel"><h2><span>Project pulse</span><span class="nx-mono nx-faint">live</span></h2>
+        <div class="nx-kpis" style="margin-top:10px;grid-template-columns:1fr 1fr">
+          <div class="nx-kpi"><b>12</b><span>signals</span></div><div class="nx-kpi"><b>3</b><span>cycles</span></div><div class="nx-kpi"><b>7</b><span>dead</span></div><div class="nx-kpi"><b>8.4s</b><span>analysis</span></div>
+        </div>
+        <p class="nx-tiny nx-muted" style="margin-top:10px;line-height:1.5">The launcher is the home page for keyboard users. Health is visible, but the graph stays one command away.</p>
+      </section>
+    </div>
+    <section class="cmd-preview" id="preview">
+      <div class="cmd-preview-head"><span>Preview</span><b data-selected-name>checkout</b><span class="faint">·</span><span data-selected-file>src/http/CheckoutController.ts</span><span class="nx-grow"></span><button class="btn sm" id="full-open">Open full graph ↗</button></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div></div>
+    </section>
+    <p class="cmd-foot">Locally indexed · no code upload · 2,462 symbols / 5,840 edges · tsgo 5.9</p>
+  </div>
+</main>
+</div>
+<a class="nx-badge" href="index.html"><b>N02</b><span class="sep">·</span>start <span class="sep">/</span> P07 + P02</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const input = document.getElementById('search');
+const results = document.querySelectorAll('.cmd-result');
+const preview = document.getElementById('preview');
+let graph = null;
+NX.bindFilter(input, '.cmd-result', null, 0);
+function open(id) {
+  preview.classList.add('on');
+  if (!graph) graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: id, maxScale: 1 });
+  else graph.select(id);
+  requestAnimationFrame(() => graph.fit());
+  preview.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => open(button.dataset.open)));
+document.querySelectorAll('[data-q]').forEach((button) => button.addEventListener('click', () => { input.value = button.dataset.q; input.dispatchEvent(new Event('input')); input.focus(); }));
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { const first = [...results].find((item) => item.style.display !== 'none'); if (first) open(first.dataset.open); }
+});
+document.getElementById('open').addEventListener('click', () => open('checkout'));
+document.getElementById('full-open').addEventListener('click', () => { NX.toast('Full graph would open with the same selection.'); });
+</script>
+</body>
+</html>

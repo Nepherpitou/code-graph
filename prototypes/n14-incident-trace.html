@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N14 · Incident trace — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0b0910;
+  --panel: #14101d;
+  --panel-2: #1d1729;
+  --line: #322744;
+  --line-soft: #241c33;
+  --fg: #f3eef9;
+  --muted: #a194b2;
+  --faint: #6a5e7c;
+  --accent: #fb7185;
+  --accent-ink: #3b0710;
+  --canvas: #100c18;
+  --edge: #52436b;
+  --danger: #fb7185;
+  --warm: #f5b56b;
+  --success: #75d8a4;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; background: radial-gradient(600px 400px at 12% 0%, color-mix(in srgb, var(--danger) 10%, transparent), transparent 65%), var(--bg); }
+.nx-body { min-height: 0; }
+.incident-wrap { flex: 1; min-width: 0; display: grid; grid-template-columns: 320px minmax(0,1fr) 300px; min-height: 0; }
+.incident-side { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 17px 15px; }
+.incident-side h1 { font-size: 20px; line-height: 1.1; letter-spacing: -.035em; margin-top: 6px; }
+.incident-side .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 4px; }
+.incident-meta { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.timeline { margin-top: 16px; }
+.frame { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; color: var(--muted); }
+.frame:hover { background: var(--panel-2); color: var(--fg); }
+.frame.active { border-color: color-mix(in srgb, var(--danger) 35%, transparent); background: color-mix(in srgb, var(--danger) 7%, transparent); color: var(--fg); }
+.frame .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); color: var(--faint); font-family: var(--mono); font-size: 8px; flex: 0 0 auto; }
+.frame.active .n { border-color: var(--danger); color: var(--danger); }
+.frame b { display: block; font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.frame small { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; line-height: 1.4; }
+.incident-side .actions { display: flex; flex-direction: column; gap: 4px; margin-top: 15px; }
+.incident-side .actions .btn { justify-content: flex-start; border-color: var(--line); background: var(--panel-2); font-size: 9.5px; }
+.incident-graph { position: relative; min-width: 0; background: var(--canvas); }
+.incident-graph .graph-shell { height: 100%; }
+.incident-graph .graph-toolbar { background: var(--panel); border-color: var(--line); top: 10px; left: 10px; }
+.incident-graph .minimap { width: 145px; height: 92px; }
+.incident-detail { border-left: 1px solid var(--line); background: var(--panel); padding: 17px 15px; overflow: auto; }
+.incident-detail h2 { font-family: var(--mono); font-size: 14px; margin-top: 7px; word-break: break-word; }
+.incident-detail .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 4px; word-break: break-all; }
+.incident-detail .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 13px 0; }
+.incident-detail .fact { padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-2); }
+.incident-detail .fact b { display: block; font-family: var(--mono); font-size: 13px; }
+.incident-detail .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.incident-detail .note { margin-top: 12px; border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); background: color-mix(in srgb, var(--danger) 6%, transparent); color: color-mix(in srgb, var(--danger) 65%, var(--fg)); font-size: 9.5px; }
+.incident-detail .actions { display: flex; flex-direction: column; gap: 3px; margin-top: 12px; }
+.incident-detail .actions button { border: 0; background: transparent; color: var(--muted); text-align: left; font-size: 9.5px; padding: 6px; border-radius: 5px; }
+.incident-detail .actions button:hover { background: var(--panel-2); color: var(--fg); }
+@media (max-width: 1050px) { .incident-wrap { grid-template-columns: 280px minmax(0,1fr); } .incident-detail { display: none; } }
+@media (max-width: 760px) { .incident-wrap { grid-template-columns: 1fr; } .incident-graph { min-height: 50vh; } .incident-side { max-height: 48vh; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme/checkout</span><span class="faint">/</span><b>incident INC-204</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Resolve</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="incident-wrap">
+    <aside class="incident-side"><div class="nx-kicker">Incident trace · INC-204</div><h1>Payment captured twice</h1><div class="file">checkout-service · a3f10c2</div><div class="incident-meta"><span class="tag danger">sev-2</span><span class="tag warm">12:42 UTC</span><span class="tag">4 frames</span></div>
+      <div class="timeline" id="frames">
+        <button class="frame active" data-frame="0" data-select="checkout"><span class="n">1</span><span><b>CheckoutController.checkout</b><small>POST /checkout · request start</small></span></button>
+        <button class="frame" data-frame="1" data-select="priceCart"><span class="n">2</span><span><b>PricingService.priceCart</b><small>totals computed · 3 items</small></span></button>
+        <button class="frame" data-frame="2" data-select="createOrder"><span class="n">3</span><span><b>OrderService.createOrder</b><small>reserveInventory → authorize</small></span></button>
+        <button class="frame" data-frame="3" data-select="authorize"><span class="n">4</span><span><b>PaymentGateway.authorize</b><small>async retry · result partially used</small></span></button>
+        <button class="frame" data-frame="4" data-select="capture"><span class="n">5</span><span><b>PaymentGateway.capture</b><small>second capture observed here</small></span></button>
+      </div>
+      <div class="actions"><button class="btn sm">Copy trace</button><button class="btn sm">Open full graph</button><button class="btn sm">Mark suspect</button></div>
+    </aside>
+    <main class="incident-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div></main>
+    <aside class="incident-detail"><div class="nx-kicker">Frame detail</div><h2 data-selected-qname>CheckoutController.checkout</h2><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>0.2ms</b><span>frame time</span></div></div><div class="note">The second capture follows a retry of <b>authorize</b>. The frame is highlighted on the route, not isolated in a list.</div><div class="actions"><button>Focus frame neighborhood →</button><button>Show upstream callers ←</button><button>Copy frame path ⧉</button></div></aside>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N14</b><span class="sep">·</span>task <span class="sep">/</span> P10 + P11</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'path', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'path');
+const order = ['checkout', 'priceCart', 'createOrder', 'authorize', 'capture'];
+let current = 0;
+function go(index) {
+  current = Math.max(0, Math.min(order.length - 1, index));
+  document.querySelectorAll('.frame').forEach((frame, i) => {
+    frame.classList.toggle('active', i === current);
+    frame.classList.toggle('done', i < current);
+  });
+  graph.route(order.slice(0, current + 1), order[current]);
+}
+document.querySelectorAll('.frame').forEach((frame, i) => frame.addEventListener('click', () => go(i)));
+document.querySelector('.incident-side .actions button:last-child').addEventListener('click', () => NX.toast('Suspect frame marked in the review.'));
+document.querySelector('.incident-side .actions button:first-child').addEventListener('click', () => NX.toast('Trace copied to clipboard.'));
+go(0);
+</script>
+</body>
+</html>

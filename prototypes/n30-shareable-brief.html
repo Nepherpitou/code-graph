@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N30 · Shareable brief — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #e9edf2;
+  --panel: #ffffff;
+  --panel-2: #f3f6fa;
+  --line: #dbe2ec;
+  --line-soft: #edf1f6;
+  --fg: #202735;
+  --muted: #6d7989;
+  --faint: #9aa5b4;
+  --accent: #3d6df0;
+  --accent-ink: #ffffff;
+  --canvas: #fafbfe;
+  --edge: #b8c2d2;
+  --danger: #c4473b;
+  --warm: #a36c12;
+  --success: #26764f;
+  --violet: #6d56bd;
+  color-scheme: light;
+}
+
+body { background: var(--bg); overflow-x: hidden; }
+.nx-top { background: rgba(255,255,255,.8); backdrop-filter: blur(18px); border-color: rgba(219,226,236,.9); }
+.nx-body { display: block; }
+.nx-main { overflow: auto; padding: 26px 28px 58px; }
+.share-wrap { width: min(1040px, 100%); margin: 0 auto; }
+.share-hero { padding: 18px 20px 15px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 10px 34px rgba(40,50,90,.06); }
+.share-hero .readonly { display: inline-flex; align-items: center; gap: 5px; color: var(--faint); font-size: 8.5px; text-transform: uppercase; letter-spacing: .08em; }
+.share-hero h1 { font-size: clamp(30px, 4.2vw, 48px); letter-spacing: -.05em; line-height: .98; margin-top: 9px; font-weight: 620; }
+.share-hero p { color: var(--muted); font-size: 11.5px; line-height: 1.6; max-width: 620px; margin-top: 9px; }
+.share-actions { display: flex; gap: 5px; margin-top: 13px; flex-wrap: wrap; }
+.share-actions .btn { border-color: var(--line); background: var(--panel-2); }
+.share-grid { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 12px; margin-top: 12px; }
+.share-card { border: 1px solid var(--line); border-radius: 13px; background: var(--panel); overflow: hidden; }
+.share-card-head { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--line-soft); }
+.share-card-head h2 { font-size: 10.5px; font-weight: 600; }
+.share-card-head .nx-grow { flex: 1; }
+.share-card-head .nx-pill { background: var(--panel-2); border-color: transparent; font-size: 8.5px; }
+.share-card-head .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.share-route { padding: 4px 6px 8px; }
+.share-route-item { display: grid; grid-template-columns: 24px minmax(0,1fr) 80px; gap: 8px; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; color: var(--muted); }
+.share-route-item:hover { background: var(--panel-2); color: var(--fg); }
+.share-route-item.active { border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--fg); }
+.share-route-item .n { font-family: var(--mono); font-size: 8px; color: var(--faint); }
+.share-route-item b { display: block; color: var(--fg); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.share-route-item small { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; }
+.share-route-item .tag { font-size: 7.5px; justify-self: end; }
+.share-graph { margin-top: 12px; }
+.share-graph .graph-shell { height: 280px; background: var(--canvas); }
+.share-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.share-side { display: flex; flex-direction: column; gap: 11px; }
+.share-stat { padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+.share-stat h3 { color: var(--faint); font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.share-stat .big { font-family: var(--mono); font-size: 27px; color: var(--accent); letter-spacing: -.06em; margin-top: 5px; }
+.share-stat p { color: var(--muted); font-size: 9px; line-height: 1.5; margin-top: 3px; }
+.share-stat .bar { height: 4px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 8px; }
+.share-stat .bar i { display: block; height: 100%; width: 78%; background: var(--accent); }
+.share-meta { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+.share-meta .row { display: flex; justify-content: space-between; color: var(--faint); font-size: 8.5px; }
+.share-meta b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.share-footer { display: flex; align-items: center; gap: 7px; margin-top: 11px; color: var(--faint); font-size: 8.5px; }
+@media (max-width: 900px) { .share-grid { grid-template-columns: 1fr; } .share-side { display: grid; grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .nx-main { padding: 18px 14px 40px; } .share-side { grid-template-columns: 1fr; } .share-route-item { grid-template-columns: 20px minmax(0,1fr) auto; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">shared view</span><span class="faint">/</span><b>checkout request</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Copy link</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<main class="nx-main">
+  <div class="share-wrap">
+    <section class="share-hero"><div class="readonly"><span class="status-dot"></span>shared view · read-only</div><h1>Checkout request: route + impact.</h1><p>A compact brief for review. Six steps from HTTP entry to payment exit, with the one node that carries the risk.</p><div class="share-actions"><button class="btn sm" id="copy">Copy link</button><button class="btn sm" id="export">Export markdown</button><button class="btn sm" id="tests-toggle">Include tests</button><span class="nx-grow"></span><span class="nx-faint nx-tiny">snapshot a3f10c2 · 6 min ago</span></div></section>
+    <div class="share-grid">
+      <div><section class="share-card"><div class="share-card-head"><h2>Execution route</h2><span class="nx-faint nx-tiny">shortest path through createOrder</span><span class="nx-grow"></span><span class="nx-pill active">Path</span><button class="btn sm">Play</button></div><div class="share-route" id="share-route">
+        <button class="share-route-item" data-select="checkout"><span class="n">01</span><span><b>checkout</b><small>POST /checkout</small></span><span class="tag success">entry</span></button>
+        <button class="share-route-item" data-select="validateCart"><span class="n">02</span><span><b>validateCart</b><small>line items and stock</small></span><span class="tag">sync</span></button>
+        <button class="share-route-item" data-select="priceCart"><span class="n">03</span><span><b>priceCart</b><small>coupons, tax, totals</small></span><span class="tag">pricing</span></button>
+        <button class="share-route-item active" data-select="createOrder"><span class="n">04</span><span><b>createOrder</b><small>reserve + authorize</small></span><span class="tag warm">risk 78</span></button>
+        <button class="share-route-item" data-select="authorize"><span class="n">05</span><span><b>authorize</b><small>payment gateway</small></span><span class="tag">async</span></button>
+        <button class="share-route-item" data-select="capture"><span class="n">06</span><span><b>capture</b><small>settle charge</small></span><span class="tag">exit</span></button>
+      </div></section>
+      <section class="share-card share-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div></section></div>
+      <aside class="share-side">
+        <div class="share-stat"><h3>Risk score</h3><div class="big">78</div><p>High blast radius · establish the untested call site before editing.</p><div class="bar"><i></i></div></div>
+        <div class="share-stat"><h3>Impact</h3><div class="share-meta"><div class="row"><span>direct callers</span><b>3</b></div><div class="row"><span>transitive affected</span><b>21</b></div><div class="row"><span>call sites</span><b>4</b></div><div class="row"><span>tests</span><b id="tests-value">2 / 5</b></div><div class="row"><span>hotspot</span><b>88</b></div></div></div>
+        <div class="share-stat"><h3>How to read this</h3><p>The route shows execution order; the impact panel shows what a change reaches. They are different questions over one snapshot.</p></div>
+      </aside>
+    </div>
+    <div class="share-footer"><span class="status-dot"></span>Generated from a local snapshot. No code leaves the machine.</div>
+  </div>
+</main>
+</div>
+<a class="nx-badge" href="index.html"><b>N30</b><span class="sep">·</span>adaptive <span class="sep">/</span> P10 + P11</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'path', selected: 'createOrder', maxScale: 1 });
+NX.bindSelect('.share-route-item', graph);
+document.querySelectorAll('.share-route-item').forEach((item, i) => item.addEventListener('click', () => {
+  graph.route(CG.checkoutPath.slice(0, i + 1), CG.checkoutPath[i]);
+}));
+let tests = true;
+document.getElementById('tests-toggle').addEventListener('click', () => {
+  tests = !tests;
+  document.getElementById('tests-value').textContent = tests ? '2 / 5' : '— / 5';
+  NX.toast(tests ? 'Tests included.' : 'Tests excluded.');
+});
+document.getElementById('copy').addEventListener('click', () => { navigator.clipboard?.writeText(location.href); NX.toast('Link copied.'); });
+document.getElementById('export').addEventListener('click', () => NX.toast('Markdown brief exported.'));
+</script>
+</body>
+</html>

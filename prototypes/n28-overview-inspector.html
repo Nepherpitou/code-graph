@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N28 · Overview inspector — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f0f3f7;
+  --line: #dfe4eb;
+  --line-soft: #eef1f5;
+  --fg: #1d2430;
+  --muted: #6b7685;
+  --faint: #9aa4b2;
+  --accent: #3d6df0;
+  --accent-ink: #ffffff;
+  --canvas: #fbfcfe;
+  --edge: #b9c2d1;
+  --danger: #c4473b;
+  --warm: #a36c12;
+  --success: #26764f;
+  --violet: #6d56bd;
+  color-scheme: light;
+}
+
+body { background: var(--bg); overflow: hidden; }
+.nx-body { min-height: 0; }
+.map-side { width: 196px; flex: 0 0 auto; border-right: 1px solid var(--line); background: var(--panel); padding: 15px 10px; overflow: auto; }
+.map-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.map-head { padding: 15px 19px 11px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.map-head h1 { font-size: 22px; letter-spacing: -.04em; line-height: 1; font-weight: 620; }
+.map-head p { color: var(--muted); font-size: 10px; margin-top: 5px; }
+.map-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.map-toolbar .nx-pill { background: var(--panel-2); border-color: transparent; font-size: 9px; }
+.map-toolbar .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.map-stage { flex: 1; min-height: 0; position: relative; background: var(--canvas); }
+.map-stage .graph-shell { height: 100%; }
+.map-stage .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.map-stage .minimap { width: 160px; height: 100px; }
+.map-table { flex: 0 0 auto; height: 210px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.map-table-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line-soft); }
+.map-table-head h2 { font-size: 10px; font-weight: 600; }
+.map-table-scroll { flex: 1; overflow: auto; }
+.map-table .nx-table td { padding: 6px 12px; }
+.map-inspector { width: 318px; flex: 0 0 auto; border-left: 1px solid var(--line); background: var(--panel); padding: 17px 15px; overflow: auto; }
+.map-inspector h2 { font-family: var(--mono); font-size: 15px; margin-top: 6px; line-height: 1.25; }
+.map-inspector .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 4px; word-break: break-all; }
+.map-inspector .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 14px 0; }
+.map-inspector .fact { padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-2); }
+.map-inspector .fact b { display: block; font-family: var(--mono); font-size: 13px; }
+.map-inspector .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.map-inspector .relation { padding: 6px 2px; font-size: 9.5px; }
+.map-inspector .actions { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.map-inspector .actions button { border: 0; background: transparent; color: var(--muted); text-align: left; font-size: 9.5px; padding: 6px; border-radius: 5px; }
+.map-inspector .actions button:hover { background: var(--panel-2); color: var(--fg); }
+@media (max-width: 1050px) { .map-side { width: 170px; } .map-inspector { width: 280px; } }
+@media (max-width: 850px) { .map-side { display: none; } .map-inspector { display: none; } .map-table { height: 180px; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>overview</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <aside class="map-side"><div class="nx-label">Project</div><nav class="nx-nav"><a class="nx-nav-item active" href="#"><span class="ico">◫</span>Overview</a><a class="nx-nav-item" href="#"><span class="ico">⌁</span>Call graph</a><a class="nx-nav-item" href="#"><span class="ico">▤</span>Files</a><a class="nx-nav-item" href="#"><span class="ico">◈</span>Signals</a></nav><div class="nx-label" style="margin-top:17px">Views</div><nav class="nx-nav"><a class="nx-nav-item" href="#"><span class="ico">◌</span>Payment flow</a><a class="nx-nav-item" href="#"><span class="ico">◌</span>Pricing cycle</a></nav><div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols</div></aside>
+  <main class="map-main"><div class="map-head"><div><div class="nx-kicker">Overview + inspector</div><h1>See the map. Keep the detail.</h1><p>The overview is the first surface; selection reveals the inspector and the table.</p></div><div class="nx-row"><button class="btn sm">Share</button><button class="btn sm">Re-analyze</button></div></div><div class="map-toolbar"><button class="nx-pill active">Overview</button><button class="nx-pill">Entry points</button><button class="nx-pill">Risk</button><button class="nx-pill">Changed</button><span class="nx-grow"></span><span class="nx-faint nx-tiny">overview first · zoom and filter · details on demand</span></div><div class="map-stage"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div></div><div class="map-table"><div class="map-table-head"><h2>Functions by risk</h2><span class="nx-faint nx-tiny">sort: hotspot</span><span class="nx-grow"></span><button class="btn sm">Export</button></div><div class="map-table-scroll"><table class="nx-table" id="map-table"><thead><tr><th>Function</th><th class="num">in</th><th class="num">out</th><th class="num">hot</th><th>signal</th></tr></thead><tbody><tr class="active" data-select="checkout"><td class="name">checkout</td><td class="num">1</td><td class="num">5</td><td class="num">94</td><td><span class="tag">entry</span></td></tr><tr data-select="createOrder"><td class="name">createOrder</td><td class="num">3</td><td class="num">4</td><td class="num">88</td><td><span class="tag warm">hotspot</span></td></tr><tr data-select="priceCart"><td class="name">priceCart</td><td class="num">4</td><td class="num">3</td><td class="num">71</td><td><span class="tag warm">cycle</span></td></tr><tr data-select="authorize"><td class="name">authorize</td><td class="num">1</td><td class="num">2</td><td class="num">68</td><td></td></tr><tr data-select="refund"><td class="name">refund</td><td class="num">2</td><td class="num">1</td><td class="num">56</td><td></td></tr></tbody></table></div></div></main>
+  <aside class="map-inspector"><div class="nx-kicker">Inspector</div><h2 data-selected-qname>CheckoutController.checkout</h2><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="nx-row" style="margin-top:8px"><span class="tag">entry</span><span class="tag warm">hotspot</span></div><div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>1.8k</b><span>reach</span></div></div><div class="nx-label">Callees</div><div class="relation"><span class="mono">validateCart</span><span class="meta">2</span></div><div class="relation"><span class="mono">createOrder</span><span class="meta">4</span></div><div class="relation"><span class="mono">priceCart</span><span class="meta">3</span></div><div class="actions"><button>Focus 2-hop →</button><button>Show blast radius ←</button><button>Open file ↗</button></div></aside>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N28</b><span class="sep">·</span>adaptive <span class="sep">/</span> P02 + P13</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'layered');
+NX.bindHover('#map-table tbody tr', graph);
+NX.bindSelect('#map-table tbody tr', graph);
+NX.bindTabs('.map-toolbar .nx-pill', () => NX.toast('Overview filter applied.'));
+</script>
+</body>
+</html>

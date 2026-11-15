@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N09 · Semantic zoom — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0f12;
+  --panel: #11181d;
+  --panel-2: #18232a;
+  --line: #2a3740;
+  --line-soft: #1b262d;
+  --fg: #ecf4f4;
+  --muted: #879a9f;
+  --faint: #56686d;
+  --accent: #64e3c2;
+  --accent-ink: #06261d;
+  --canvas: #0b1216;
+  --edge: #3f535b;
+  --danger: #ff8178;
+  --warm: #f1b36b;
+  --success: #64e3c2;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; }
+.nx-side { width: 226px; }
+.nx-main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.semantic-head { flex: 0 0 auto; padding: 18px 24px 13px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.semantic-head h1 { font-size: 22px; letter-spacing: -.035em; font-weight: 620; margin-top: 5px; }
+.semantic-head p { color: var(--muted); font-size: 10px; margin-top: 4px; }
+.zoom-tabs { display: flex; align-items: center; gap: 8px; padding: 8px 24px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.zoom-tabs .nx-pill { background: var(--panel-2); border-color: transparent; }
+.zoom-tabs .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.zoom-tabs .nx-grow { flex: 1; }
+.zoom-tabs .depth { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+.zoom-canvas { position: relative; flex: 1; min-height: 0; background: var(--canvas); }
+.zoom-stage { position: absolute; inset: 0; display: none; }
+.zoom-stage.active { display: block; }
+.zoom-stage .graph-shell { height: 100%; }
+.zoom-stage .graph-toolbar { top: 11px; left: 11px; background: var(--panel); border-color: var(--line); }
+.zoom-stage .graph-toolbar button { color: var(--muted); }
+.zoom-stage .minimap { width: 150px; height: 94px; right: 11px; bottom: 11px; }
+.zoom-stage .stage-label { position: absolute; left: 12px; bottom: 12px; z-index: 8; display: flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--muted); font-size: 9px; }
+.zoom-stage .stage-label b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.module-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.module-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); text-align: left; }
+.module-item:hover { background: var(--panel-2); color: var(--fg); }
+.module-item.active { border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--fg); }
+.module-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--violet); }
+.module-item .dot.http { background: #6ea8ff; } .module-item .dot.domain { background: #b79cff; } .module-item .dot.payments { background: #f0a35e; } .module-item .dot.infra { background: #58d6a7; }
+.module-item b { display: block; font-size: 10px; font-weight: 550; }
+.module-item small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; margin-top: 2px; }
+.module-item .risk { margin-left: auto; color: var(--warm); font-family: var(--mono); font-size: 8px; }
+.zoom-foot { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 9px 24px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 9px; }
+.zoom-foot .nx-pill { background: var(--panel-2); border-color: transparent; }
+@media (max-width: 900px) { .nx-side { width: 200px; } .semantic-head, .zoom-tabs, .zoom-foot { padding-left: 15px; padding-right: 15px; } }
+@media (max-width: 760px) { .nx-side { display: none; } .zoom-tabs .depth { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>semantic zoom</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <aside class="nx-side">
+    <div class="nx-label">Zoom level</div>
+    <nav class="nx-nav"><a class="nx-nav-item active" href="#"><span class="ico">◫</span>Architecture</a><a class="nx-nav-item" href="#"><span class="ico">▤</span>Modules</a><a class="nx-nav-item" href="#"><span class="ico">⌁</span>Functions</a></nav>
+    <div class="nx-label" style="margin-top:18px">Modules</div>
+    <div class="module-list">
+      <button class="module-item active" data-select="checkout"><span class="dot http"></span><span><b>HTTP / controllers</b><small>388 nodes · 4 files</small></span><span class="risk">2</span></button>
+      <button class="module-item" data-select="createOrder"><span class="dot domain"></span><span><b>Domain</b><small>1,204 nodes · 18 files</small></span><span class="risk">1</span></button>
+      <button class="module-item" data-select="authorize"><span class="dot payments"></span><span><b>Payments</b><small>812 nodes · 9 files</small></span><span class="risk">2</span></button>
+      <button class="module-item" data-select="emitEvent"><span class="dot infra"></span><span><b>Infrastructure</b><small>258 nodes · 6 files</small></span><span class="risk">0</span></button>
+    </div>
+    <div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols · 5,840 edges</div>
+  </aside>
+  <main class="nx-main">
+    <div class="semantic-head"><div class="nx-kicker">Semantic zoom</div><h1>One codebase, three scales.</h1><p>Architecture → modules → functions. The graph keeps its place; the readable label wins at every scale.</p></div>
+    <div class="zoom-tabs"><button class="nx-pill active" data-stage="architecture">Architecture</button><button class="nx-pill" data-stage="modules">Modules</button><button class="nx-pill" data-stage="symbols">Functions</button><span class="nx-grow"></span><span class="depth">40 files · 2,462 symbols · 5,840 edges</span></div>
+    <div class="zoom-canvas">
+      <div class="zoom-stage active" id="stage-architecture"><div class="graph-shell" id="graph-architecture"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="stage-label">scale <b>architecture</b> · 4 modules</div></div></div>
+      <div class="zoom-stage" id="stage-modules"><div class="graph-shell" id="graph-modules"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="stage-label">scale <b>modules</b> · 20 symbols</div></div></div>
+      <div class="zoom-stage" id="stage-symbols"><div class="graph-shell" id="graph-symbols"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="stage-label">scale <b>functions</b> · 20 symbols</div></div></div>
+    </div>
+    <div class="zoom-foot"><span class="nx-pill active">Overview first</span><span class="nx-pill">Filter</span><span class="nx-pill">Details on demand</span><span class="nx-grow"></span><span>← → to zoom</span></div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N09</b><span class="sep">·</span>graph <span class="sep">/</span> P03 + P02</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const stages = {
+  architecture: CG.mount(document.getElementById('graph-architecture'), { layout: 'modules', clusters: true, selected: 'checkout', maxScale: 1 }),
+  modules: CG.mount(document.getElementById('graph-modules'), { layout: 'layered', selected: 'createOrder', maxScale: 1 }),
+  symbols: CG.mount(document.getElementById('graph-symbols'), { layout: 'radial', selected: 'authorize', maxScale: 1 }),
+};
+const tabs = [...document.querySelectorAll('[data-stage]')];
+function show(name) {
+  tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.stage === name));
+  document.querySelectorAll('.zoom-stage').forEach((stage) => stage.classList.toggle('active', stage.id === `stage-${name}`));
+  requestAnimationFrame(() => stages[name].fit());
+}
+tabs.forEach((tab) => tab.addEventListener('click', () => show(tab.dataset.stage)));
+document.querySelectorAll('.module-item').forEach((item) => item.addEventListener('click', () => {
+  document.querySelectorAll('.module-item').forEach((node) => node.classList.remove('active'));
+  item.classList.add('active');
+  stages.architecture.select(item.dataset.select);
+}));
+document.addEventListener('keydown', (event) => {
+  const names = tabs.map((tab) => tab.dataset.stage);
+  const current = names.findIndex((name) => tabs.find((tab) => tab.dataset.stage === name).classList.contains('active'));
+  if (event.key === 'ArrowRight') show(names[Math.min(names.length - 1, current + 1)]);
+  if (event.key === 'ArrowLeft') show(names[Math.max(0, current - 1)]);
+});
+</script>
+</body>
+</html>

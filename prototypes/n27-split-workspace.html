@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N27 · Split workspace — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #090d12;
+  --panel: #111820;
+  --panel-2: #18222c;
+  --line: #293745;
+  --line-soft: #1b2832;
+  --fg: #eef4f9;
+  --muted: #8b9aa9;
+  --faint: #566777;
+  --accent: #84e1c1;
+  --accent-ink: #08251c;
+  --canvas: #0b1117;
+  --edge: #3c4f5c;
+  --danger: #ff8178;
+  --warm: #f2b568;
+  --success: #84e1c1;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; }
+.workspace { flex: 1; min-width: 0; display: flex; min-height: 0; }
+.pane-table { width: 45%; min-width: 280px; max-width: 62%; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); }
+.pane-table-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.pane-table-head h1 { font-size: 11px; font-weight: 600; }
+.pane-table-scroll { flex: 1; overflow: auto; }
+.pane-table .nx-table td { padding: 7px 10px; }
+.pane-table .nx-table .name { font-size: 10px; }
+.pane-table .nx-table .sub { font-size: 8px; }
+.pane-table-foot { padding: 8px 12px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 8.5px; }
+.split-handle { width: 7px; flex: 0 0 auto; cursor: col-resize; background: var(--bg); border-right: 1px solid var(--line); position: relative; }
+.split-handle::after { content: ""; position: absolute; top: 50%; left: 2px; width: 3px; height: 32px; transform: translateY(-50%); border-radius: 99px; background: var(--line); }
+.split-handle:hover::after, .split-handle.dragging::after { background: var(--accent); }
+.pane-graph { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas); }
+.pane-graph-head { display: flex; align-items: center; gap: 7px; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); color: var(--muted); font-size: 9px; }
+.pane-graph .graph-shell { flex: 1; min-height: 0; }
+.pane-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.pane-graph .minimap { width: 135px; height: 86px; }
+.pane-graph-foot { padding: 9px 12px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 9px; display: flex; align-items: center; gap: 8px; }
+.pane-graph-foot b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.workspace-top { display: flex; align-items: center; gap: 7px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.workspace-top .nx-search { height: 27px; width: 250px; background: var(--panel-2); border-color: transparent; }
+.workspace-top .nx-pill { min-height: 22px; font-size: 9px; background: var(--panel-2); border-color: transparent; }
+.workspace-top .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.workspace-top .nx-grow { flex: 1; }
+@media (max-width: 900px) { .pane-table { width: 52%; } .workspace-top .nx-search { width: 180px; } }
+@media (max-width: 700px) { .pane-table { display: none; } .split-handle { display: none; } .pane-graph { display: flex; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>workspace</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Export</button><button class="btn sm">Share</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <main class="nx-main" style="display:flex;flex-direction:column">
+    <div class="workspace-top"><div class="nx-search">⌕ <input id="search" placeholder="Filter functions…"></div><button class="nx-pill active">Table + graph</button><button class="nx-pill">Graph only</button><button class="nx-pill">Table only</button><span class="nx-grow"></span><span class="nx-faint nx-tiny">drag divider</span></div>
+    <div class="workspace" id="workspace">
+      <section class="pane-table"><div class="pane-table-head"><h1>Functions</h1><span class="nx-faint nx-tiny">sort: hotspot</span><span class="nx-grow"></span><button class="btn sm">Columns</button></div><div class="pane-table-scroll"><table class="nx-table" id="split-table"><thead><tr><th>Function</th><th class="num">in</th><th class="num">out</th><th class="num">reach</th><th>hot</th></tr></thead><tbody>
+        <tr class="active" data-select="checkout"><td><span class="name">checkout</span><span class="sub"> · CheckoutController.ts</span></td><td class="num">1</td><td class="num">5</td><td class="num">1.8k</td><td>94</td></tr>
+        <tr data-select="createOrder"><td><span class="name">createOrder</span><span class="sub"> · OrderService.ts</span></td><td class="num">3</td><td class="num">4</td><td class="num">831</td><td>88</td></tr>
+        <tr data-select="priceCart"><td><span class="name">priceCart</span><span class="sub"> · PricingService.ts</span></td><td class="num">4</td><td class="num">3</td><td class="num">488</td><td>71</td></tr>
+        <tr data-select="authorize"><td><span class="name">authorize</span><span class="sub"> · PaymentGateway.ts</span></td><td class="num">1</td><td class="num">2</td><td class="num">312</td><td>68</td></tr>
+        <tr data-select="webhook"><td><span class="name">handle</span><span class="sub"> · PaymentWebhook.ts</span></td><td class="num">0</td><td class="num">2</td><td class="num">922</td><td>61</td></tr>
+        <tr data-select="refund"><td><span class="name">refund</span><span class="sub"> · RefundService.ts</span></td><td class="num">2</td><td class="num">1</td><td class="num">611</td><td>56</td></tr>
+        <tr data-select="validateCart"><td><span class="name">validateCart</span><span class="sub"> · CheckoutController.ts</span></td><td class="num">3</td><td class="num">2</td><td class="num">220</td><td>38</td></tr>
+        <tr data-select="legacyRefund"><td><span class="name">legacyRefund</span><span class="sub"> · RefundService.ts</span></td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td>2</td></tr>
+      </tbody></table></div><div class="pane-table-foot">Hover to brush · click to keep selection.</div></section>
+      <div class="split-handle" id="split-handle"></div>
+      <section class="pane-graph"><div class="pane-graph-head"><span class="nx-tint">Selected context</span><span class="nx-faint">1-hop</span><span class="nx-grow"></span><button class="nx-pill active">1-hop</button><button class="nx-pill">2-hop</button></div><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div><div class="minimap" id="minimap"></div></div><div class="pane-graph-foot"><span class="status-dot"></span><b data-selected-qname>CheckoutController.checkout</b><span>· fan-in <b data-fanin>1</b></span><span>· fan-out <b data-fanout>5</b></span></div></section>
+    </div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N27</b><span class="sep">·</span>adaptive <span class="sep">/</span> P03 + P13</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'layered');
+NX.bindHover('#split-table tbody tr', graph);
+NX.bindSelect('#split-table tbody tr', graph);
+NX.bindFilter(document.getElementById('search'), '#split-table tbody tr', null, 0);
+const handle = document.getElementById('split-handle');
+const pane = document.querySelector('.pane-table');
+let dragging = false;
+handle.addEventListener('pointerdown', (event) => { dragging = true; handle.classList.add('dragging'); event.preventDefault(); });
+document.addEventListener('pointermove', (event) => {
+  if (!dragging) return;
+  const workspace = document.getElementById('workspace');
+  const rect = workspace.getBoundingClientRect();
+  const width = Math.max(280, Math.min(rect.width * .62, event.clientX - rect.left));
+  pane.style.width = `${width}px`;
+  requestAnimationFrame(() => graph.fit());
+});
+document.addEventListener('pointerup', () => { dragging = false; handle.classList.remove('dragging'); });
+</script>
+</body>
+</html>

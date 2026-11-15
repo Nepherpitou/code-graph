@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N29 · Command review — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #090d0d;
+  --panel: #111717;
+  --panel-2: #182121;
+  --line: #293737;
+  --line-soft: #1b2727;
+  --fg: #eef6f2;
+  --muted: #8b9f98;
+  --faint: #566b64;
+  --accent: #9ef0c0;
+  --accent-ink: #06251a;
+  --canvas: #0c1313;
+  --edge: #40544f;
+  --danger: #ff857c;
+  --warm: #f1b36b;
+  --success: #9ef0c0;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; background: radial-gradient(700px 420px at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 65%), var(--bg); }
+.nx-body { min-height: 0; flex-direction: column; }
+.command-review-top { display: flex; align-items: center; gap: 9px; padding: 11px 17px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.command-review-top .nx-search { flex: 1; max-width: 620px; height: 38px; background: var(--panel-2); border-color: var(--line); }
+.command-review-top .nx-search input { font-size: 12px; }
+.command-review-top .hint { color: var(--faint); font-size: 9px; white-space: nowrap; }
+.command-review-body { flex: 1; min-height: 0; display: flex; }
+.review-queue { width: 430px; flex: 0 0 auto; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.review-queue-head { padding: 13px 15px 9px; border-bottom: 1px solid var(--line); }
+.review-queue-head h1 { font-size: 17px; letter-spacing: -.03em; margin-top: 4px; }
+.review-queue-head p { color: var(--muted); font-size: 9.5px; margin-top: 3px; }
+.review-queue-list { flex: 1; overflow: auto; padding: 5px 8px 20px; }
+.review-ticket { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 8px; width: 100%; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; color: var(--muted); }
+.review-ticket:hover { background: var(--panel-2); color: var(--fg); }
+.review-ticket.active { border-color: color-mix(in srgb, var(--accent) 32%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--fg); }
+.review-ticket .kbd { height: 17px; min-width: 17px; font-size: 8px; }
+.review-ticket b { display: block; color: var(--fg); font-size: 10.5px; font-weight: 550; line-height: 1.35; }
+.review-ticket small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; }
+.review-ticket .age { color: var(--faint); font-size: 8.5px; }
+.review-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.review-preview-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 9.5px; }
+.review-preview-head .nx-pill { background: var(--panel-2); border-color: transparent; }
+.review-preview .graph-shell { flex: 1; min-height: 0; }
+.review-preview .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.review-preview .minimap { width: 145px; height: 92px; }
+.review-preview-foot { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 9px; }
+.review-preview-foot b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.shortcut-overlay { position: fixed; inset: 0; z-index: 80; display: none; place-items: center; background: rgba(4,7,7,.65); backdrop-filter: blur(4px); }
+.shortcut-overlay.open { display: grid; }
+.shortcut-card { width: min(520px, calc(100% - 30px)); padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+.shortcut-card h2 { font-size: 16px; margin-bottom: 10px; }
+.shortcut-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 10.5px; }
+.shortcut-row kbd { color: var(--fg); }
+@media (max-width: 900px) { .review-queue { width: 360px; } }
+@media (max-width: 700px) {
+  .review-queue { display: none; }
+  .command-review-top { flex-wrap: wrap; }
+  .command-review-top .nx-search { flex-basis: 100%; max-width: none; }
+  .command-review-top .hint { display: none; }
+  .command-review-body { flex-direction: column; }
+  .review-preview { flex: 1; min-height: 0; }
+  .review-preview .graph-shell { min-height: 320px; }
+  .review-preview-foot { flex-wrap: wrap; }
+}
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme/checkout</span><span class="faint">/</span><b>review</b></div>
+  <span class="nx-grow"></span>
+  <span class="nx-faint nx-tiny">keyboard mode</span><button class="btn sm">Re-analyze</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="command-review-top"><div class="nx-search">⌕ <input id="review-search" autofocus placeholder="Filter signals…"><span class="kbd">↑</span><span class="kbd">↓</span><span class="kbd">↵</span></div><span class="hint">keyboard first · esc to clear</span><span class="nx-grow"></span><button class="btn sm" id="help">?</button><span class="nx-faint nx-tiny">12 signals · 9 unreviewed</span></div>
+  <div class="command-review-body">
+    <section class="review-queue"><div class="review-queue-head"><div class="nx-kicker">Command review</div><h1>Review without leaving the keys.</h1><p>Filter, move, open. The graph follows focus.</p></div><div class="review-queue-list" id="review-queue">
+      <button class="review-ticket active" data-select="priceCart"><span class="kbd">1</span><span><b>Pricing cycle reaches capture</b><small>priceCart → applyCoupon → taxFor</small></span><span class="age">2h</span></button>
+      <button class="review-ticket" data-select="createOrder"><span class="kbd">2</span><span><b>createOrder is a new hotspot</b><small>OrderService.createOrder · 3 callers</small></span><span class="age">2h</span></button>
+      <button class="review-ticket" data-select="authorize"><span class="kbd">3</span><span><b>authorize discards results</b><small>PaymentGateway.authorize · async</small></span><span class="age">1d</span></button>
+      <button class="review-ticket" data-select="refund"><span class="kbd">4</span><span><b>Refund path has no retry guard</b><small>handlePaymentError → refund</small></span><span class="age">1d</span></button>
+      <button class="review-ticket" data-select="legacyRefund"><span class="kbd">5</span><span><b>legacyRefund is never called</b><small>RefundService.legacyRefund · 199 days</small></span><span class="age">199d</span></button>
+    </div></section>
+    <main class="review-preview"><div class="review-preview-head"><span class="nx-pill active">Preview</span><span data-selected-qname>PricingService.priceCart</span><span class="nx-grow"></span><button class="btn sm">Open full graph</button><button class="btn sm">Mark reviewed</button></div><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div><div class="review-preview-foot"><span class="status-dot"></span><b>Signal preview</b><span>·</span><span>in <b data-fanin>4</b></span><span>out <b data-fanout>3</b></span><span>hot <b data-hotspot>71</b></span><span class="nx-grow"></span><span>enter opens · esc clears</span></div></main>
+  </div>
+  <div class="shortcut-overlay" id="shortcuts"><div class="shortcut-card"><h2>Keyboard review</h2><div class="shortcut-row"><span>Move selection</span><kbd>↑ ↓</kbd></div><div class="shortcut-row"><span>Open selected</span><kbd>↵</kbd></div><div class="shortcut-row"><span>Focus filter</span><kbd>/</kbd></div><div class="shortcut-row"><span>Close</span><kbd>esc</kbd></div></div></div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N29</b><span class="sep">·</span>adaptive <span class="sep">/</span> P07 + P06</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'priceCart', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+const items = [...document.querySelectorAll('.review-ticket')];
+let current = 0;
+function go(index) {
+  current = Math.max(0, Math.min(items.length - 1, index));
+  items.forEach((item, i) => item.classList.toggle('active', i === current));
+  graph.select(items[current].dataset.select);
+}
+items.forEach((item, i) => item.addEventListener('click', () => go(i)));
+document.getElementById('review-search').addEventListener('input', (event) => {
+  const q = event.target.value.toLowerCase();
+  items.forEach((item) => { item.style.display = item.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+});
+document.addEventListener('keydown', (event) => {
+  if (event.target.tagName === 'INPUT' && event.key !== 'Escape') return;
+  if (event.key === 'ArrowDown') { event.preventDefault(); go(current + 1); }
+  if (event.key === 'ArrowUp') { event.preventDefault(); go(current - 1); }
+  if (event.key === 'Enter') { event.preventDefault(); go(current); }
+  if (event.key === '/') { event.preventDefault(); document.getElementById('review-search').focus(); }
+  if (event.key === 'Escape') { document.getElementById('review-search').value = ''; items.forEach((item) => { item.style.display = ''; }); }
+  if (event.key === '?') { document.getElementById('shortcuts').classList.add('open'); }
+});
+document.getElementById('help').addEventListener('click', () => document.getElementById('shortcuts').classList.toggle('open'));
+</script>
+</body>
+</html>

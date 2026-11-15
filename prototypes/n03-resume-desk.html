@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N03 · Resume desk — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f4f1ec;
+  --panel: #fffdfa;
+  --panel-2: #ebe7e0;
+  --line: #ded8ce;
+  --line-soft: #efebe4;
+  --fg: #211f1c;
+  --muted: #6f6961;
+  --faint: #9c958b;
+  --accent: #2d5f73;
+  --accent-ink: #ffffff;
+  --canvas: #fbfaf7;
+  --edge: #bfb7aa;
+  --danger: #b94a3d;
+  --warm: #a56b1c;
+  --success: #24704d;
+  --violet: #6e59ab;
+  color-scheme: light;
+}
+
+body { background: var(--bg); overflow: hidden; }
+.nx-side { width: 232px; padding: 15px 10px; }
+.nx-main { display: flex; min-height: 0; overflow: hidden; }
+.resume-center { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: auto; padding: 23px 26px 44px; }
+.resume-aside { width: 252px; flex: 0 0 auto; border-left: 1px solid var(--line); background: var(--panel); padding: 17px 15px; overflow: auto; }
+.resume-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.resume-head h1 { font-size: 27px; letter-spacing: -.04em; line-height: 1.08; font-weight: 650; }
+.resume-head p { color: var(--muted); font-size: 11px; margin-top: 6px; }
+.resume-tabs { display: flex; gap: 6px; margin-top: 16px; }
+.session-list { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+.session { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 9px; align-items: center; width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; }
+.session:hover { background: var(--panel-2); color: var(--fg); }
+.session.active { border-color: color-mix(in srgb, var(--accent) 26%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--fg); }
+.session .thumb { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); position: relative; overflow: hidden; }
+.session .thumb i { position: absolute; width: 4px; height: 4px; border-radius: 1px; background: var(--faint); }
+.session .thumb i:nth-child(1) { left: 4px; top: 8px; } .session .thumb i:nth-child(2) { left: 12px; top: 15px; background: var(--accent); } .session .thumb i:nth-child(3) { left: 21px; top: 9px; }
+.session b { display: block; color: var(--fg); font-size: 10.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; margin-top: 2px; }
+.session .when { margin-left: auto; color: var(--faint); font-size: 8.5px; white-space: nowrap; }
+.session .meta { display: flex; align-items: center; gap: 4px; }
+.resume-card { margin-top: 15px; overflow: hidden; }
+.resume-card .graph-shell { height: 340px; background: var(--canvas); }
+.resume-card .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.resume-card .graph-toolbar button { color: var(--muted); }
+.resume-card .graph-foot { display: flex; align-items: center; gap: 9px; padding: 10px 13px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 9px; }
+.resume-card .graph-foot b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.note-list { display: flex; flex-direction: column; gap: 9px; margin-top: 9px; }
+.note-item { display: flex; gap: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.note-item .n { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); color: var(--faint); font-family: var(--mono); font-size: 8px; flex: 0 0 auto; }
+.note-item.done .n { background: var(--accent); color: var(--accent-ink); }
+.resume-aside h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); }
+.resume-aside .next { margin-top: 10px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel-2); font-size: 10px; line-height: 1.5; color: var(--muted); }
+.resume-aside .next b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+@media (max-width: 1050px) { .resume-aside { width: 220px; } .session .when { display: none; } }
+@media (max-width: 850px) { .resume-aside { display: none; } .nx-side { width: 190px; } }
+@media (max-width: 760px) { .nx-side { display: none; } .resume-center { padding: 18px 14px 30px; } .resume-head { flex-direction: column; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme</span><span class="faint">/</span><b>checkout-service</b><span class="faint">/</span><span class="muted">resume</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <aside class="nx-side">
+    <div class="nx-label">Resume</div>
+    <div class="nx-search" style="margin-top:6px;height:30px"><input id="session-search" placeholder="Filter sessions…"></div>
+    <div class="session-list" id="sessions">
+      <button class="session active" data-select="createOrder" data-title="Payment flow" data-file="src/domain/OrderService.ts"><span class="thumb"><i></i><i></i><i></i></span><span><b>Payment flow</b><small>createOrder · 24 nodes</small></span><span class="when">2h</span></button>
+      <button class="session" data-select="webhook" data-title="Webhook fan-out" data-file="src/payments/PaymentWebhook.ts"><span class="thumb"><i></i><i></i><i></i></span><span><b>Webhook fan-out</b><small>handle · 18 nodes</small></span><span class="when">1d</span></button>
+      <button class="session" data-select="priceCart" data-title="Pricing cycle" data-file="src/domain/PricingService.ts"><span class="thumb"><i></i><i></i><i></i></span><span><b>Pricing cycle</b><small>priceCart · 6 nodes</small></span><span class="when">1d</span></button>
+      <button class="session" data-select="checkout" data-title="Checkout entry" data-file="src/http/CheckoutController.ts"><span class="thumb"><i></i><i></i><i></i></span><span><b>Checkout entry</b><small>checkout · 12 nodes</small></span><span class="when">3d</span></button>
+    </div>
+    <div class="nx-label" style="margin-top:17px">Saved</div>
+    <nav class="nx-nav"><a class="nx-nav-item" href="#"><span class="ico">◌</span>All spaces</a><a class="nx-nav-item" href="#"><span class="ico">↳</span>Entry points</a></nav>
+    <div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols · 5,840 edges</div>
+  </aside>
+  <main class="nx-main">
+    <div class="resume-center">
+      <div class="resume-head"><div><div class="nx-kicker">Resume desk</div><h1 data-session-title>Payment flow</h1><p><span class="nx-mono" data-selected-file>src/domain/OrderService.ts</span> · last opened 2h ago</p></div><div class="nx-row"><button class="btn sm" id="new">New session</button><button class="btn sm">Share</button></div></div>
+      <div class="resume-tabs"><button class="nx-pill active">Graph</button><button class="nx-pill">Notes</button><button class="nx-pill">Changes</button><span class="nx-grow"></span><span class="nx-pill">Layered</span></div>
+      <section class="nx-card resume-card">
+        <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div>
+        <div class="graph-foot"><span class="status-dot"></span><b data-selected-qname>OrderService.createOrder</b><span>·</span><span>fan-in <b data-fanin>3</b></span><span>·</span><span>fan-out <b data-fanout>4</b></span><span class="nx-grow"></span><span>2-hop context</span></div>
+      </section>
+      <section class="nx-card" style="margin-top:12px"><div class="nx-card-head"><h2>Then, maybe</h2><span class="nx-faint nx-tiny">from your history</span></div><div class="nx-card-body"><div class="nx-grid-3">
+        <button class="nx-list-item" data-select="authorize"><span><b>authorize</b><small>upstream of createOrder</small></span><span class="meta">↗</span></button>
+        <button class="nx-list-item" data-select="refund"><span><b>refund</b><small>failure path</small></span><span class="meta">↗</span></button>
+        <button class="nx-list-item" data-select="priceCart"><span><b>priceCart</b><small>cycle alert</small></span><span class="meta">↗</span></button>
+      </div></div></section>
+    </div>
+    <aside class="resume-aside">
+      <h2>Session notes</h2>
+      <div class="note-list">
+        <div class="note-item done"><span class="n">✓</span><span>Read the entry point and two direct callers.</span></div>
+        <div class="note-item done"><span class="n">✓</span><span>Found the inventory → payment ordering.</span></div>
+        <div class="note-item"><span class="n">3</span><span>Check the failure path around <b>authorize</b> before editing.</span></div>
+        <div class="note-item"><span class="n">4</span><span>Run blast radius for <b>createOrder</b>.</span></div>
+      </div>
+      <div class="next"><div class="nx-label">Next action</div><div style="margin-top:5px">Inspect <b>handlePaymentError</b> and its refund path.</div><button class="btn sm" style="width:100%;margin-top:8px" data-select="handlePaymentError">Open node →</button></div>
+      <div class="nx-hairline" style="margin:16px 0"></div>
+      <div class="nx-tiny nx-muted">The session keeps the node, layout, filters, and notes. This is durable state, not a browser-history guess.</div>
+    </aside>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N03</b><span class="sep">·</span>start <span class="sep">/</span> P07 + P02 + P09</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'createOrder', maxScale: 1 });
+NX.bindSelect('.session', graph);
+document.querySelectorAll('.session').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelector('[data-session-title]').textContent = button.dataset.title;
+  });
+});
+NX.bindFilter(document.getElementById('session-search'), '.session', null, 0);
+NX.bindSelect('.nx-list-item[data-select], .next [data-select]', graph);
+document.getElementById('new').addEventListener('click', () => NX.toast('New session starts from the current graph.'));
+</script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N07 · Route theater — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0d0f14;
+  --panel: #141820;
+  --panel-2: #1c222c;
+  --line: #2c3542;
+  --line-soft: #1d252f;
+  --fg: #f3efe8;
+  --muted: #98918a;
+  --faint: #5f5a55;
+  --accent: #f1b36b;
+  --accent-ink: #2b1a06;
+  --canvas: #10141a;
+  --edge: #4b5260;
+  --danger: #ff8078;
+  --warm: #f1b36b;
+  --success: #75d29b;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; }
+.route-story { width: 330px; flex: 0 0 auto; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); min-height: 0; }
+.route-story-head { padding: 18px 18px 13px; border-bottom: 1px solid var(--line-soft); }
+.route-story-head .nx-kicker { color: var(--accent); }
+.route-story-head h1 { margin-top: 7px; font-size: 20px; line-height: 1.15; letter-spacing: -.03em; font-weight: 600; }
+.route-story-head p { color: var(--muted); font-size: 10px; line-height: 1.5; margin-top: 6px; }
+.route-controls { display: flex; align-items: center; gap: 6px; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); }
+.route-controls .play { width: 29px; height: 29px; border-radius: 50%; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); display: grid; place-items: center; font-size: 10px; }
+.route-controls .count { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 9px; }
+.route-steps { flex: 1; overflow: auto; padding: 7px 10px 24px; }
+.route-now { padding: 13px 17px; border-top: 1px solid var(--line-soft); background: var(--panel-2); }
+.route-now h2 { font-family: var(--mono); font-size: 12px; margin-top: 5px; }
+.route-now .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; }
+.route-now p { color: var(--muted); font-size: 9.5px; line-height: 1.5; margin-top: 5px; }
+.route-stage { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; background: var(--canvas); }
+.route-stage-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); background: var(--panel); color: var(--muted); font-size: 9.5px; }
+.route-stage-head .nx-pill { background: var(--panel-2); border-color: transparent; }
+.route-stage-head .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.route-stage .graph-shell { flex: 1; min-height: 0; }
+.route-stage .graph-toolbar { top: 11px; left: 11px; background: color-mix(in srgb, var(--panel) 90%, transparent); border-color: var(--line); }
+.route-stage .minimap { width: 150px; height: 94px; }
+.route-legend { position: absolute; left: 13px; bottom: 13px; z-index: 8; display: flex; align-items: center; gap: 12px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 90%, transparent); color: var(--faint); font-size: 9px; }
+.route-legend .route-line { width: 18px; height: 0; border-top: 2px solid var(--accent); display: inline-block; margin-right: 4px; }
+.route-endpoints { position: absolute; top: 13px; right: 13px; z-index: 8; display: flex; gap: 6px; }
+.route-endpoint { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--muted); font-size: 9px; }
+.route-endpoint b { color: var(--accent); font-family: var(--mono); font-weight: 500; }
+@media (max-width: 1000px) { .route-story { width: 290px; } .route-endpoints { display: none; } }
+@media (max-width: 760px) { .route-story { width: 100%; max-height: 46vh; } .nx-body { flex-direction: column; overflow: auto; } .route-stage { min-height: 54vh; } .route-stage-head .nx-pill:nth-of-type(n+3) { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>route theater</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Open full graph</button><button class="btn sm">Share path</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <section class="route-story">
+    <div class="route-story-head"><div class="nx-kicker">Route theater · checkout request</div><h1>From HTTP to capture,<br>one call at a time.</h1><p>A guided reading of the critical path. The graph is the stage; the route is the script.</p></div>
+    <div class="route-controls"><button class="play" id="play">▶</button><button class="btn sm" id="prev">prev</button><button class="btn sm" id="next">next</button><span class="count" id="counter">04 / 06</span></div>
+    <div class="route-steps" id="steps">
+      <button class="nx-step done" data-id="checkout"><span class="n">1</span><span><b>POST /checkout</b><small>CheckoutController.checkout · entry</small></span></button>
+      <button class="nx-step done" data-id="validateCart"><span class="n">2</span><span><b>validateCart</b><small>checks line items and stock</small></span></button>
+      <button class="nx-step done" data-id="priceCart"><span class="n">3</span><span><b>priceCart</b><small>coupons, tax, totals · 4 callers</small></span></button>
+      <button class="nx-step active" data-id="createOrder"><span class="n">4</span><span><b>createOrder</b><small>reserve inventory, authorize payment</small></span></button>
+      <button class="nx-step" data-id="authorize"><span class="n">5</span><span><b>authorize</b><small>PaymentGateway.authorize · async</small></span></button>
+      <button class="nx-step" data-id="capture"><span class="n">6</span><span><b>capture</b><small>settles the authorized charge</small></span></button>
+    </div>
+    <div class="route-now"><div class="nx-label">Now showing</div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div><p>Reserves inventory before authorizing. If authorization fails, inventory is released.</p></div>
+  </section>
+  <main class="route-stage">
+    <div class="route-stage-head"><span class="nx-pill active">Path only</span><span class="nx-pill">Include callers</span><span class="nx-pill">Data edges</span><span class="nx-grow"></span><span>step <b id="step-label" style="color:var(--fg)">4</b> of 6</span></div>
+    <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div><div class="minimap" id="minimap"></div><div class="route-endpoints"><span class="route-endpoint">entry <b>checkout</b></span><span class="route-endpoint">exit <b>capture</b></span></div><div class="route-legend"><span><i class="route-line"></i>execution route</span><span>step <b id="legend-step" style="color:var(--fg)">4</b></span></div></div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N07</b><span class="sep">·</span>graph <span class="sep">/</span> P09 + P10</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'path', selected: 'createOrder', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'path');
+const order = CG.checkoutPath;
+let current = 3;
+let timer = null;
+function go(index) {
+  current = Math.max(0, Math.min(order.length - 1, index));
+  document.querySelectorAll('.route-steps .nx-step').forEach((step, i) => {
+    step.classList.toggle('active', i === current);
+    step.classList.toggle('done', i < current);
+  });
+  graph.route(order.slice(0, current + 1), order[current]);
+  document.getElementById('counter').textContent = `${String(current + 1).padStart(2, '0')} / 06`;
+  document.getElementById('step-label').textContent = String(current + 1);
+  document.getElementById('legend-step').textContent = String(current + 1);
+}
+function stop() { clearInterval(timer); timer = null; document.getElementById('play').textContent = '▶'; }
+document.querySelectorAll('.route-steps .nx-step').forEach((step, i) => step.addEventListener('click', () => { stop(); go(i); }));
+document.getElementById('play').addEventListener('click', () => {
+  if (timer) { stop(); return; }
+  if (current >= order.length - 1) go(0);
+  timer = setInterval(() => { if (current >= order.length - 1) { stop(); return; } go(current + 1); }, 1200);
+  document.getElementById('play').textContent = '❚❚';
+});
+document.getElementById('prev').addEventListener('click', () => { stop(); go(current - 1); });
+document.getElementById('next').addEventListener('click', () => { stop(); go(current + 1); });
+document.addEventListener('keydown', (event) => { if (event.key === 'ArrowRight') { stop(); go(current + 1); } if (event.key === 'ArrowLeft') { stop(); go(current - 1); } });
+go(3);
+</script>
+</body>
+</html>

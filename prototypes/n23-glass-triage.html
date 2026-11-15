@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N23 · Glass triage — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0b0716;
+  --panel: #171226;
+  --panel-2: #211a34;
+  --line: #3b3157;
+  --line-soft: #2a2341;
+  --fg: #f6f1ff;
+  --muted: #b2a5cb;
+  --faint: #776b92;
+  --accent: #ffc878;
+  --accent-ink: #2b1a04;
+  --canvas: #0e0a1d;
+  --edge: #5a4d78;
+  --danger: #ff8a9b;
+  --warm: #ffc878;
+  --success: #75e0b0;
+  --violet: #c4b5fd;
+}
+
+body { overflow: hidden; background: radial-gradient(700px 500px at 16% 18%, rgba(118,77,255,.38), transparent 65%), radial-gradient(800px 600px at 82% 6%, rgba(255,101,180,.25), transparent 60%), radial-gradient(600px 500px at 70% 92%, rgba(56,189,248,.18), transparent 65%), #0b0716; }
+.nx-top { border-bottom: 1px solid rgba(255,255,255,.09); background: rgba(20,15,35,.45); backdrop-filter: blur(22px); }
+.nx-body { min-height: 0; padding: 12px 14px 14px; gap: 10px; display: flex; background: transparent; }
+.glass { border: 1px solid rgba(255,255,255,.12); border-radius: 18px; background: rgba(20,15,35,.55); backdrop-filter: blur(26px) saturate(1.25); box-shadow: 0 24px 70px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.07); }
+.glass-nav { width: 190px; flex: 0 0 auto; padding: 14px 10px; overflow: auto; }
+.glass-queue { width: 360px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.queue-head { padding: 15px 15px 10px; border-bottom: 1px solid rgba(255,255,255,.09); }
+.queue-head h1 { font-size: 18px; letter-spacing: -.03em; margin-top: 5px; }
+.queue-head p { color: var(--muted); font-size: 9.5px; margin-top: 4px; line-height: 1.4; }
+.queue-tools { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.queue-tools .nx-pill { min-height: 22px; font-size: 9px; background: rgba(255,255,255,.05); border-color: transparent; }
+.queue-tools .nx-pill.active { color: var(--accent); background: rgba(255,200,120,.12); }
+.queue-list { overflow: auto; flex: 1; padding: 6px 8px 20px; }
+.ticket { display: grid; grid-template-columns: 4px minmax(0,1fr) auto; gap: 9px; width: 100%; padding: 9px 8px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; color: var(--fg); }
+.ticket:hover { background: rgba(255,255,255,.05); }
+.ticket.active { background: rgba(255,255,255,.08); border-color: rgba(255,200,120,.28); }
+.ticket .severity { border-radius: 99px; background: var(--warm); height: 31px; margin-top: 2px; }
+.ticket.high .severity { background: var(--danger); }
+.ticket.info .severity { background: var(--violet); }
+.ticket b { display: block; font-size: 10.5px; font-weight: 550; line-height: 1.35; }
+.ticket small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; line-height: 1.4; }
+.ticket .age { color: var(--faint); font-size: 8.5px; }
+.glass-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.glass-preview .graph-shell { flex: 1; min-height: 0; background: rgba(12,8,24,.45); }
+.glass-preview .graph-toolbar { background: rgba(20,15,35,.62); border-color: rgba(255,255,255,.12); backdrop-filter: blur(18px); }
+.glass-preview .graph-toolbar button { color: var(--muted); }
+.glass-preview .minimap { background: rgba(20,15,35,.6); border-color: rgba(255,255,255,.12); }
+.glass-detail { flex: 0 0 auto; display: flex; gap: 12px; padding: 12px 15px; border-top: 1px solid rgba(255,255,255,.09); }
+.glass-detail .facts { display: flex; gap: 15px; color: var(--faint); font-size: 8.5px; }
+.glass-detail .facts b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.glass-detail .why { color: var(--muted); font-size: 9.5px; line-height: 1.45; max-width: 380px; }
+.glass-detail .why b { color: var(--accent); font-family: var(--mono); font-weight: 500; }
+@media (max-width: 1050px) { .glass-nav { width: 170px; } .glass-queue { width: 320px; } }
+@media (max-width: 850px) { .glass-nav { display: none; } .glass-detail .why { display: none; } }
+@media (max-width: 700px) { .nx-body { display: block; overflow: auto; } .glass-queue { width: 100%; max-height: 45vh; } .glass-preview { min-height: 48vh; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme/checkout</span><span class="faint">/</span><b>signals</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Re-analyze</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <nav class="glass-nav glass"><div class="nx-label">Workspace</div><nav class="nx-nav"><a class="nx-nav-item active" href="#"><span class="ico">◈</span>Signals<span class="count">12</span></a><a class="nx-nav-item" href="#"><span class="ico">⌁</span>Call graph</a><a class="nx-nav-item" href="#"><span class="ico">▤</span>Files</a></nav><div class="nx-label" style="margin-top:17px">Saved</div><nav class="nx-nav"><a class="nx-nav-item" href="#"><span class="ico">◌</span>Payment flow</a><a class="nx-nav-item" href="#"><span class="ico">◌</span>Pricing cycle</a><a class="nx-nav-item" href="#"><span class="ico">◌</span>Dead code</a></nav><div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago</div></nav>
+  <section class="glass-queue glass"><div class="queue-head"><div class="nx-kicker">Triage inbox</div><h1>Signals, not everything.</h1><p>12 findings from the latest snapshot. The graph is a preview, not the product.</p><div class="queue-tools"><button class="nx-pill active">All 12</button><button class="nx-pill">Risk</button><button class="nx-pill">Cycles</button><button class="nx-pill">Dead</button></div></div><div class="queue-list">
+    <button class="ticket high active" data-select="priceCart"><i class="severity"></i><span><b>Pricing cycle reaches payment capture</b><small>priceCart → applyCoupon → taxFor → priceCart</small></span><span class="age">2h</span></button>
+    <button class="ticket high" data-select="createOrder"><i class="severity"></i><span><b>createOrder is a new hotspot</b><small>OrderService.createOrder · 94th pct</small></span><span class="age">2h</span></button>
+    <button class="ticket" data-select="refund"><i class="severity"></i><span><b>Refund path has no retry guard</b><small>handlePaymentError → refund · 2 sites</small></span><span class="age">1d</span></button>
+    <button class="ticket info" data-select="authorize"><i class="severity"></i><span><b>authorize discards 41% of results</b><small>PaymentGateway.authorize · fan-out 2</small></span><span class="age">1d</span></button>
+    <button class="ticket" data-select="legacyRefund"><i class="severity" style="background:var(--faint)"></i><span><b>legacyRefund is never called</b><small>RefundService.legacyRefund · 199 days</small></span><span class="age">199d</span></button>
+  </div></section>
+  <main class="glass-preview glass"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div><div class="glass-detail"><div><div class="nx-kicker">Selected signal</div><div class="nx-label" style="margin-top:5px" data-selected-qname>PricingService.priceCart</div></div><div class="facts"><span>in <b data-fanin>4</b></span><span>out <b data-fanout>3</b></span><span>hot <b data-hotspot>71</b></span><span>risk <b>78</b></span></div><div class="why">Break the cycle by moving coupon validation out of the tax path. Start with <b>applyCoupon</b>.</div></div></main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N23</b><span class="sep">·</span>visual <span class="sep">/</span> P19 + P06</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'priceCart', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+NX.bindSelect('.ticket', graph);
+document.querySelectorAll('.queue-tools .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.queue-tools .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+}));
+</script>
+</body>
+</html>

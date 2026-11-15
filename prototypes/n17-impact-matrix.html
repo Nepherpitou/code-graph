@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N17 · Impact matrix — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0d0a0c;
+  --panel: #171114;
+  --panel-2: #21171c;
+  --line: #39282f;
+  --line-soft: #291d23;
+  --fg: #f8eff2;
+  --muted: #b09aa2;
+  --faint: #7a646d;
+  --accent: #ff8a8a;
+  --accent-ink: #32080b;
+  --canvas: #130e11;
+  --edge: #61424b;
+  --danger: #ff8a8a;
+  --warm: #f2b568;
+  --success: #72ddb0;
+  --violet: #c4b5fd;
+}
+
+body { overflow: hidden; background: radial-gradient(650px 420px at 50% -10%, color-mix(in srgb, var(--danger) 7%, transparent), transparent 60%), var(--bg); }
+.nx-body { min-height: 0; }
+.matrix-body { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) 330px; min-height: 0; }
+.matrix-main { min-width: 0; display: flex; flex-direction: column; }
+.matrix-head { padding: 16px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.matrix-head h1 { font-size: 23px; letter-spacing: -.035em; line-height: 1; font-weight: 620; }
+.matrix-head p { color: var(--muted); font-size: 10px; margin-top: 5px; }
+.matrix-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.matrix-toolbar .nx-search { height: 27px; width: 240px; background: var(--panel-2); border-color: transparent; }
+.matrix-toolbar .nx-pill { min-height: 22px; font-size: 9px; background: var(--panel-2); border-color: transparent; }
+.matrix-toolbar .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.matrix-scroll { flex: 1; overflow: auto; }
+.matrix-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 9.5px; }
+.matrix-table th { position: sticky; top: 0; z-index: 2; padding: 8px 10px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; text-align: left; white-space: nowrap; }
+.matrix-table td { padding: 7px 10px; border-bottom: 1px solid var(--line-soft); color: var(--muted); white-space: nowrap; }
+.matrix-table tr { cursor: pointer; }
+.matrix-table tr:hover td, .matrix-table tr.active td { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--fg); }
+.matrix-table tr.active td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.matrix-table .name { color: var(--fg); font-size: 10px; }
+.matrix-table .sub { color: var(--faint); font-size: 8px; }
+.matrix-table .num { text-align: right; }
+.matrix-table .risk { color: var(--accent); font-weight: 600; }
+.matrix-table .bar { display: inline-block; width: 34px; height: 4px; border-radius: 99px; background: var(--line); vertical-align: middle; }
+.matrix-table .bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.matrix-table .ok { color: var(--success); } .matrix-table .bad { color: var(--accent); }
+.matrix-foot { display: flex; align-items: center; gap: 8px; padding: 8px 20px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 9px; }
+.matrix-detail { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.matrix-detail .graph-shell { height: 310px; flex: 0 0 auto; background: var(--canvas); }
+.matrix-detail .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.matrix-detail .info { padding: 15px; overflow: auto; }
+.matrix-detail h2 { font-family: var(--mono); font-size: 14px; margin-top: 6px; }
+.matrix-detail .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; word-break: break-all; }
+.matrix-detail .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.matrix-detail .fact { padding: 7px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+.matrix-detail .fact b { display: block; font-family: var(--mono); font-size: 13px; }
+.matrix-detail .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.matrix-detail .note { margin-top: 10px; font-size: 9.5px; }
+@media (max-width: 1050px) { .matrix-body { grid-template-columns: minmax(0,1fr) 290px; } }
+@media (max-width: 850px) {
+  .matrix-body { display: flex; flex-direction: column; }
+  .matrix-main { flex: 1; min-height: 0; }
+  .matrix-detail { display: none; }
+  .matrix-toolbar { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .matrix-toolbar .nx-search { flex-basis: 100%; width: 100%; }
+  .matrix-head { padding-left: 14px; padding-right: 14px; }
+  .matrix-toolbar { padding-left: 14px; padding-right: 14px; }
+}
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>impact matrix</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Export</button><button class="btn sm">Compare</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="matrix-body">
+    <main class="matrix-main">
+      <div class="matrix-head"><div class="nx-kicker">Impact matrix</div><h1>What is worth changing?</h1><p>Sortable impact, coverage, and fan-in. The graph is a preview, not a separate destination.</p></div>
+      <div class="matrix-toolbar"><div class="nx-search">⌕ <input id="search" placeholder="Filter affected functions…"></div><button class="nx-pill active" data-sort="risk">Risk</button><button class="nx-pill" data-sort="reach">Reach</button><button class="nx-pill" data-sort="tests">Untested</button><span class="nx-grow"></span><span class="nx-faint nx-tiny" id="matrix-count">8 functions</span></div>
+      <div class="matrix-scroll"><table class="matrix-table" id="matrix"><thead><tr><th>Function</th><th class="num">risk</th><th class="num">fan-in</th><th class="num">transitive</th><th class="num">call sites</th><th>tests</th><th>hotspot</th></tr></thead><tbody>
+        <tr class="active" data-select="createOrder" data-risk="78" data-reach="831" data-tests="2"><td><span class="name">createOrder</span><span class="sub"> · OrderService.ts</span></td><td class="num risk">78</td><td class="num">3</td><td class="num">21</td><td class="num">4</td><td class="bad">2/5</td><td><span class="bar"><i style="width:88%"></i></span></td></tr>
+        <tr data-select="priceCart" data-risk="71" data-reach="488" data-tests="1"><td><span class="name">priceCart</span><span class="sub"> · PricingService.ts</span></td><td class="num risk">71</td><td class="num">4</td><td class="num">17</td><td class="num">3</td><td class="bad">1/4</td><td><span class="bar"><i style="width:71%"></i></span></td></tr>
+        <tr data-select="authorize" data-risk="68" data-reach="312" data-tests="1"><td><span class="name">authorize</span><span class="sub"> · PaymentGateway.ts</span></td><td class="num risk">68</td><td class="num">1</td><td class="num">9</td><td class="num">2</td><td class="bad">1/3</td><td><span class="bar"><i style="width:68%"></i></span></td></tr>
+        <tr data-select="refund" data-risk="56" data-reach="611" data-tests="2"><td><span class="name">refund</span><span class="sub"> · RefundService.ts</span></td><td class="num risk">56</td><td class="num">2</td><td class="num">12</td><td class="num">2</td><td class="ok">2/3</td><td><span class="bar"><i style="width:56%"></i></span></td></tr>
+        <tr data-select="handleEvent" data-risk="47" data-reach="447" data-tests="0"><td><span class="name">handleEvent</span><span class="sub"> · PaymentWebhook.ts</span></td><td class="num risk">47</td><td class="num">1</td><td class="num">7</td><td class="num">2</td><td class="bad">0/2</td><td><span class="bar"><i style="width:47%"></i></span></td></tr>
+        <tr data-select="validateCart" data-risk="38" data-reach="220" data-tests="2"><td><span class="name">validateCart</span><span class="sub"> · CheckoutController.ts</span></td><td class="num risk">38</td><td class="num">3</td><td class="num">11</td><td class="num">2</td><td class="ok">2/3</td><td><span class="bar"><i style="width:38%"></i></span></td></tr>
+        <tr data-select="reserveInventory" data-risk="35" data-reach="140" data-tests="1"><td><span class="name">reserveInventory</span><span class="sub"> · InventoryService.ts</span></td><td class="num risk">35</td><td class="num">1</td><td class="num">6</td><td class="num">1</td><td class="bad">1/2</td><td><span class="bar"><i style="width:35%"></i></span></td></tr>
+        <tr data-select="finalizeOrder" data-risk="31" data-reach="82" data-tests="1"><td><span class="name">finalizeOrder</span><span class="sub"> · OrderService.ts</span></td><td class="num risk">31</td><td class="num">1</td><td class="num">4</td><td class="num">1</td><td class="ok">1/2</td><td><span class="bar"><i style="width:31%"></i></span></td></tr>
+      </tbody></table></div>
+      <div class="matrix-foot"><span class="status-dot"></span><span>risk = reach × fan-in × uncovered call sites</span><span class="nx-grow"></span><span>click a row to preview</span></div>
+    </main>
+    <aside class="matrix-detail"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div></div><div class="info"><div class="nx-kicker">Preview</div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div><div class="facts"><div class="fact"><b data-fanin>3</b><span>fan-in</span></div><div class="fact"><b data-fanout>4</b><span>fan-out</span></div><div class="fact"><b data-hotspot>88</b><span>hotspot</span></div><div class="fact"><b>78</b><span>risk</span></div></div><div class="note">Start with the untested call site, then run the upstream callers. Sorting by risk keeps the review focused.</div></div></aside>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N17</b><span class="sep">·</span>table <span class="sep">/</span> P13 + P11</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'createOrder', maxScale: 1 });
+NX.bindSelect('#matrix tbody tr', graph);
+NX.bindFilter(document.getElementById('search'), '#matrix tbody tr', document.getElementById('matrix-count'), 8, (n) => `${n} functions`);
+document.querySelectorAll('.matrix-toolbar .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.matrix-toolbar .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  const key = button.dataset.sort;
+  const body = document.querySelector('#matrix tbody');
+  const rows = [...body.querySelectorAll('tr')];
+  rows.sort((a, b) => Number(b.dataset[key]) - Number(a.dataset[key]));
+  rows.forEach((row) => body.appendChild(row));
+}));
+</script>
+</body>
+</html>

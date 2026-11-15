@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N08 · Canvas command — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #090c10;
+  --panel: #11161d;
+  --panel-2: #18212a;
+  --line: #29333e;
+  --line-soft: #1a232c;
+  --fg: #edf3f7;
+  --muted: #8797a6;
+  --faint: #556575;
+  --accent: #84e1c1;
+  --accent-ink: #08251c;
+  --canvas: #0b1016;
+  --edge: #3c4d5d;
+  --danger: #ff8178;
+  --warm: #f2b568;
+  --success: #84e1c1;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; background: var(--canvas); }
+.nx-body { min-height: 0; }
+.canvas-app { flex: 1; min-height: 0; position: relative; display: flex; }
+.canvas-app .graph-shell { flex: 1; min-height: 0; }
+.canvas-app .graph-toolbar { top: 14px; left: 16px; background: color-mix(in srgb, var(--panel) 88%, transparent); border-color: var(--line); backdrop-filter: blur(16px); }
+.canvas-app .minimap { right: 17px; bottom: 17px; background: color-mix(in srgb, var(--panel) 84%, transparent); backdrop-filter: blur(16px); }
+.canvas-top { position: absolute; top: 13px; left: 17px; right: 17px; z-index: 12; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.canvas-top > * { pointer-events: auto; }
+.canvas-crumbs { display: flex; align-items: center; gap: 7px; padding: 0 11px; height: 36px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: 0 5px 18px rgba(0,0,0,.2); backdrop-filter: blur(18px); color: var(--muted); font-size: 10px; }
+.canvas-crumbs b { color: var(--fg); font-weight: 500; }
+.canvas-search { width: 280px; height: 36px; background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(18px); }
+.canvas-search input { font-size: 11px; }
+.canvas-spacer { flex: 1; }
+.canvas-actions { display: flex; gap: 6px; }
+.canvas-actions .btn { background: color-mix(in srgb, var(--panel) 88%, transparent); border-color: color-mix(in srgb, var(--line) 80%, transparent); backdrop-filter: blur(18px); }
+.canvas-hud { position: absolute; left: 17px; bottom: 17px; z-index: 10; width: 280px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 11px; background: color-mix(in srgb, var(--panel) 91%, transparent); box-shadow: 0 16px 42px rgba(0,0,0,.25); backdrop-filter: blur(20px); overflow: hidden; }
+.canvas-hud-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
+.canvas-hud-head h2 { font-family: var(--mono); font-size: 12px; }
+.canvas-hud-body { padding: 11px 12px; }
+.canvas-hud-body .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; word-break: break-all; }
+.canvas-hud-facts { display: flex; gap: 10px; margin-top: 8px; color: var(--faint); font-size: 8.5px; }
+.canvas-hud-facts b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.canvas-dock { position: absolute; left: 50%; bottom: 17px; transform: translateX(-50%); z-index: 10; display: flex; align-items: center; gap: 10px; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(18px); color: var(--faint); font-size: 9px; }
+.canvas-dock b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.palette-backdrop { position: fixed; inset: 0; z-index: 50; display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(5,8,11,.55); backdrop-filter: blur(4px); }
+.palette-backdrop.open { display: flex; }
+.palette { width: min(600px, calc(100% - 28px)); }
+.palette .nx-command-group { max-height: 340px; overflow: auto; }
+.palette-hint { padding: 8px 12px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 9px; display: flex; justify-content: space-between; }
+@media (max-width: 900px) { .canvas-search { display: none; } .canvas-crumbs { max-width: 240px; overflow: hidden; } .canvas-hud { display: none; } .canvas-dock { display: none; } }
+@media (max-width: 700px) { .canvas-crumbs { max-width: 180px; } .canvas-actions .btn:nth-child(2) { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>canvas</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <main class="canvas-app">
+    <div class="canvas-top">
+      <div class="canvas-crumbs"><span>checkout-service</span><span class="faint">/</span><b>entry points</b><span class="faint">/</span><span>checkout</span></div>
+      <div class="nx-search canvas-search">⌕ <input id="search" placeholder="Search canvas or press ⌘K"><span class="kbd">⌘K</span></div>
+      <span class="canvas-spacer"></span>
+      <div class="canvas-actions"><button class="btn sm" id="palette-open">⌘ Command</button><button class="btn sm">Export</button></div>
+    </div>
+    <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><button>⌗</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div>
+    <aside class="canvas-hud"><div class="canvas-hud-head"><span class="status-dot"></span><h2 data-selected-name>checkout</h2><span class="nx-grow"></span><span class="tag">entry</span></div><div class="canvas-hud-body"><div class="file" data-selected-file>src/http/CheckoutController.ts</div><div class="canvas-hud-facts"><span>in <b data-fanin>1</b></span><span>out <b data-fanout>5</b></span><span>hot <b data-hotspot>94</b></span></div></div></aside>
+    <div class="canvas-dock"><span class="status-dot"></span><span>local snapshot</span><span>·</span><b>a3f10c2</b><span>·</span><span>2,462 symbols</span></div>
+    <div class="palette-backdrop" id="palette-backdrop">
+      <div class="palette nx-command">
+        <div class="nx-search big" style="height:48px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent">⌕ <input id="palette-input" placeholder="Jump to a symbol, action, or view…" autofocus></div>
+        <div class="nx-command-group"><div class="nx-command-title">Jump to</div>
+          <button class="nx-command-item" data-open="checkout"><span class="tag">EP</span><span>CheckoutController.checkout</span><span class="hint">src/http</span></button>
+          <button class="nx-command-item" data-open="createOrder"><span class="tag">EP</span><span>OrderService.createOrder</span><span class="hint">src/domain</span></button>
+          <button class="nx-command-item" data-open="priceCart"><span class="tag">fn</span><span>PricingService.priceCart</span><span class="hint">cycle</span></button>
+          <button class="nx-command-item" data-open="authorize"><span class="tag">fn</span><span>PaymentGateway.authorize</span><span class="hint">async</span></button>
+        </div>
+        <div class="nx-command-group"><div class="nx-command-title">Actions</div>
+          <button class="nx-command-item" data-action="route"><span class="tag">↳</span><span>Show entry → exit route</span><span class="hint">route</span></button>
+          <button class="nx-command-item" data-action="impact"><span class="tag">←</span><span>Show blast radius</span><span class="hint">impact</span></button>
+          <button class="nx-command-item" data-action="fit"><span class="tag">⌖</span><span>Fit graph</span><span class="hint">view</span></button>
+        </div>
+        <div class="palette-hint"><span>↑↓ navigate</span><span>enter open</span><span>esc close</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N08</b><span class="sep">·</span>graph <span class="sep">/</span> P03 + P07</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'checkout', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+const backdrop = document.getElementById('palette-backdrop');
+const paletteInput = document.getElementById('palette-input');
+function openPalette() { backdrop.classList.add('open'); setTimeout(() => paletteInput.focus(), 0); }
+function closePalette() { backdrop.classList.remove('open'); }
+document.getElementById('palette-open').addEventListener('click', openPalette);
+backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closePalette(); });
+NX.bindCommand(paletteInput, '.nx-command-item', graph, { close: closePalette, onOpen: (item) => {
+  if (item.dataset.action === 'route') graph.route(CG.checkoutPath, 'createOrder');
+  if (item.dataset.action === 'impact') graph.select('createOrder');
+  if (item.dataset.action === 'fit') graph.fit();
+} });
+document.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); }
+  if (event.key === 'Escape') closePalette();
+});
+const canvasSearch = document.getElementById('search');
+canvasSearch.addEventListener('input', () => {
+  if (!canvasSearch.value.trim()) return;
+  openPalette();
+  paletteInput.value = canvasSearch.value;
+  paletteInput.dispatchEvent(new Event('input'));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N22 · Spatial home — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #eef0f5;
+  --panel: #ffffff;
+  --panel-2: #f3f5f9;
+  --line: #dfe3ec;
+  --line-soft: #eceff5;
+  --fg: #1f2330;
+  --muted: #6d7587;
+  --faint: #a0a7b8;
+  --accent: #5b6cff;
+  --accent-ink: #ffffff;
+  --canvas: #f7f8fc;
+  --edge: #b3b9cb;
+  --danger: #c9463d;
+  --warm: #a16c10;
+  --success: #2a7d56;
+  --violet: #7a63d8;
+  color-scheme: light;
+}
+
+body { overflow-x: hidden; background: radial-gradient(800px 500px at 18% 0%, #dfe4ff, transparent 65%), radial-gradient(700px 500px at 88% 10%, #ffe1ea, transparent 60%), radial-gradient(600px 600px at 50% 100%, #dff6ec, transparent 65%), var(--bg); }
+.nx-body { display: block; }
+.nx-main { overflow: auto; padding: 24px 28px 56px; }
+.spatial-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; }
+.spatial-hero h1 { font-size: clamp(38px, 5.4vw, 70px); line-height: .9; letter-spacing: -.065em; font-weight: 600; }
+.spatial-hero h1 em { font-style: normal; color: var(--accent); }
+.spatial-hero p { color: var(--muted); font-size: 12px; line-height: 1.6; max-width: 500px; margin-top: 12px; }
+.spatial-cta { display: flex; gap: 7px; }
+.spatial-cta .btn { border-radius: 999px; background: rgba(255,255,255,.7); border-color: rgba(255,255,255,.85); box-shadow: 0 3px 12px rgba(30,40,80,.06); }
+.spatial-cta .btn.primary { background: var(--fg); border-color: var(--fg); color: #fff; }
+.spatial-grid { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(280px,.8fr); gap: 12px; margin-top: 22px; }
+.spatial-card { border: 1px solid rgba(255,255,255,.8); border-radius: 20px; background: rgba(255,255,255,.62); backdrop-filter: blur(24px) saturate(1.1); box-shadow: 0 14px 46px rgba(40,50,90,.10), inset 0 1px 0 rgba(255,255,255,.8); overflow: hidden; }
+.spatial-card .card-head { display: flex; align-items: center; gap: 8px; padding: 13px 15px; border-bottom: 1px solid rgba(255,255,255,.8); }
+.spatial-card .card-head h2 { font-size: 11px; font-weight: 600; }
+.spatial-card .graph-shell { height: 310px; background: rgba(255,255,255,.5); }
+.spatial-card .graph-toolbar { background: rgba(255,255,255,.72); border-color: rgba(255,255,255,.9); border-radius: 999px; box-shadow: 0 5px 18px rgba(40,50,90,.08); padding: 3px; }
+.spatial-card .graph-toolbar button { border-radius: 50%; color: var(--muted); }
+.entry-list { padding: 5px; }
+.entry-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 9px; border-radius: 10px; background: transparent; border: 0; color: var(--fg); text-align: left; }
+.entry-item:hover { background: rgba(255,255,255,.65); }
+.entry-item.active { background: rgba(255,255,255,.9); box-shadow: 0 3px 12px rgba(40,50,90,.06); }
+.entry-item .rank { color: var(--faint); font-family: var(--mono); font-size: 8.5px; width: 18px; text-align: right; }
+.entry-item .name { display: block; font-family: var(--mono); font-size: 10px; }
+.entry-item .file { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; }
+.entry-item .reach { margin-left: auto; color: var(--accent); font-family: var(--mono); font-size: 10px; }
+.spatial-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.spatial-stat { padding: 11px 12px; border-radius: 14px; background: rgba(255,255,255,.58); border: 1px solid rgba(255,255,255,.8); box-shadow: 0 6px 20px rgba(40,50,90,.05); }
+.spatial-stat b { display: block; font-family: var(--mono); font-size: 16px; font-weight: 550; }
+.spatial-stat span { display: block; color: var(--faint); font-size: 8.5px; text-transform: uppercase; letter-spacing: .06em; margin-top: 3px; }
+.spatial-recent { display: flex; gap: 9px; margin-top: 13px; overflow-x: auto; padding-bottom: 4px; }
+.recent-card { flex: 0 0 190px; padding: 12px; border: 1px solid rgba(255,255,255,.8); border-radius: 16px; background: rgba(255,255,255,.58); box-shadow: 0 6px 20px rgba(40,50,90,.05); text-align: left; color: var(--fg); }
+.recent-card:hover { background: rgba(255,255,255,.8); }
+.recent-card b { display: block; font-size: 10.5px; }
+.recent-card small { display: block; color: var(--faint); font-size: 8.5px; margin-top: 3px; }
+.recent-card .mini { height: 45px; margin-top: 9px; border-radius: 7px; background: var(--canvas); position: relative; overflow: hidden; }
+.recent-card .mini i { position: absolute; width: 5px; height: 3px; background: var(--faint); border-radius: 1px; }
+.recent-card .mini i.on { background: var(--accent); }
+@media (max-width: 1000px) { .spatial-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .nx-main { padding: 18px 14px 40px; } .spatial-hero { flex-direction: column; align-items: flex-start; } .spatial-hero h1 { font-size: 44px; } .spatial-stats { grid-template-columns: 1fr 1fr; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme</span><span class="faint">/</span><b>checkout-service</b><span class="faint">/</span><span class="muted">home</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Re-analyze</button>
+  <span class="avatar">AR</span>
+</header>
+<main class="nx-main">
+  <div class="spatial-hero"><div><div class="nx-kicker">checkout-service · project home</div><h1>Everything,<br><em>in its place.</em></h1><p>Health, risk, and recent work as soft surfaces. Open the graph only when adjacency is the answer.</p></div><div class="spatial-cta"><button class="btn" id="open-graph">Explore graph ↗</button><button class="btn primary" data-select="checkout">Start at entry</button></div></div>
+  <div class="spatial-stats"><div class="spatial-stat"><b>2,462</b><span>symbols · +38</span></div><div class="spatial-stat"><b>12</b><span>signals · 3 cycles</span></div><div class="spatial-stat"><b>7</b><span>dead candidates</span></div><div class="spatial-stat"><b>6 min</b><span>last analysis</span></div></div>
+  <div class="spatial-grid">
+    <section class="spatial-card"><div class="card-head"><h2>Call graph preview</h2><span class="nx-faint nx-tiny">entry points · 2-hop</span><span class="nx-grow"></span><span class="nx-pill active">Layered</span><span class="nx-pill">2-hop</span></div><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div></section>
+    <section class="spatial-card"><div class="card-head"><h2>Entry points</h2><span class="nx-faint nx-tiny">by reach</span></div><div class="entry-list"><button class="entry-item active" data-select="checkout"><span class="rank">01</span><span><span class="name">CheckoutController.checkout</span><span class="file">src/http/CheckoutController.ts</span></span><span class="reach">1.8k</span></button><button class="entry-item" data-select="createOrder"><span class="rank">02</span><span><span class="name">OrderService.createOrder</span><span class="file">src/domain/OrderService.ts</span></span><span class="reach">1.1k</span></button><button class="entry-item" data-select="webhook"><span class="rank">03</span><span><span class="name">PaymentWebhook.handle</span><span class="file">src/payments/PaymentWebhook.ts</span></span><span class="reach">922</span></button><button class="entry-item" data-select="refund"><span class="rank">04</span><span><span class="name">RefundService.refund</span><span class="file">src/domain/RefundService.ts</span></span><span class="reach">611</span></button></div><div class="nx-card-foot" style="padding:10px 14px;border:0;color:var(--faint);font-size:9px">4 of 24 roots · view all →</div></section>
+  </div>
+  <div class="spatial-recent"><button class="recent-card" data-select="createOrder"><b>Payment flow</b><small>24 nodes · 2h ago</small><div class="mini"><i class="on" style="left:12px;top:18px"></i><i class="on" style="left:48px;top:10px"></i><i style="left:92px;top:30px"></i><i style="left:130px;top:14px"></i><i class="on" style="left:160px;top:31px"></i></div></button><button class="recent-card" data-select="priceCart"><b>Pricing cycle</b><small>6 nodes · 1d ago</small><div class="mini"><i class="on" style="left:16px;top:12px"></i><i class="on" style="left:54px;top:24px"></i><i class="on" style="left:100px;top:12px"></i><i style="left:140px;top:30px"></i></div></button><button class="recent-card" data-select="webhook"><b>Webhook fan-out</b><small>18 nodes · 1d ago</small><div class="mini"><i class="on" style="left:12px;top:22px"></i><i style="left:60px;top:12px"></i><i style="left:60px;top:32px"></i><i class="on" style="left:120px;top:22px"></i></div></button><button class="recent-card" data-select="legacyRefund"><b>Dead code</b><small>7 nodes · 3d ago</small><div class="mini"><i style="left:20px;top:20px"></i><i class="on" style="left:80px;top:28px"></i><i style="left:140px;top:12px"></i></div></button></div>
+</main>
+</div>
+<a class="nx-badge" href="index.html"><b>N22</b><span class="sep">·</span>visual <span class="sep">/</span> P24 + P02</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+NX.bindSelect('.entry-item', graph);
+NX.bindSelect('.recent-card', graph);
+document.getElementById('open-graph').addEventListener('click', () => NX.toast('Full graph would open with the entry-point slice.'));
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N01 · Project pulse — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f5f6f4;
+  --panel: #ffffff;
+  --panel-2: #eef1ee;
+  --line: #dfe4de;
+  --line-soft: #edf0ec;
+  --fg: #1d2420;
+  --muted: #68736b;
+  --faint: #99a39b;
+  --accent: #2e6b4f;
+  --accent-ink: #ffffff;
+  --canvas: #fafbf9;
+  --edge: #b9c4bc;
+  --danger: #bf4b3d;
+  --warm: #a86f18;
+  --success: #24784f;
+  --violet: #6c59b8;
+  color-scheme: light;
+}
+
+body { background: var(--bg); }
+.nx-side { width: 196px; }
+.nx-main.pad { padding: 26px 30px 50px; }
+.pulse-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.pulse-head h1 { font-size: clamp(32px, 4vw, 52px); letter-spacing: -.055em; line-height: .95; font-weight: 650; }
+.pulse-head p { max-width: 580px; color: var(--muted); font-size: 12.5px; line-height: 1.6; margin-top: 11px; }
+.pulse-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pulse-actions .btn { background: var(--panel); border-color: var(--line); }
+.pulse-actions .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.pulse-kpis { margin-top: 22px; }
+.pulse-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .65fr); gap: 13px; margin-top: 13px; }
+.signal-row { display: grid; grid-template-columns: 4px minmax(0,1fr) auto; gap: 10px; width: 100%; padding: 10px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--fg); text-align: left; }
+.signal-row:hover, .signal-row.active { background: var(--panel-2); }
+.signal-row .bar { border-radius: 99px; background: var(--warm); }
+.signal-row.high .bar { background: var(--danger); }
+.signal-row.info .bar { background: var(--violet); }
+.signal-row b { display: block; font-size: 11px; line-height: 1.35; font-weight: 600; }
+.signal-row small { display: block; color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; }
+.signal-row .age { color: var(--faint); font-size: 9px; padding-top: 2px; }
+.entry-list { padding: 4px 5px 5px; }
+.entry { display: grid; grid-template-columns: 20px minmax(0,1fr) 48px; gap: 8px; align-items: center; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--fg); }
+.entry:hover { background: var(--panel-2); }
+.entry .rank { color: var(--faint); font-family: var(--mono); font-size: 8.5px; text-align: right; }
+.entry .name { display: block; font-family: var(--mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry .file { display: block; color: var(--faint); font-size: 8.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry .reach { color: var(--accent); font-family: var(--mono); font-size: 10px; text-align: right; }
+.preview-card { margin-top: 13px; display: grid; grid-template-columns: minmax(0,1fr) 250px; overflow: hidden; }
+.preview-card .graph-shell { height: 260px; background: var(--canvas); }
+.preview-card .graph-toolbar { background: rgba(255,255,255,.9); border-color: var(--line); }
+.preview-card .graph-toolbar button { color: var(--muted); }
+.preview-card .side-note { padding: 16px; border-left: 1px solid var(--line); background: var(--panel); }
+.preview-card .side-note h2 { font-size: 11px; }
+.preview-card .side-note p { color: var(--muted); font-size: 10.5px; line-height: 1.55; margin-top: 7px; }
+.preview-card .side-note .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.preview-card .fact { padding: 7px 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+.preview-card .fact b { display: block; font-family: var(--mono); font-size: 12px; }
+.preview-card .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.full-overlay { position: fixed; inset: 0; z-index: 70; display: none; flex-direction: column; background: var(--bg); }
+.full-overlay.open { display: flex; }
+.full-top { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.full-graph { flex: 1; min-height: 0; }
+.full-graph .graph-shell { height: 100%; }
+@media (max-width: 1000px) { .pulse-grid { grid-template-columns: 1fr; } .preview-card { grid-template-columns: 1fr; } .preview-card .side-note { border-left: 0; border-top: 1px solid var(--line); } }
+@media (max-width: 760px) { .pulse-head { flex-direction: column; } .pulse-actions { justify-content: flex-start; } .nx-side { display: none; } .preview-card .graph-shell { height: 220px; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme</span><span class="faint">/</span><b>checkout-service</b><span class="faint">/</span><span class="muted">pulse</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">Re-analyze</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <aside class="nx-side">
+    <div class="nx-label">Project</div>
+    <nav class="nx-nav">
+      <a class="nx-nav-item active" href="#"><span class="ico">◫</span>Pulse<span class="count">12</span></a>
+      <a class="nx-nav-item" href="#"><span class="ico">⌁</span>Call graph</a>
+      <a class="nx-nav-item" href="#"><span class="ico">▤</span>Files</a>
+      <a class="nx-nav-item" href="#"><span class="ico">◈</span>Signals</a>
+    </nav>
+    <div class="nx-label" style="margin-top:18px">Saved views</div>
+    <nav class="nx-nav">
+      <a class="nx-nav-item" href="#"><span class="ico">↳</span>Payment flow</a>
+      <a class="nx-nav-item" href="#"><span class="ico">◌</span>Pricing cycle</a>
+      <a class="nx-nav-item" href="#"><span class="ico">◌</span>Dead code</a>
+    </nav>
+    <div class="nx-side-foot"><b>Snapshot a3f10c2</b><br>tsgo 5.9 · 6 min ago<br>2,462 symbols · 5,840 edges</div>
+  </aside>
+  <main class="nx-main pad">
+    <div class="nx-inner">
+      <div class="pulse-head">
+        <div>
+          <div class="nx-kicker">Project pulse</div>
+          <h1>checkout-service</h1>
+          <p>Start with health, risk, and the one door you need. The graph is a destination, not the default.</p>
+        </div>
+        <div class="pulse-actions"><button class="btn" id="open-full">Explore call graph ↗</button><button class="btn primary" id="open-entry">Start at entry point</button></div>
+      </div>
+      <div class="nx-kpis pulse-kpis">
+        <div class="nx-kpi"><b>2,462</b><span>symbols · +38</span></div>
+        <div class="nx-kpi"><b>12</b><span>signals · 3 cycles</span></div>
+        <div class="nx-kpi"><b>7</b><span>dead candidates</span></div>
+        <div class="nx-kpi"><b>8.4s</b><span>last analysis</span></div>
+      </div>
+      <div class="pulse-grid">
+        <section class="nx-card">
+          <div class="nx-card-head"><h2>Needs attention</h2><span class="nx-faint nx-tiny">ordered by blast radius</span><span class="nx-grow"></span><span class="nx-pill">12 signals</span></div>
+          <div class="nx-card-body" id="signals">
+            <button class="signal-row high" data-select="priceCart"><i class="bar"></i><span><b>Pricing cycle reaches payment capture</b><small>priceCart → applyCoupon → taxFor → priceCart</small></span><span class="age">2h</span></button>
+            <button class="signal-row high" data-select="createOrder"><i class="bar"></i><span><b>createOrder is a new hotspot</b><small>OrderService.createOrder · 94th pct · 3 callers</small></span><span class="age">2h</span></button>
+            <button class="signal-row" data-select="refund"><i class="bar"></i><span><b>Refund path has no retry guard</b><small>handlePaymentError → refund · 2 call sites</small></span><span class="age">1d</span></button>
+            <button class="signal-row info" data-select="authorize"><i class="bar"></i><span><b>authorize discards 41% of results</b><small>PaymentGateway.authorize · fan-out 2</small></span><span class="age">1d</span></button>
+            <div class="nx-hairline" style="margin:6px 0"></div>
+            <button class="signal-row" data-select="legacyRefund"><i class="bar" style="background:var(--faint)"></i><span><b>legacyRefund is never called</b><small>RefundService.legacyRefund · 199 days</small></span><span class="age">199d</span></button>
+          </div>
+          <div class="nx-card-foot">Click a signal to inspect its node in the preview.</div>
+        </section>
+        <section class="nx-card">
+          <div class="nx-card-head"><h2>Entry points</h2><span class="nx-faint nx-tiny">by reach</span></div>
+          <div class="entry-list">
+            <button class="entry" data-select="checkout"><span class="rank">01</span><span><span class="name">CheckoutController.checkout</span><span class="file">src/http/CheckoutController.ts</span></span><span class="reach">1.8k</span></button>
+            <button class="entry" data-select="createOrder"><span class="rank">02</span><span><span class="name">OrderService.createOrder</span><span class="file">src/domain/OrderService.ts</span></span><span class="reach">1.1k</span></button>
+            <button class="entry" data-select="webhook"><span class="rank">03</span><span><span class="name">PaymentWebhook.handle</span><span class="file">src/payments/PaymentWebhook.ts</span></span><span class="reach">922</span></button>
+            <button class="entry" data-select="refund"><span class="rank">04</span><span><span class="name">RefundService.refund</span><span class="file">src/domain/RefundService.ts</span></span><span class="reach">611</span></button>
+          </div>
+          <div class="nx-card-foot">4 of 24 roots · <button class="btn ghost sm" style="padding:0">view all →</button></div>
+        </section>
+      </div>
+      <section class="nx-card preview-card">
+        <div class="graph-shell" id="preview-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div>
+        <div class="side-note">
+          <div class="nx-kicker">Preview</div>
+          <h2 data-selected-qname style="margin-top:6px">CheckoutController.checkout</h2>
+          <div class="nx-faint nx-mono nx-tiny" data-selected-file>src/http/CheckoutController.ts</div>
+          <div class="facts"><div class="fact"><b data-fanin>1</b><span>fan-in</span></div><div class="fact"><b data-fanout>5</b><span>fan-out</span></div><div class="fact"><b data-hotspot>94</b><span>hotspot</span></div><div class="fact"><b>1.8k</b><span>reach</span></div></div>
+          <p>Selected signal and entry point share one preview. Open the full graph when the neighborhood is the answer.</p>
+          <button class="btn sm" id="preview-open" style="width:100%;margin-top:10px">Open in full graph ↗</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<section class="full-overlay" id="full-overlay">
+  <div class="full-top"><button class="btn ghost" id="full-close">← Pulse</button><div class="breadcrumbs"><span>checkout-service</span><span class="sep">/</span><b>call graph</b><span class="sep">/</span><span>entry points</span></div><span class="spacer"></span><span class="nx-pill active">Layered</span><span class="nx-pill">2-hop</span></div>
+  <div class="full-graph"><div class="graph-shell" id="full-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div></div></div>
+</section>
+</div>
+<a class="nx-badge" href="index.html"><b>N01</b><span class="sep">·</span>start <span class="sep">/</span> P02 + P06</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const preview = CG.mount(document.getElementById('preview-graph'), { layout: 'layered', selected: 'checkout', maxScale: .92 });
+NX.bindSelect('[data-select]', preview);
+const overlay = document.getElementById('full-overlay');
+let full = null;
+function openFull() {
+  overlay.classList.add('open');
+  if (!full) full = CG.mount(document.getElementById('full-graph'), { layout: 'layered', selected: 'checkout', maxScale: 1 });
+  requestAnimationFrame(() => full.fit());
+}
+document.getElementById('open-full').addEventListener('click', openFull);
+document.getElementById('preview-open').addEventListener('click', openFull);
+document.getElementById('open-entry').addEventListener('click', openFull);
+document.getElementById('full-close').addEventListener('click', () => overlay.classList.remove('open'));
+</script>
+</body>
+</html>

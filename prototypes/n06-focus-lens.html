@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N06 · Focus lens — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0e13;
+  --panel: #111821;
+  --panel-2: #18212c;
+  --line: #2a3644;
+  --line-soft: #1b2531;
+  --fg: #eef4fa;
+  --muted: #8b9aab;
+  --faint: #586879;
+  --accent: #7dd3fc;
+  --accent-ink: #052432;
+  --canvas: #0b1119;
+  --edge: #405365;
+  --danger: #ff827a;
+  --warm: #f4b567;
+  --success: #72ddb0;
+  --violet: #b9a5ff;
+}
+
+body { overflow: hidden; background: var(--canvas); }
+.nx-body { min-height: 0; }
+.focus-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.focus-route { flex: 0 0 auto; }
+.focus-main { flex: 1; min-height: 0; display: flex; }
+.mini-rail { width: 48px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 11px 0; border-right: 1px solid var(--line-soft); background: color-mix(in srgb, var(--bg) 92%, transparent); }
+.mini-rail .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-family: var(--mono); font-weight: 800; font-size: 12px; margin-bottom: 6px; }
+.mini-rail button { width: 31px; height: 31px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--faint); font-size: 13px; }
+.mini-rail button:hover { background: var(--panel-2); color: var(--fg); }
+.mini-rail button.active { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); }
+.mini-rail .bottom { margin-top: auto; display: flex; flex-direction: column; gap: 7px; align-items: center; }
+.canvas-wrap { flex: 1; min-width: 0; position: relative; background: var(--canvas); }
+.canvas-wrap .graph-shell { height: 100%; }
+.canvas-wrap .graph-toolbar { top: 12px; left: 12px; background: var(--panel); border-color: var(--line); }
+.canvas-wrap .graph-toolbar button { color: var(--muted); }
+.canvas-wrap .minimap { width: 160px; height: 98px; }
+.focus-label { position: absolute; left: 13px; bottom: 13px; z-index: 8; display: flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 90%, transparent); color: var(--muted); font-size: 9px; }
+.focus-label b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.focus-inspector { width: 304px; flex: 0 0 auto; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 17px 16px; }
+.focus-inspector h2 { font-family: var(--mono); font-size: 15px; margin-top: 7px; line-height: 1.25; }
+.focus-inspector .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 4px; word-break: break-all; }
+.focus-inspector .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 14px 0; }
+.focus-inspector .fact { padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-2); }
+.focus-inspector .fact b { display: block; font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.focus-inspector .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.focus-inspector .section { margin-top: 14px; }
+.focus-inspector .relation { padding: 6px 2px; font-size: 9.5px; }
+.focus-inspector .actions { display: flex; flex-direction: column; gap: 2px; margin-top: 13px; }
+.focus-inspector .actions button { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); text-align: left; font-size: 10px; }
+.focus-inspector .actions button:hover { background: var(--panel-2); color: var(--fg); }
+.focus-inspector .actions .arrow { margin-left: auto; color: var(--faint); }
+@media (max-width: 1000px) { .focus-inspector { width: 250px; } }
+@media (max-width: 800px) { .focus-inspector { display: none; } .mini-rail { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>focus</b><span class="faint">/</span><span class="muted">createOrder</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Layers</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="focus-wrap">
+    <div class="nx-route focus-route"><span class="nx-tiny nx-faint" style="margin-right:6px;text-transform:uppercase;letter-spacing:.1em">Path</span>
+      <button class="nx-route-item" data-select="checkout">checkout <span class="nx-faint">1</span></button><span class="nx-route-sep">→</span>
+      <button class="nx-route-item" data-select="validateCart">validateCart <span class="nx-faint">2</span></button><span class="nx-route-sep">→</span>
+      <button class="nx-route-item" data-select="priceCart">priceCart <span class="nx-faint">3</span></button><span class="nx-route-sep">→</span>
+      <button class="nx-route-item active" data-select="createOrder">createOrder <span class="nx-faint">4</span></button><span class="nx-route-sep">→</span>
+      <button class="nx-route-item" data-select="authorize">authorize <span class="nx-faint">5</span></button><span class="nx-route-sep">→</span>
+      <button class="nx-route-item" data-select="capture">capture <span class="nx-faint">6</span></button>
+      <span class="nx-grow"></span><span class="nx-faint nx-tiny">2-hop context · 20 nodes · 23 edges</span>
+    </div>
+    <div class="focus-main">
+      <nav class="mini-rail"><a class="logo" href="index.html">◉</a><button class="active" title="Graph">⌁</button><button title="Files">▤</button><button title="Signals">◈</button><button title="History">↶</button><div class="bottom"><button title="Palette">⌘</button><button title="Help">?</button></div></nav>
+      <section class="canvas-wrap"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><button>⌗</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div><div class="focus-label"><b data-selected-name>createOrder</b><span class="nx-faint">selected</span><span class="kbd">esc</span><span class="nx-faint">clear</span></div></div></section>
+      <aside class="focus-inspector">
+        <div class="nx-label">Focus</div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div>
+        <div class="facts"><div class="fact"><b data-fanin>3</b><span>fan-in</span></div><div class="fact"><b data-fanout>4</b><span>fan-out</span></div><div class="fact"><b data-hotspot>88</b><span>hotspot</span></div><div class="fact"><b>831</b><span>reach</span></div></div>
+        <div class="section"><div class="nx-label">Context window</div><div class="relation"><span class="arrow">←</span><span class="mono">checkout</span><span class="meta">HTTP</span></div><div class="relation"><span class="arrow">←</span><span class="mono">validateCart</span><span class="meta">2</span></div><div class="relation"><span class="arrow">←</span><span class="mono">handleEvent</span><span class="meta">1</span></div></div>
+        <div class="section"><div class="nx-label">Next in path</div><div class="relation"><span class="arrow">→</span><span class="mono">reserveInventory</span><span class="meta">Inventory</span></div><div class="relation"><span class="arrow">→</span><span class="mono">authorize</span><span class="meta">Payments</span></div></div>
+        <div class="actions"><button>Show entry → exit route <span class="arrow">→</span></button><button>Blast radius <span class="arrow">←</span></button><button>Open containing file <span class="arrow">↗</span></button><button>Copy qualified name <span class="arrow">⧉</span></button></div>
+        <div class="nx-hairline" style="margin-top:14px"></div><div class="nx-tiny nx-faint" style="margin-top:11px"><span class="status-dot" style="display:inline-block;margin-right:5px"></span>snapshot a3f10c2 · local · 6 min ago</div>
+      </aside>
+    </div>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N06</b><span class="sep">·</span>graph <span class="sep">/</span> P03 + P09</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'createOrder', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+NX.bindSelect('.nx-route-item', graph);
+document.querySelectorAll('.mini-rail button').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.mini-rail button').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  if (button.title === 'Graph') { graph.select('createOrder'); }
+  if (button.title === 'Palette') { NX.toast('Command palette is the next prototype.'); }
+}));
+document.querySelector('.focus-inspector .actions button').addEventListener('click', () => graph.route(CG.checkoutPath, 'createOrder'));
+</script>
+</body>
+</html>

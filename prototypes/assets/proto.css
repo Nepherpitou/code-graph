@@ -248,6 +248,7 @@ svg { display: block; }
   transition: stroke .15s, opacity .15s, stroke-width .15s;
 }
 .graph-edges path.is-hot { stroke: var(--accent); stroke-width: 1.8; }
+.graph-edges path.is-route { stroke: var(--accent); stroke-width: 2.4; opacity: 1; }
 .graph-edges path.is-dim { opacity: .12; }
 .graph-edges path.data { stroke-dasharray: 4 4; stroke: var(--violet); }
 .graph-edges .arrow, .graph-world marker .arrow { fill: var(--edge, var(--muted)); }
@@ -283,6 +284,7 @@ svg { display: block; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent), 0 8px 22px rgba(0,0,0,.2);
   z-index: 5;
 }
+.gnode.is-route { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); }
 .gnode.is-dim { opacity: .18; }
 .gnode .g-title {
   font-family: var(--mono);

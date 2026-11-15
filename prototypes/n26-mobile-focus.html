@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N26 · Mobile focus — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0d12;
+  --panel: #11161d;
+  --panel-2: #171e27;
+  --line: #27313d;
+  --line-soft: #1a222c;
+  --fg: #eaf0f6;
+  --muted: #8796a7;
+  --faint: #536272;
+  --accent: #7dd3fc;
+  --accent-ink: #052432;
+  --canvas: #0b1118;
+  --edge: #3d4e61;
+  --danger: #ff827a;
+  --warm: #f4b567;
+  --success: #72ddb0;
+  --violet: #b9a5ff;
+}
+
+body { overflow: hidden; background: radial-gradient(800px 500px at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 65%), #080b0f; }
+.nx-body { min-height: 0; display: grid; place-items: center; padding: 18px; }
+.phone-main { display: grid; place-items: center; }
+.nx-phone { width: 390px; max-width: 100%; height: 760px; max-height: calc(100vh - 84px); border: 1px solid var(--line); border-radius: 24px; background: var(--bg); overflow: hidden; position: relative; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
+.phone-status { height: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; color: var(--faint); font-family: var(--mono); font-size: 8px; }
+.phone-head { height: 43px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); }
+.phone-head .nx-brand { font-size: 11px; }
+.phone-head .nx-mark { width: 20px; height: 20px; font-size: 9px; }
+.phone-head .nx-grow { flex: 1; }
+.phone-head button { border: 0; background: transparent; color: var(--faint); font-size: 14px; }
+.phone-route { display: flex; align-items: center; gap: 3px; padding: 7px 12px; border-bottom: 1px solid var(--line-soft); overflow-x: auto; scrollbar-width: none; }
+.phone-route::-webkit-scrollbar { display: none; }
+.phone-route .nx-route-item { font-size: 8.5px; padding: 2px 6px; }
+.phone-graph { position: absolute; top: 114px; left: 0; right: 0; height: 430px; background: var(--canvas); }
+.phone-graph .graph-shell { height: 100%; }
+.phone-graph .graph-toolbar { top: 8px; left: 8px; padding: 3px; background: var(--panel); border-color: var(--line); }
+.phone-graph .graph-toolbar button { min-width: 21px; height: 21px; font-size: 9px; }
+.phone-graph .graph-legend { display: none; }
+.phone-graph .minimap { width: 108px; height: 70px; right: 8px; bottom: 8px; }
+.mobile-sheet { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 20; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(18px); transition: height .2s; height: 186px; overflow: hidden; }
+.mobile-sheet.expanded { height: 330px; }
+.sheet-grab { height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.sheet-grab i { width: 34px; height: 3px; border-radius: 99px; background: var(--line); }
+.sheet-head { display: flex; align-items: flex-start; gap: 8px; padding: 0 13px 8px; }
+.sheet-head h2 { font-family: var(--mono); font-size: 12px; margin-top: 2px; }
+.sheet-head .file { color: var(--faint); font-family: var(--mono); font-size: 8px; margin-top: 3px; word-break: break-all; }
+.sheet-head .tag { margin-left: auto; }
+.sheet-facts { display: flex; gap: 13px; padding: 0 13px 9px; color: var(--faint); font-size: 8px; }
+.sheet-facts b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.sheet-tabs { display: flex; gap: 13px; padding: 0 13px; border-bottom: 1px solid var(--line-soft); }
+.sheet-tabs button { border: 0; background: transparent; color: var(--muted); font-size: 9px; padding: 6px 0; border-bottom: 1px solid transparent; }
+.sheet-tabs button.active { color: var(--accent); border-color: var(--accent); }
+.sheet-body { padding: 10px 13px; overflow: auto; height: 100px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.mobile-sheet.expanded .sheet-body { height: 230px; }
+.sheet-body .relation { padding: 4px 0; font-size: 9px; }
+.phone-nav { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; justify-content: space-around; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 15px; z-index: 5; }
+.phone-nav .active { color: var(--accent); }
+@media (max-width: 500px) { .nx-body { padding: 0; } .nx-phone { width: 100%; height: 100vh; max-height: none; border-radius: 0; border: 0; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>phone</b></div>
+  <span class="nx-grow"></span>
+  <span class="nx-faint nx-tiny">390 px</span>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <main class="phone-main">
+    <div class="nx-phone">
+      <div class="phone-status"><span>9:41</span><span>checkout-service</span><span>◉ 100%</span></div>
+      <div class="phone-head"><a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a><span class="nx-grow"></span><button>⌘</button><button>⋯</button></div>
+      <div class="phone-route"><button class="nx-route-item" data-select="checkout">checkout</button><span class="nx-route-sep">→</span><button class="nx-route-item" data-select="validateCart">validate</button><span class="nx-route-sep">→</span><button class="nx-route-item" data-select="priceCart">price</button><span class="nx-route-sep">→</span><button class="nx-route-item active" data-select="createOrder">createOrder</button><span class="nx-route-sep">→</span><button class="nx-route-item" data-select="authorize">authorize</button></div>
+      <div class="phone-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button></div><div class="minimap" id="minimap"></div></div></div>
+      <section class="mobile-sheet" id="sheet"><div class="sheet-grab" id="grab"><i></i></div><div class="sheet-head"><div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div></div><span class="tag warm">hotspot</span></div><div class="sheet-facts"><span>in <b data-fanin>3</b></span><span>out <b data-fanout>4</b></span><span>hot <b data-hotspot>88</b></span><span>risk <b>78</b></span></div><div class="sheet-tabs"><button class="active">Overview</button><button>Callers 3</button><button>Callees 4</button><button>Route</button></div><div class="sheet-body"><div class="relation"><span class="arrow">←</span><span class="mono">checkout</span><span class="meta">HTTP</span></div><div class="relation"><span class="arrow">←</span><span class="mono">validateCart</span><span class="meta">2</span></div><div class="relation"><span class="arrow">→</span><span class="mono">reserveInventory</span><span class="meta">Inventory</span></div><div class="relation"><span class="arrow">→</span><span class="mono">authorize</span><span class="meta">Payments</span></div></div></section>
+      <nav class="phone-nav"><span class="active">⌁</span><span>↳</span><span>◈</span><span>▤</span><span>↶</span></nav>
+    </div>
+  </main>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N26</b><span class="sep">·</span>adaptive <span class="sep">/</span> P09 + P24</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'createOrder', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+NX.bindSelect('.phone-route .nx-route-item', graph);
+const sheet = document.getElementById('sheet');
+document.getElementById('grab').addEventListener('click', () => sheet.classList.toggle('expanded'));
+NX.bindTabs('.sheet-tabs button', (tab) => {
+  if (tab.textContent === 'Route') graph.route(CG.checkoutPath, 'createOrder');
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') sheet.classList.remove('expanded'); });
+</script>
+</body>
+</html>

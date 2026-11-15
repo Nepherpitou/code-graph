@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N05 · Saved spaces — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --panel-2: #eef2f7;
+  --line: #dde3eb;
+  --line-soft: #edf1f5;
+  --fg: #202631;
+  --muted: #6e7887;
+  --faint: #9ca6b4;
+  --accent: #5266e8;
+  --accent-ink: #ffffff;
+  --canvas: #fafbfe;
+  --edge: #b8c1d0;
+  --danger: #c34c40;
+  --warm: #9d6b13;
+  --success: #28754f;
+  --violet: #735bc8;
+  color-scheme: light;
+}
+
+body { overflow: hidden; background: radial-gradient(700px 400px at 20% 0%, #e4e9ff, transparent 65%), radial-gradient(600px 400px at 90% 10%, #ffe9ed, transparent 60%), var(--bg); }
+.nx-main { overflow: auto; padding: 26px 28px 44px; }
+.spaces-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.spaces-head h1 { font-size: 32px; letter-spacing: -.045em; line-height: 1; font-weight: 650; }
+.spaces-head p { color: var(--muted); font-size: 11.5px; margin-top: 7px; max-width: 560px; }
+.space-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-top: 21px; }
+.space-card { padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.72); box-shadow: 0 8px 24px rgba(40,50,90,.05); text-align: left; color: var(--fg); }
+.space-card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.space-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
+.space-thumb { height: 92px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--canvas); position: relative; overflow: hidden; margin-bottom: 11px; }
+.space-thumb i { position: absolute; width: 18px; height: 8px; border-radius: 2px; background: var(--line); }
+.space-thumb i.on { background: var(--accent); }
+.space-card h2 { font-size: 12px; font-weight: 600; }
+.space-card p { color: var(--muted); font-size: 10px; margin-top: 4px; line-height: 1.45; }
+.space-meta { display: flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--faint); font-family: var(--mono); font-size: 8.5px; }
+.space-meta .nx-pill { margin-left: auto; }
+.space-detail { display: grid; grid-template-columns: minmax(0,1fr) 270px; gap: 12px; margin-top: 15px; }
+.space-graph { overflow: hidden; }
+.space-graph .graph-shell { height: 300px; background: var(--canvas); }
+.space-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.space-graph .graph-toolbar button { color: var(--muted); }
+.space-info { padding: 15px; }
+.space-info h2 { font-family: var(--mono); font-size: 13px; margin-top: 6px; }
+.space-info .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; word-break: break-all; }
+.space-info .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.space-info .fact { padding: 7px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+.space-info .fact b { display: block; font-family: var(--mono); font-size: 12px; }
+.space-info .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+@media (max-width: 1000px) { .space-grid { grid-template-columns: 1fr 1fr; } .space-detail { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .space-grid { grid-template-columns: 1fr; } .nx-main { padding: 18px 14px 34px; } .spaces-head { flex-direction: column; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">acme</span><span class="faint">/</span><b>checkout-service</b><span class="faint">/</span><span class="muted">spaces</span></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Share</button><button class="btn sm">New</button>
+  <span class="avatar">AR</span>
+</header>
+<main class="nx-main">
+  <div class="spaces-head"><div><div class="nx-kicker">Saved spaces</div><h1>Your maps, kept warm.</h1><p>Graphs are durable views, not a transient search result. Each space remembers its nodes, layout, filters, and notes.</p></div><div class="nx-row"><button class="btn sm" id="new-space">New space</button><button class="btn sm">Share</button></div></div>
+  <div class="space-grid">
+    <button class="space-card active" data-space="payment" data-select="createOrder"><div class="space-thumb"><i class="on" style="left:12px;top:28px"></i><i class="on" style="left:70px;top:16px"></i><i class="on" style="left:132px;top:46px"></i><i style="left:190px;top:20px"></i><i style="left:92px;top:62px"></i><i style="left:220px;top:64px"></i></div><h2>Payment flow</h2><p>checkout → validate → price → createOrder → authorize → capture.</p><div class="space-meta"><span>24 nodes · layered</span><span class="nx-pill">2h</span></div></button>
+    <button class="space-card" data-space="cycle" data-select="priceCart"><div class="space-thumb"><i class="on" style="left:22px;top:30px"></i><i class="on" style="left:82px;top:18px"></i><i class="on" style="left:142px;top:48px"></i><i class="on" style="left:202px;top:24px"></i><i style="left:60px;top:67px"></i><i style="left:250px;top:60px"></i></div><h2>Pricing cycle</h2><p>priceCart → applyCoupon → taxFor → priceCart. A tight loop worth breaking.</p><div class="space-meta"><span>6 nodes · cycle</span><span class="nx-pill">1d</span></div></button>
+    <button class="space-card" data-space="webhook" data-select="handleEvent"><div class="space-thumb"><i class="on" style="left:18px;top:34px"></i><i class="on" style="left:84px;top:20px"></i><i class="on" style="left:84px;top:62px"></i><i class="on" style="left:164px;top:34px"></i><i style="left:210px;top:16px"></i><i style="left:210px;top:64px"></i></div><h2>Webhook fan-out</h2><p>handle → verifySignature and handleEvent → createOrder/refund.</p><div class="space-meta"><span>18 nodes · focus</span><span class="nx-pill">1d</span></div></button>
+    <button class="space-card" data-space="dead" data-select="legacyRefund"><div class="space-thumb"><i style="left:20px;top:28px"></i><i class="on" style="left:80px;top:50px"></i><i style="left:144px;top:26px"></i><i style="left:210px;top:64px"></i><i style="left:56px;top:66px"></i></div><h2>Dead code</h2><p>Uncalled methods and imports that survived the last rewrite.</p><div class="space-meta"><span>7 nodes · filtered</span><span class="nx-pill">3d</span></div></button>
+    <button class="space-card" data-space="entry" data-select="checkout"><div class="space-thumb"><i class="on" style="left:16px;top:22px"></i><i class="on" style="left:16px;top:58px"></i><i style="left:92px;top:22px"></i><i style="left:92px;top:58px"></i><i style="left:170px;top:38px"></i><i style="left:240px;top:38px"></i></div><h2>Entry points</h2><p>The five roots by reach, with their first two hops.</p><div class="space-meta"><span>5 roots · 2-hop</span><span class="nx-pill">4d</span></div></button>
+    <button class="space-card" data-space="custom" data-select="authorize"><div class="space-thumb"><i style="left:22px;top:22px"></i><i style="left:88px;top:48px"></i><i style="left:160px;top:30px"></i><i style="left:230px;top:58px"></i></div><h2>Empty space</h2><p>Start a new map from the current selection.</p><div class="space-meta"><span>draft</span><span class="nx-pill active">new</span></div></button>
+  </div>
+  <section class="space-detail">
+    <div class="nx-card space-graph"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div></div></div>
+    <aside class="nx-card space-info"><div class="nx-kicker">Active space</div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div><div class="facts"><div class="fact"><b data-fanin>3</b><span>fan-in</span></div><div class="fact"><b data-fanout>4</b><span>fan-out</span></div><div class="fact"><b data-hotspot>88</b><span>hotspot</span></div><div class="fact"><b>24</b><span>nodes</span></div></div><p class="nx-tiny nx-muted">A space keeps the graph editable without turning the home page into a console.</p><button class="btn sm" style="width:100%;margin-top:10px" id="open-space">Open full graph ↗</button><button class="btn sm" style="width:100%;margin-top:5px" id="duplicate">Duplicate space</button></aside>
+  </section>
+</main>
+</div>
+<a class="nx-badge" href="index.html"><b>N05</b><span class="sep">·</span>start <span class="sep">/</span> P24 + P07</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'createOrder', maxScale: 1 });
+const cards = NX.bindSelect('.space-card', graph);
+cards.forEach((card) => card.addEventListener('click', () => NX.toast(`Opened “${card.querySelector('h2').textContent}”`)));
+document.getElementById('new-space').addEventListener('click', () => NX.toast('New space created from the current selection.'));
+document.getElementById('open-space').addEventListener('click', () => NX.toast('Full graph would open in a new tab.'));
+document.getElementById('duplicate').addEventListener('click', () => NX.toast('Space duplicated.'));
+</script>
+</body>
+</html>

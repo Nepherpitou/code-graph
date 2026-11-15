@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N13 · Blast radius — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #f6f3f0;
+  --panel: #ffffff;
+  --panel-2: #f3eeea;
+  --line: #e2dbd5;
+  --line-soft: #eee9e4;
+  --fg: #2a2522;
+  --muted: #756c66;
+  --faint: #a69b93;
+  --accent: #c94c3d;
+  --accent-ink: #ffffff;
+  --canvas: #fbf9f8;
+  --edge: #c9b8ae;
+  --danger: #c94c3d;
+  --warm: #a9751a;
+  --success: #2d7a55;
+  --violet: #7d5bc6;
+  color-scheme: light;
+}
+
+body { overflow: hidden; background: var(--bg); }
+.nx-body { min-height: 0; }
+.blast-question { display: flex; align-items: center; gap: 12px; padding: 0 20px; min-height: 60px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.blast-question .q { font-size: 14px; font-weight: 550; letter-spacing: -.015em; }
+.blast-question .target { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); font-family: var(--mono); font-size: 10px; }
+.blast-question .target .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.blast-question .nx-grow { flex: 1; }
+.blast-question .toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9.5px; }
+.switch { width: 26px; height: 15px; border-radius: 99px; background: var(--line); position: relative; cursor: pointer; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--panel); transition: transform .15s; }
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(11px); background: #fff; }
+.blast-wrap { flex: 1; min-width: 0; display: grid; grid-template-columns: 264px minmax(0,1fr) 308px; min-height: 0; }
+.blast-summary { border-right: 1px solid var(--line); background: var(--panel); padding: 18px; overflow: auto; }
+.blast-summary h1 { margin-top: 8px; font-family: var(--mono); font-size: 15px; line-height: 1.25; word-break: break-word; }
+.blast-summary .file { color: var(--faint); font-family: var(--mono); font-size: 9px; margin-top: 4px; }
+.risk { margin-top: 17px; padding: 13px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--danger) 5%, var(--panel)); }
+.risk-head { display: flex; align-items: flex-end; justify-content: space-between; }
+.risk-head b { color: var(--accent); font-family: var(--mono); font-size: 23px; letter-spacing: -.05em; }
+.risk-head span { color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.risk p { color: var(--muted); font-size: 10px; line-height: 1.5; margin-top: 6px; }
+.risk .bar { height: 5px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 9px; }
+.risk .bar i { display: block; height: 100%; width: 78%; background: var(--accent); border-radius: inherit; }
+.blast-summary .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 14px; }
+.blast-summary .fact { padding: 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+.blast-summary .fact b { display: block; font-family: var(--mono); font-size: 12px; }
+.blast-summary .fact span { display: block; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.blast-summary .note { margin-top: 13px; font-size: 9.5px; }
+.blast-summary .actions { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
+.blast-summary .btn { justify-content: flex-start; font-size: 9.5px; background: var(--panel); border-color: var(--line); }
+.blast-graph { display: flex; flex-direction: column; min-width: 0; background: var(--canvas); }
+.blast-graph-head { display: flex; align-items: center; gap: 8px; padding: 10px 13px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.blast-graph-head .title { font-size: 10.5px; font-weight: 600; }
+.blast-graph-head .nx-pill { background: var(--panel-2); border-color: transparent; font-size: 9px; }
+.blast-graph .graph-shell { flex: 1; min-height: 0; }
+.blast-graph .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.blast-graph .minimap { width: 140px; height: 90px; background: var(--panel); }
+.blast-coverage { display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-top: 1px solid var(--line-soft); background: var(--panel); color: var(--faint); font-size: 9px; }
+.blast-table { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.blast-table-head { padding: 12px 13px 9px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+.blast-table-head h2 { font-size: 11px; font-weight: 600; }
+.blast-table-head span { color: var(--faint); font-size: 9px; }
+.blast-table-scroll { overflow: auto; flex: 1; }
+.blast-table .nx-table th { font-size: 8px; }
+.blast-table .nx-table td { padding: 7px 9px; }
+.blast-table .depth { display: inline-flex; gap: 2px; }
+.blast-table .depth i { width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
+.blast-table .depth i.on { background: var(--accent); }
+.blast-table .ok { color: var(--success); } .blast-table .bad { color: var(--danger); }
+@media (max-width: 1100px) { .blast-wrap { grid-template-columns: 230px minmax(0,1fr) 270px; } }
+@media (max-width: 900px) { .blast-wrap { grid-template-columns: 1fr; } .blast-summary, .blast-table { display: none; } .blast-question .toggle { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>impact</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Compare snapshot</button><button class="btn sm">Export</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="blast-question"><span class="q">What breaks if I change</span><span class="target"><span class="dot"></span><span data-selected-qname>OrderService.createOrder</span><span class="faint">⌄</span></span><span class="nx-grow"></span><span class="toggle"><span class="switch on" id="tests"></span>include tests</span><button class="btn sm">Open definition ↗</button></div>
+<div class="nx-body">
+  <div class="blast-wrap">
+    <aside class="blast-summary"><div class="nx-kicker">Change impact</div><h1 data-selected-qname>OrderService.createOrder</h1><div class="file" data-selected-file>src/domain/OrderService.ts</div>
+      <div class="risk"><div class="risk-head"><b>78</b><span>risk score</span></div><p>High blast radius. Three upstream entry points reach this function; one has no test coverage.</p><div class="bar"><i></i></div></div>
+      <div class="facts"><div class="fact"><span>direct callers</span><b>3</b></div><div class="fact"><span>transitive</span><b>21</b></div><div class="fact"><span>call sites</span><b>4</b></div><div class="fact"><span>tests</span><b id="test-count">2 / 5</b></div></div>
+      <div class="note">Reach × fan-in × uncovered call sites. Tests are included when the toggle is on.</div>
+      <div class="actions"><button class="btn sm">Focus blast radius</button><button class="btn sm">Show callers only</button><button class="btn sm">Copy refactor brief</button></div>
+    </aside>
+    <main class="blast-graph"><div class="blast-graph-head"><span class="title">Upstream callers</span><span>reverse graph · 2-hop</span><span class="nx-grow"></span><button class="nx-pill active">Callers</button><button class="nx-pill">Tests</button><button class="nx-pill">Data</button></div>
+      <div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call<span class="line"></span>data</span></div><div class="minimap" id="minimap"></div></div>
+      <div class="blast-coverage"><span class="status-dot"></span><span id="coverage-text">5 direct call sites · 3 tested · 2 untested</span><span class="nx-grow"></span><span>path depth 3 · fan-in 3</span></div>
+    </main>
+    <aside class="blast-table"><div class="blast-table-head"><h2>Affected functions</h2><span>21 total</span></div><div class="blast-table-scroll"><table class="nx-table">
+      <thead><tr><th>Function</th><th>depth</th><th>tests</th></tr></thead><tbody id="affected">
+        <tr class="active" data-select="checkout"><td class="name">checkout <span class="sub">· HTTP</span></td><td><span class="depth"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="ok">✓</td></tr>
+        <tr data-select="validateCart"><td class="name">validateCart</td><td><span class="depth"><i class="on"></i><i class="on"></i><i></i></span></td><td class="ok">✓</td></tr>
+        <tr data-select="priceCart"><td class="name">priceCart</td><td><span class="depth"><i class="on"></i><i class="on"></i><i></i></span></td><td class="ok">✓</td></tr>
+        <tr data-select="handleEvent"><td class="name">handleEvent</td><td><span class="depth"><i class="on"></i><i></i><i></i></span></td><td class="bad">—</td></tr>
+        <tr data-select="webhook"><td class="name">handle <span class="sub">· webhook</span></td><td><span class="depth"><i class="on"></i><i></i><i></i></span></td><td class="bad">—</td></tr>
+        <tr data-select="refund"><td class="name">refund</td><td><span class="depth"><i class="on"></i><i class="on"></i><i></i></span></td><td class="ok">✓</td></tr>
+      </tbody></table></div><div class="nx-card-foot">Click a row to center it in the graph.</div></aside>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N13</b><span class="sep">·</span>task <span class="sep">/</span> P11 + P13</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'hub', selected: 'createOrder', maxScale: 1 });
+CG.minimap(document.getElementById('minimap'), 'hub');
+NX.bindSelect('#affected tr', graph);
+const toggle = document.getElementById('tests');
+toggle.addEventListener('click', () => {
+  toggle.classList.toggle('on');
+  document.getElementById('test-count').textContent = toggle.classList.contains('on') ? '2 / 5' : '— / 5';
+  document.getElementById('coverage-text').textContent = toggle.classList.contains('on') ? '5 direct call sites · 3 tested · 2 untested' : 'tests excluded from this view';
+});
+NX.bindTabs('.blast-graph-head .nx-pill', () => NX.toast('Graph filter applied.'));
+</script>
+</body>
+</html>

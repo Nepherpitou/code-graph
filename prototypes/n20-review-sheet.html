@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N20 · Review sheet — code-graph next cut</title>
+<link rel="stylesheet" href="assets/proto.css">
+<link rel="stylesheet" href="assets/next.css">
+
+<style>
+:root {
+  --bg: #0a0e13;
+  --panel: #111820;
+  --panel-2: #18222c;
+  --line: #283642;
+  --line-soft: #1b2731;
+  --fg: #edf4f8;
+  --muted: #8a99a6;
+  --faint: #566777;
+  --accent: #7dd3fc;
+  --accent-ink: #052432;
+  --canvas: #0c1319;
+  --edge: #3f5261;
+  --danger: #ff8178;
+  --warm: #f2b568;
+  --success: #72ddb0;
+  --violet: #b8a1ff;
+}
+
+body { overflow: hidden; }
+.nx-body { min-height: 0; }
+.review-body { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) 340px; min-height: 0; }
+.review-main { display: flex; flex-direction: column; min-width: 0; }
+.review-head { padding: 16px 20px 11px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.review-head h1 { font-size: 22px; letter-spacing: -.035em; line-height: 1; font-weight: 620; margin-top: 4px; }
+.review-head p { color: var(--muted); font-size: 10px; margin-top: 5px; }
+.review-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.review-toolbar .nx-pill { min-height: 22px; font-size: 9px; background: var(--panel-2); border-color: transparent; }
+.review-toolbar .nx-pill.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.review-scroll { flex: 1; overflow: auto; }
+.review-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 9.5px; }
+.review-table th { position: sticky; top: 0; z-index: 2; padding: 8px 10px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; text-align: left; white-space: nowrap; }
+.review-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.review-table tr:hover td, .review-table tr.active td { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--fg); }
+.review-table tr.reviewed td { opacity: .55; }
+.review-table .name { color: var(--fg); font-size: 10px; }
+.review-table .sub { color: var(--faint); font-size: 8px; }
+.review-table input { accent-color: var(--accent); }
+.review-table .sev { display: inline-flex; align-items: center; gap: 4px; }
+.review-table .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warm); }
+.review-table .dot.high { background: var(--danger); }
+.review-foot { display: flex; align-items: center; gap: 8px; padding: 8px 20px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font-size: 9px; }
+.review-aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.review-aside .graph-shell { height: 330px; flex: 0 0 auto; background: var(--canvas); }
+.review-aside .graph-toolbar { background: var(--panel); border-color: var(--line); }
+.review-info { padding: 14px 15px; overflow: auto; }
+.review-info h2 { font-family: var(--mono); font-size: 14px; margin-top: 6px; }
+.review-info .file { color: var(--faint); font-family: var(--mono); font-size: 8.5px; margin-top: 3px; word-break: break-all; }
+.review-info .facts { display: flex; gap: 12px; margin-top: 9px; color: var(--faint); font-size: 8.5px; }
+.review-info .facts b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+.review-progress { margin-top: 13px; }
+.review-progress .bar { height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.review-progress .bar i { display: block; height: 100%; width: 33%; background: var(--accent); border-radius: inherit; transition: width .2s; }
+.review-progress .label { display: flex; justify-content: space-between; color: var(--faint); font-size: 8.5px; margin-top: 4px; }
+@media (max-width: 1050px) { .review-body { grid-template-columns: minmax(0,1fr) 300px; } }
+@media (max-width: 800px) { .review-body { grid-template-columns: 1fr; } .review-aside { display: none; } }
+
+</style>
+</head>
+<body>
+<div class="nx-app">
+<header class="nx-top">
+  <a class="nx-brand" href="index.html"><span class="nx-mark">◉</span><span>code-graph</span></a>
+  <div class="nx-crumbs"><span class="muted">checkout-service</span><span class="faint">/</span><b>review sheet</b></div>
+  <span class="nx-grow"></span>
+  <button class="btn sm">Export</button><button class="btn sm">Submit review</button>
+  <span class="avatar">AR</span>
+</header>
+<div class="nx-body">
+  <div class="review-body">
+    <main class="review-main">
+      <div class="review-head"><div class="nx-kicker">Review sheet · security pass</div><h1>12 functions, one decision.</h1><p>Use the table as the checklist. The graph shows what each row actually touches.</p></div>
+      <div class="review-toolbar"><button class="nx-pill active" data-filter="all">All 12</button><button class="nx-pill" data-filter="unreviewed">Unreviewed</button><button class="nx-pill" data-filter="high">High risk</button><span class="nx-grow"></span><span class="nx-faint nx-tiny" id="review-count">12 rows</span></div>
+      <div class="review-scroll"><table class="review-table" id="review"><thead><tr><th>✓</th><th>Function</th><th>signal</th><th>risk</th><th>owner</th></tr></thead><tbody>
+        <tr class="active" data-select="createOrder" data-risk="high"><td><input type="checkbox"></td><td><span class="name">createOrder</span><span class="sub"> · OrderService.ts</span></td><td><span class="sev"><i class="dot high"></i>hotspot</span></td><td>78</td><td>payments</td></tr>
+        <tr data-select="priceCart" data-risk="high"><td><input type="checkbox"></td><td><span class="name">priceCart</span><span class="sub"> · PricingService.ts</span></td><td><span class="sev"><i class="dot high"></i>cycle</span></td><td>71</td><td>domain</td></tr>
+        <tr data-select="authorize" data-risk="high"><td><input type="checkbox"></td><td><span class="name">authorize</span><span class="sub"> · PaymentGateway.ts</span></td><td><span class="sev"><i class="dot high"></i>async</span></td><td>68</td><td>payments</td></tr>
+        <tr data-select="refund"><td><input type="checkbox"></td><td><span class="name">refund</span><span class="sub"> · RefundService.ts</span></td><td><span class="sev"><i class="dot"></i>uncovered</span></td><td>56</td><td>domain</td></tr>
+        <tr data-select="handleEvent"><td><input type="checkbox"></td><td><span class="name">handleEvent</span><span class="sub"> · PaymentWebhook.ts</span></td><td><span class="sev"><i class="dot"></i>fan-out</span></td><td>47</td><td>payments</td></tr>
+        <tr data-select="validateCart"><td><input type="checkbox" checked></td><td><span class="name">validateCart</span><span class="sub"> · CheckoutController.ts</span></td><td><span class="sev"><i class="dot"></i>entry-adjacent</span></td><td>38</td><td>http</td></tr>
+        <tr data-select="reserveInventory"><td><input type="checkbox"></td><td><span class="name">reserveInventory</span><span class="sub"> · InventoryService.ts</span></td><td><span class="sev"><i class="dot"></i>inventory</span></td><td>35</td><td>domain</td></tr>
+        <tr data-select="finalizeOrder"><td><input type="checkbox" checked></td><td><span class="name">finalizeOrder</span><span class="sub"> · OrderService.ts</span></td><td><span class="sev"><i class="dot"></i>event</span></td><td>31</td><td>domain</td></tr>
+        <tr data-select="legacyRefund"><td><input type="checkbox"></td><td><span class="name">legacyRefund</span><span class="sub"> · RefundService.ts</span></td><td><span class="sev"><i class="dot"></i>dead</span></td><td>2</td><td>domain</td></tr>
+      </tbody></table></div>
+      <div class="review-foot"><span class="status-dot"></span><span>2 reviewed · 7 remaining</span><span class="nx-grow"></span><span>click a row to preview, checkbox to mark reviewed</span></div>
+    </main>
+    <aside class="review-aside"><div class="graph-shell" id="demo-graph"><div class="graph-toolbar"><button>−</button><button>+</button><button>⌖</button><span class="graph-legend"><i></i>call</span></div></div><div class="review-info"><div class="nx-kicker">Preview</div><h2 data-selected-qname>OrderService.createOrder</h2><div class="file" data-selected-file>src/domain/OrderService.ts</div><div class="facts"><span>in <b data-fanin>3</b></span><span>out <b data-fanout>4</b></span><span>hot <b data-hotspot>88</b></span></div><div class="review-progress"><div class="bar"><i id="review-bar"></i></div><div class="label"><span id="review-label">2 reviewed</span><span>9 rows</span></div></div><div class="nx-card-foot" style="padding:10px 0 0;border:0">Reviewing a row does not change the code. It records a decision.</div></div></aside>
+  </div>
+</div>
+</div>
+<a class="nx-badge" href="index.html"><b>N20</b><span class="sep">·</span>table <span class="sep">/</span> P13 + P06</a>
+<script src="assets/proto.js"></script>
+<script src="assets/next.js"></script>
+<script>
+const graph = CG.mount(document.getElementById('demo-graph'), { layout: 'layered', selected: 'createOrder', maxScale: 1 });
+NX.bindSelect('#review tbody tr', graph);
+function updateReview() {
+  const rows = [...document.querySelectorAll('#review tbody tr')];
+  const reviewed = rows.filter((row) => row.querySelector('input').checked).length;
+  rows.forEach((row) => row.classList.toggle('reviewed', row.querySelector('input').checked));
+  document.getElementById('review-label').textContent = `${reviewed} reviewed`;
+  document.getElementById('review-bar').style.width = `${(reviewed / rows.length) * 100}%`;
+  document.querySelector('.review-foot span:nth-child(2)').textContent = `${reviewed} reviewed · ${rows.length - reviewed} remaining`;
+}
+document.querySelectorAll('#review input').forEach((input) => input.addEventListener('click', (event) => {
+  event.stopPropagation(); updateReview();
+}));
+document.querySelectorAll('.review-toolbar .nx-pill').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.review-toolbar .nx-pill').forEach((item) => item.classList.remove('active'));
+  button.classList.add('active');
+  const filter = button.dataset.filter;
+  document.querySelectorAll('#review tbody tr').forEach((row) => {
+    const reviewed = row.querySelector('input').checked;
+    const high = row.dataset.risk === 'high';
+    row.style.display = filter === 'all' || (filter === 'unreviewed' && !reviewed) || (filter === 'high' && high) ? '' : 'none';
+  });
+}));
+updateReview();
+</script>
+</body>
+</html>

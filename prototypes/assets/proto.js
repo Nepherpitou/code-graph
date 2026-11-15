@@ -109,6 +109,9 @@
   const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
   const kindLabel = { function: 'fn', method: 'method', constructor: 'ctor', constant: 'const', external: 'external' };
   const counters = { graph: 0 };
+  const checkoutPath = ['checkout', 'validateCart', 'priceCart', 'createOrder', 'authorize', 'capture'];
+  const callers = twin(nodes, (node) => edges.filter((edge) => edge.to === node.id).map((edge) => edge.from));
+  const callees = twin(nodes, (node) => edges.filter((edge) => edge.from === node.id).map((edge) => edge.to));
 
   function nodeEl(node) {
     const el = document.createElement('button');
@@ -194,6 +197,18 @@
     el.appendChild(world);
 
     const state = { selected: null, api: null };
+    function facts(id) {
+      if (!id) return;
+      const node = byId[id];
+      for (const target of document.querySelectorAll('[data-selected-name]')) target.textContent = node.name;
+      for (const target of document.querySelectorAll('[data-selected-qname]')) target.textContent = `${node.cls}.${node.name}`;
+      for (const target of document.querySelectorAll('[data-selected-file]')) target.textContent = node.file;
+      for (const target of document.querySelectorAll('[data-selected-kind]')) target.textContent = node.kind;
+      for (const target of document.querySelectorAll('[data-fanin]')) target.textContent = node.fanIn;
+      for (const target of document.querySelectorAll('[data-fanout]')) target.textContent = node.fanOut;
+      for (const target of document.querySelectorAll('[data-hotspot]')) target.textContent = `${node.hotspot}`;
+      if (options.onSelect) options.onSelect(node);
+    }
     function select(id) {
       state.selected = id;
       const neighbors = new Set([id]);
@@ -202,36 +217,46 @@
         if (edge.to === id) neighbors.add(edge.from);
       }
       for (const [nodeId, nodeEl] of nodeEls) {
+        nodeEl.classList.remove('is-route');
         nodeEl.classList.toggle('is-selected', nodeId === id);
         nodeEl.classList.toggle('is-dim', Boolean(id) && !neighbors.has(nodeId));
       }
       for (const edgeEl of edgeEls) {
         const hot = edgeEl.dataset.from === id || edgeEl.dataset.to === id;
+        edgeEl.classList.remove('is-route');
         edgeEl.classList.toggle('is-hot', Boolean(id) && hot);
         edgeEl.classList.toggle('is-dim', Boolean(id) && !hot);
       }
-      if (id) {
-        const node = byId[id];
-        for (const target of document.querySelectorAll('[data-selected-name]')) target.textContent = node.name;
-        for (const target of document.querySelectorAll('[data-selected-qname]')) target.textContent = `${node.cls}.${node.name}`;
-        for (const target of document.querySelectorAll('[data-selected-file]')) target.textContent = node.file;
-        for (const target of document.querySelectorAll('[data-selected-kind]')) target.textContent = node.kind;
-        for (const target of document.querySelectorAll('[data-fanin]')) target.textContent = node.fanIn;
-        for (const target of document.querySelectorAll('[data-fanout]')) target.textContent = node.fanOut;
-        for (const target of document.querySelectorAll('[data-hotspot]')) target.textContent = `${node.hotspot}`;
-        if (options.onSelect) options.onSelect(node);
-      }
+      facts(id);
       return nodeEls.get(id);
+    }
+    function route(ids, focusId) {
+      const focus = focusId || ids[0];
+      const set = new Set(ids);
+      state.selected = focus;
+      for (const [nodeId, nodeEl] of nodeEls) {
+        nodeEl.classList.toggle('is-selected', nodeId === focus);
+        nodeEl.classList.toggle('is-route', set.has(nodeId));
+        nodeEl.classList.toggle('is-dim', !set.has(nodeId));
+      }
+      for (const edgeEl of edgeEls) {
+        const onRoute = set.has(edgeEl.dataset.from) && set.has(edgeEl.dataset.to);
+        edgeEl.classList.toggle('is-route', onRoute);
+        edgeEl.classList.remove('is-hot');
+        edgeEl.classList.toggle('is-dim', !onRoute);
+      }
+      facts(focus);
+      return nodeEls.get(focus);
     }
 
     nodeEls.forEach((nodeEl, id) => {
       nodeEl.addEventListener('click', () => select(id));
     });
     el.addEventListener('click', (event) => {
-      if (event.target.closest('.gnode')) return;
+      if (event.target.closest('.gnode, button, .graph-toolbar, .minimap, .glass-pills, .route-endpoints, .route-legend, .focus-label, .stage-label, .bottom-dock, .nx-sheet, .nx-route')) return;
       state.selected = null;
-      for (const nodeEl of nodeEls.values()) nodeEl.classList.remove('is-selected', 'is-dim');
-      for (const edgeEl of edgeEls) edgeEl.classList.remove('is-hot', 'is-dim');
+      for (const nodeEl of nodeEls.values()) nodeEl.classList.remove('is-selected', 'is-route', 'is-dim');
+      for (const edgeEl of edgeEls) edgeEl.classList.remove('is-hot', 'is-route', 'is-dim');
     });
 
     function fit() {
@@ -247,7 +272,7 @@
     observer.observe(el);
     requestAnimationFrame(fit);
     if (selectedStart) select(selectedStart);
-    state.api = { select, fit, observer, nodeEls };
+    state.api = { select, route, fit, observer, nodeEls };
     return state.api;
   }
 
@@ -275,5 +300,8 @@
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
   }
 
-  window.CG = { project, nodes, edges, modules, layouts, mount, minimap, fmt, byId };
+  window.CG = {
+    project, nodes, edges, modules, layouts, mount, minimap, fmt, byId,
+    callers, callees, checkoutPath,
+  };
 })();
