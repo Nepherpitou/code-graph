@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::Result;
+use serde::Serialize;
 use tokio::sync::RwLock;
 
 mod entry;
@@ -20,6 +21,17 @@ use crate::store::Store;
 pub struct GraphSlice {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusSlice {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+    pub entry: Option<String>,
+    pub exit: Option<String>,
+    /// Node IDs on the shortest entry → selected → exit route.
+    pub route: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -56,6 +68,12 @@ struct IndexedEdge {
     id: i64,
     source: usize,
     target: usize,
+}
+
+fn select_with_budget(selected: &mut HashSet<usize>, node: usize, limit: usize) {
+    if selected.len() < limit {
+        selected.insert(node);
+    }
 }
 
 struct GraphIndex {
@@ -247,6 +265,303 @@ impl QueryService {
             nodes,
             edges,
             truncated,
+        })
+    }
+
+    /// Focused exploration slice.
+    ///
+    /// Priority order:
+    /// 1. the selected node and all direct neighbours;
+    /// 2. the shortest caller path to the nearest entry point;
+    /// 3. the shortest callee path to the nearest exit point;
+    /// 4. all undirected neighbours at exactly two hops;
+    /// 5. remaining callers up to the entry point, then callees up to the
+    ///    exit point (the limit still applies).
+    ///
+    /// The two shortest paths together form the execution route through the
+    /// selected node. The budget is spent on context around that route instead
+    /// of unrelated entry-point branches.
+    pub async fn focus_slice(&self, graph_id: i64, root: &str, limit: usize) -> Result<FocusSlice> {
+        let index = self.index(graph_id).await?;
+        let Some(&root_idx) = index.key_to_idx.get(root) else {
+            return Ok(FocusSlice::default());
+        };
+        let limit = limit.clamp(1, 5000);
+        let nodes = self.store.all_nodes(graph_id).await?;
+        let node_by_key: HashMap<&str, &GraphNode> =
+            nodes.iter().map(|node| (node.id.as_str(), node)).collect();
+        let mut selected = HashSet::new();
+        select_with_budget(&mut selected, root_idx, limit);
+
+        // 1. Direct neighbours, both incoming and outgoing, all edge kinds.
+        let mut direct = Vec::new();
+        for edge_index in index.out_all[root_idx]
+            .iter()
+            .chain(index.in_all[root_idx].iter())
+        {
+            let edge = &index.edges[*edge_index];
+            let next = if edge.source == root_idx {
+                edge.target
+            } else {
+                edge.source
+            };
+            if next != root_idx {
+                direct.push(next);
+            }
+        }
+        direct.sort_unstable();
+        direct.dedup();
+        for next in direct {
+            select_with_budget(&mut selected, next, limit);
+        }
+
+        // Reverse call BFS: distance from the selected node to each caller.
+        let mut distance = vec![usize::MAX; index.keys.len()];
+        let mut parent: Vec<Option<(usize, i64)>> = vec![None; index.keys.len()];
+        distance[root_idx] = 0;
+        let mut queue = VecDeque::new();
+        queue.push_back(root_idx);
+        while let Some(node) = queue.pop_front() {
+            let next_distance = distance[node] + 1;
+            for edge_index in &index.in_call[node] {
+                let edge = &index.edges[*edge_index];
+                let caller = edge.source;
+                if distance[caller] != usize::MAX {
+                    continue;
+                }
+                distance[caller] = next_distance;
+                parent[caller] = Some((node, edge.id));
+                queue.push_back(caller);
+            }
+        }
+
+        let mut entries: Vec<(usize, usize, u32)> = distance
+            .iter()
+            .enumerate()
+            .filter(|(_, distance)| **distance != usize::MAX)
+            .filter_map(|(node, distance)| {
+                let candidate = node_by_key.get(index.keys[node].as_str())?;
+                if !entry::is_entry_candidate(candidate) {
+                    return None;
+                }
+                Some((*distance, node, candidate.metrics.transitive_fan_out))
+            })
+            .collect();
+        entries.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| right.2.cmp(&left.2))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+
+        // 2. Add the caller path from the nearest entry point to the selection.
+        let mut entry_distance = None;
+        let mut entry_node = None;
+        let mut entry_path = Vec::new();
+        if let Some((nearest_distance, entry_idx, _)) = entries.first().copied() {
+            entry_distance = Some(nearest_distance);
+            entry_node = Some(entry_idx);
+            let mut cursor = entry_idx;
+            let mut path = Vec::new();
+            loop {
+                path.push(cursor);
+                if cursor == root_idx {
+                    break;
+                }
+                let Some((next, _)) = parent[cursor] else {
+                    break;
+                };
+                cursor = next;
+            }
+            // Root-to-entry order keeps the budget concentrated near the
+            // selected node when the path itself is larger than the limit.
+            for node in path.iter().rev() {
+                select_with_budget(&mut selected, *node, limit);
+            }
+            entry_path = path;
+        }
+
+        // Forward call BFS: shortest callee paths from the selected node.
+        let mut out_distance = vec![usize::MAX; index.keys.len()];
+        let mut out_parent: Vec<Option<(usize, i64)>> = vec![None; index.keys.len()];
+        out_distance[root_idx] = 0;
+        let mut queue = VecDeque::new();
+        queue.push_back(root_idx);
+        while let Some(node) = queue.pop_front() {
+            let next_distance = out_distance[node] + 1;
+            for edge_index in &index.out_call[node] {
+                let edge = &index.edges[*edge_index];
+                let callee = edge.target;
+                if out_distance[callee] != usize::MAX {
+                    continue;
+                }
+                out_distance[callee] = next_distance;
+                out_parent[callee] = Some((node, edge.id));
+                queue.push_back(callee);
+            }
+        }
+
+        let mut exits: Vec<(usize, usize, u32)> = out_distance
+            .iter()
+            .enumerate()
+            .filter(|(_, distance)| **distance != usize::MAX)
+            .filter_map(|(node, distance)| {
+                let candidate = node_by_key.get(index.keys[node].as_str())?;
+                if !entry::is_exit_candidate(candidate) {
+                    return None;
+                }
+                Some((*distance, node, candidate.metrics.height))
+            })
+            .collect();
+        exits.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| right.2.cmp(&left.2))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+
+        // 3. Add the callee path from the selection to the nearest exit.
+        let mut exit_distance = None;
+        let mut exit_node = None;
+        let mut exit_path = Vec::new();
+        if let Some((nearest_distance, exit_idx, _)) = exits.first().copied() {
+            exit_distance = Some(nearest_distance);
+            exit_node = Some(exit_idx);
+            let mut cursor = exit_idx;
+            let mut path = Vec::new();
+            loop {
+                path.push(cursor);
+                if cursor == root_idx {
+                    break;
+                }
+                let Some((previous, _)) = out_parent[cursor] else {
+                    break;
+                };
+                cursor = previous;
+            }
+            // Root-to-exit order, same budget rule as the caller path.
+            for node in path.iter().rev() {
+                select_with_budget(&mut selected, *node, limit);
+            }
+            exit_path = path;
+        }
+
+        // 4. Second-level neighbours in the undirected slice.
+        let mut undirected = vec![usize::MAX; index.keys.len()];
+        undirected[root_idx] = 0;
+        let mut queue = VecDeque::new();
+        queue.push_back(root_idx);
+        while let Some(node) = queue.pop_front() {
+            let next_distance = undirected[node] + 1;
+            if next_distance > 2 {
+                continue;
+            }
+            for edge_index in index.out_all[node].iter().chain(index.in_all[node].iter()) {
+                let edge = &index.edges[*edge_index];
+                let next = if edge.source == node {
+                    edge.target
+                } else {
+                    edge.source
+                };
+                if next == node || undirected[next] != usize::MAX {
+                    continue;
+                }
+                undirected[next] = next_distance;
+                queue.push_back(next);
+            }
+        }
+        let mut second: Vec<(usize, usize)> = undirected
+            .iter()
+            .enumerate()
+            .filter(|(_, distance)| **distance == 2)
+            .map(|(node, _)| node)
+            .map(|node| (node, 0))
+            .collect();
+        second.sort_unstable();
+        for (node, _) in second {
+            select_with_budget(&mut selected, node, limit);
+        }
+
+        // 5. Remaining callers up to the nearest entry point. When the
+        // component has no entry candidate, use the whole caller closure (the
+        // limit still applies).
+        let ancestor_limit = entry_distance.unwrap_or(usize::MAX);
+        let mut ancestors: Vec<(usize, usize, u32)> = distance
+            .iter()
+            .enumerate()
+            .filter(|(_, distance)| **distance != usize::MAX && **distance <= ancestor_limit)
+            .filter_map(|(node, distance)| {
+                let candidate = node_by_key.get(index.keys[node].as_str())?;
+                Some((*distance, node, candidate.metrics.transitive_fan_out))
+            })
+            .collect();
+        ancestors.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| right.2.cmp(&left.2))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        for (_, node, _) in ancestors {
+            select_with_budget(&mut selected, node, limit);
+        }
+
+        // 6. Remaining callees up to the nearest exit point.
+        let descendant_limit = exit_distance.unwrap_or(usize::MAX);
+        let mut descendants: Vec<(usize, usize, u32)> = out_distance
+            .iter()
+            .enumerate()
+            .filter(|(_, distance)| **distance != usize::MAX && **distance <= descendant_limit)
+            .filter_map(|(node, distance)| {
+                let candidate = node_by_key.get(index.keys[node].as_str())?;
+                Some((*distance, node, candidate.metrics.height))
+            })
+            .collect();
+        descendants.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| right.2.cmp(&left.2))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        for (_, node, _) in descendants {
+            select_with_budget(&mut selected, node, limit);
+        }
+
+        let keys: Vec<String> = selected
+            .iter()
+            .filter_map(|node| index.keys.get(*node).cloned())
+            .collect();
+        let mut edge_ids = HashSet::new();
+        for node in &selected {
+            for edge_index in index.out_all[*node]
+                .iter()
+                .chain(index.in_all[*node].iter())
+            {
+                let edge = &index.edges[*edge_index];
+                if selected.contains(&edge.source) && selected.contains(&edge.target) {
+                    edge_ids.insert(edge.id);
+                }
+            }
+        }
+        let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
+        let edges = self
+            .store
+            .edges_by_ids(graph_id, &edge_ids.into_iter().collect::<Vec<_>>())
+            .await?;
+        let mut route_keys = Vec::new();
+        let mut route_seen = HashSet::new();
+        for node in entry_path.iter().chain(exit_path.iter().rev().skip(1)) {
+            if let Some(key) = index.keys.get(*node) {
+                if route_seen.insert(key.clone()) {
+                    route_keys.push(key.clone());
+                }
+            }
+        }
+        Ok(FocusSlice {
+            nodes,
+            edges,
+            entry: entry_node.and_then(|node| index.keys.get(node).cloned()),
+            exit: exit_node.and_then(|node| index.keys.get(node).cloned()),
+            route: route_keys,
         })
     }
 

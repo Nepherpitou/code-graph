@@ -43,6 +43,7 @@ export interface FlowEdgeData extends Record<string, unknown> {
   edge: GraphEdge;
   dimmed: boolean;
   highlighted: boolean;
+  route?: boolean;
 }
 
 export interface GhostNodeData extends Record<string, unknown> {
@@ -258,14 +259,18 @@ export function toFlowEdges(
   edges: GraphEdge[],
   selectedId: string | null,
   neighborIds: Set<string>,
+  routeIds: Set<string> = new Set(),
 ): FlowEdge[] {
   return edges.map((edge) => {
     const inferred = Boolean(edge.inferred);
     const data = edge.kind === 'data';
     const returnsValue = edge.kind === 'call' && (edge.resultUsed === 'all' || edge.resultUsed === 'some');
     const unknown = edge.kind === 'call' && edge.resultUsed === 'unknown';
-    const color = inferred ? 'var(--warning)' : data ? 'var(--success)' : returnsValue ? 'var(--accent)' : 'var(--edge-call)';
-    const dash = inferred || data || unknown ? '6 4' : undefined;
+    const route = routeIds.has(edge.source) && routeIds.has(edge.target);
+    const color = route
+      ? 'var(--success)'
+      : inferred ? 'var(--warning)' : data ? 'var(--success)' : returnsValue ? 'var(--accent)' : 'var(--edge-call)';
+    const dash = route ? undefined : inferred || data || unknown ? '6 4' : undefined;
     const highlighted = selectedId !== null && (edge.source === selectedId || edge.target === selectedId);
     const dimmed = selectedId !== null && !highlighted && !(neighborIds.has(edge.source) && neighborIds.has(edge.target));
     return {
@@ -280,23 +285,23 @@ export function toFlowEdges(
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
       interactionWidth: 16,
-      data: { edge, dimmed, highlighted },
+      data: { edge, dimmed, highlighted, route },
       style: {
-        stroke: highlighted ? 'var(--accent)' : color,
-        strokeWidth: highlighted ? 2.6 : 1.5,
+        stroke: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
+        strokeWidth: route ? 2.8 : highlighted ? 2.6 : 1.5,
         strokeDasharray: dash,
-        opacity: dimmed ? 0.1 : 0.9,
+        opacity: dimmed ? 0.1 : route ? 1 : 0.9,
       },
       markerEnd: {
         type: 'arrowclosed',
-        color: highlighted ? 'var(--accent)' : color,
-        width: 16,
-        height: 16,
+        color: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
+        width: route ? 18 : 16,
+        height: route ? 18 : 16,
       },
       markerStart: returnsValue
         ? {
             type: 'arrowclosed',
-            color: highlighted ? 'var(--accent)' : color,
+            color: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
             width: 14,
             height: 14,
           }

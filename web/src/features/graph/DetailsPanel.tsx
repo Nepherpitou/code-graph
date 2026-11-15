@@ -81,7 +81,7 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
         <h3>Node details</h3>
         <p className="muted">Select a node to inspect metrics, callers, and callees.</p>
         <ul className="hints">
-          <li><b>Click</b> a card to inspect it and focus only its connected slice.</li>
+          <li><b>Click</b> a card to focus its direct neighbours and shortest entry→exit route.</li>
           <li><b>Double-click</b> to focus the same connected slice.</li>
           <li><b>Top entries</b> returns to the entry-point overview.</li>
           <li>Arrowheads point at callees; a second arrowhead means the result is used.</li>
@@ -160,7 +160,7 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
         <RelationList title="Used by" edges={incoming.filter((edge) => edge.kind === 'data')} side="source" report={report} onSelect={onSelect} />
       </div>
       <div className="detail-actions">
-        <button className="button" onClick={() => onFocus(node.id)}>Focus 2-hop neighborhood</button>
+        <button className="button" onClick={() => onFocus(node.id)}>Focus connected slice</button>
         {focused ? <button className="button" onClick={onClearFocus}>Clear focus</button> : null}
       </div>
     </section>

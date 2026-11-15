@@ -15,9 +15,10 @@ import {
 } from '@xyflow/react';
 import { toPng } from 'html-to-image';
 
-import { fetchEntryPoints, fetchImpact, fetchSubgraph } from '../../lib/api';
+import { fetchEntryPoints, fetchFocus, fetchImpact } from '../../lib/api';
 import type {
   EntryPoint,
+  FocusSlice,
   GraphEdge,
   GraphNode,
   GraphReport,
@@ -129,6 +130,7 @@ export function useGraphView({
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIds, setFocusIds] = useState<Set<string> | null>(null);
+  const [routeIds, setRouteIds] = useState<Set<string>>(new Set());
   const [entryRoots, setEntryRoots] = useState<EntryPoint[]>([]);
   const [entryInfo, setEntryInfo] = useState<{
     totalRoots: number;
@@ -193,15 +195,16 @@ export function useGraphView({
 
   const flowEdges = useMemo<FlowEdge[]>(
     () => [
-      ...toFlowEdges(visible.edges, selectedId, neighborIds),
+      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds),
       ...ghostEdges,
     ],
-    [visible.edges, selectedId, neighborIds, ghostEdges],
+    [visible.edges, selectedId, neighborIds, routeIds, ghostEdges],
   );
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {
     // A focused slice is a new scope; a plain selection only adds that node's
     // immediate relations to the current entry-point view.
+    setRouteIds(new Set());
     if (focus) {
       setEntryRoots([]);
       setEntryInfo(null);
@@ -298,7 +301,7 @@ export function useGraphView({
     void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
   }, [positions, flowNodes, entryRoots, selectedId, reactFlow]);
 
-  const showFocusedSlice = useCallback((slice: GraphSlice, id: string) => {
+  const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
     if (!snapshot) return;
     setReport({
       meta: snapshot.meta,
@@ -312,6 +315,7 @@ export function useGraphView({
     setEntryRoots([]);
     setEntryInfo(null);
     setFocusIds(new Set(slice.nodes.map((node) => node.id)));
+    setRouteIds(new Set(slice.route));
     setSelectedId(id);
   }, [snapshot, setEntryInfo, setEntryRoots, setFocusIds, setReport, setSelectedId]);
 
@@ -339,13 +343,14 @@ export function useGraphView({
       if (!report) return;
       setEntryRoots([]);
       setEntryInfo(null);
+      setRouteIds(new Set());
       setFocusIds(neighborhood(report, id, FOCUS_DEPTH));
       return;
     }
 
-    // Same depth and node budget as the initial entry-point view, but only
-    // nodes reachable from the selected node are eligible.
-    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], FOCUS_DEPTH, FOCUS_LIMIT)
+    // Direct neighbours, the shortest entry→selection→exit route, and the
+    // surrounding two-hop context, with the same node budget as the initial view.
+    void fetchFocus(apiContext.base, apiContext.graphId, id, FOCUS_LIMIT)
       .then((slice) => showFocusedSlice(slice, id))
       .catch((caught: Error) => setError(caught.message));
   }, [
@@ -416,6 +421,7 @@ export function useGraphView({
       });
       setSelectedId(null);
       setFocusIds(null);
+      setRouteIds(new Set());
       setFilters(defaultFilters());
       setSearchText('');
       setPositions({});
@@ -469,6 +475,7 @@ export function useGraphView({
   const resetGraphView = useCallback(() => {
     setSelectedId(null);
     setFocusIds(null);
+    setRouteIds(new Set());
     setEntryRoots([]);
     setEntryInfo(null);
     setFilters(defaultFilters());

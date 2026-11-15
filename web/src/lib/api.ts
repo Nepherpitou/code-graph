@@ -2,6 +2,7 @@ import type {
   AnalysisStatus,
   EntryGraph,
   FileSlice,
+  FocusSlice,
   GraphNode,
   GraphSlice,
   GraphSummary,
@@ -127,6 +128,18 @@ export async function fetchSubgraph(
   });
   return getJson<GraphSlice>(
     `${normalizeBase(base)}/graphs/${encodeURIComponent(graphId)}/subgraph?${params}`,
+  );
+}
+
+export async function fetchFocus(
+  base: string,
+  graphId: string,
+  node: string,
+  limit = 180,
+): Promise<FocusSlice> {
+  const params = new URLSearchParams({ node, limit: String(limit) });
+  return getJson<FocusSlice>(
+    `${normalizeBase(base)}/graphs/${encodeURIComponent(graphId)}/focus?${params}`,
   );
 }
 

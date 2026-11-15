@@ -58,7 +58,16 @@ pub fn rank_entry_points(nodes: &[GraphNode], limit: usize) -> EntryRanking {
     EntryRanking { points, total }
 }
 
-fn is_entry_candidate(node: &GraphNode) -> bool {
+pub(crate) fn is_exit_candidate(node: &GraphNode) -> bool {
+    node.kind.is_callable()
+        && node.kind != NodeKind::Constructor
+        && !node.external
+        && !node.synthetic
+        && node.metrics.call_out == 0
+        && !is_test_node(node)
+}
+
+pub(crate) fn is_entry_candidate(node: &GraphNode) -> bool {
     node.kind.is_callable()
         && node.kind != NodeKind::Constructor
         && !node.external

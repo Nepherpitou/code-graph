@@ -130,6 +130,12 @@ export interface GraphSlice {
   edges: GraphEdge[];
 }
 
+export interface FocusSlice extends GraphSlice {
+  entry: string | null;
+  exit: string | null;
+  route: string[];
+}
+
 export interface FileSlice extends GraphSlice {
   total: number;
   truncated: boolean;

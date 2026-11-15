@@ -122,7 +122,7 @@ export function App() {
   const refreshing = state.analysisStatus?.state === 'running';
   const canRefresh = Boolean(state.apiContext && state.analysisStatus?.canAnalyze);
   const menuActions: ContextAction[] = contextMenu ? [
-    { label: 'Focus 2-hop neighborhood', onSelect: () => graph.focusNode(contextMenu.node.id) },
+    { label: 'Focus connected slice', onSelect: () => graph.focusNode(contextMenu.node.id) },
     { label: 'Show callers', onSelect: () => void graph.showImpact(contextMenu.node, 'in') },
     { label: 'Show callees', onSelect: () => void graph.showImpact(contextMenu.node, 'out') },
     { label: 'Open containing file', onSelect: () => void openFileSlice(contextMenu.node.file) },

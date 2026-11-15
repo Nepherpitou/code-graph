@@ -19,8 +19,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::analysis::{self, analyze_with_progress, AnalyzeOptions};
 use crate::progress::{ProgressCallback, ProgressEvent, ProgressSink};
 use crate::query::{
-    build_overview, file_slice, rank_entry_points, EdgeFilter, EntryPoint, GraphSlice, Overview,
-    PathResult, QueryService,
+    build_overview, file_slice, rank_entry_points, EdgeFilter, EntryPoint, FocusSlice, GraphSlice,
+    Overview, PathResult, QueryService,
 };
 use crate::store::{GraphSummary, Store};
 
@@ -212,6 +212,12 @@ struct SubgraphParams {
 }
 
 #[derive(Deserialize)]
+struct FocusParams {
+    node: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PathParams {
     from: String,
@@ -337,6 +343,7 @@ pub async fn serve(
         .route("/graphs/{id}/nodes", get(nodes))
         .route("/graphs/{id}/entry-points", get(entry_points))
         .route("/graphs/{id}/subgraph", get(subgraph))
+        .route("/graphs/{id}/focus", get(focus))
         .route("/graphs/{id}/path", get(path))
         .route("/graphs/{id}/impact", get(impact))
         .with_state(state);
@@ -586,6 +593,19 @@ async fn subgraph(
         )
         .await?;
     Ok(Json(slice.into()))
+}
+
+async fn focus(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Query(params): Query<FocusParams>,
+) -> Result<Json<FocusSlice>, ApiError> {
+    let graph_id = resolve_graph(&state.store, &id).await?;
+    let slice = state
+        .query
+        .focus_slice(graph_id, &params.node, params.limit.unwrap_or(180))
+        .await?;
+    Ok(Json(slice))
 }
 
 async fn path(
