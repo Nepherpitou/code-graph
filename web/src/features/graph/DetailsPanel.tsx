@@ -81,8 +81,9 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
         <h3>Node details</h3>
         <p className="muted">Select a node to inspect metrics, callers, and callees.</p>
         <ul className="hints">
-          <li><b>Click</b> a card to pin its metrics and highlight its neighbors.</li>
-          <li><b>Double-click</b> to isolate a 2-hop neighborhood.</li>
+          <li><b>Click</b> a card to inspect it and focus only its connected slice.</li>
+          <li><b>Double-click</b> to focus the same connected slice.</li>
+          <li><b>Top entries</b> returns to the entry-point overview.</li>
           <li>Arrowheads point at callees; a second arrowhead means the result is used.</li>
           <li>Dashed edges are reference fallback or constant usage.</li>
           <li>Press <kbd>/</kbd> to search, <kbd>Esc</kbd> to clear.</li>

@@ -76,6 +76,9 @@ interface Input {
   setError: (message: string | null) => void;
 }
 
+const FOCUS_DEPTH = 2;
+const FOCUS_LIMIT = 180;
+
 export interface GraphView {
   report: GraphReport | null;
   visible: { nodes: GraphNode[]; edges: GraphEdge[] };
@@ -295,10 +298,28 @@ export function useGraphView({
     void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
   }, [positions, flowNodes, entryRoots, selectedId, reactFlow]);
 
+  const showFocusedSlice = useCallback((slice: GraphSlice, id: string) => {
+    if (!snapshot) return;
+    setReport({
+      meta: snapshot.meta,
+      nodes: slice.nodes,
+      edges: slice.edges,
+      files: [],
+      stats: snapshot.stats,
+      top: snapshot.top,
+      warnings: snapshot.warnings,
+    });
+    setEntryRoots([]);
+    setEntryInfo(null);
+    setFocusIds(new Set(slice.nodes.map((node) => node.id)));
+    setSelectedId(id);
+  }, [snapshot, setEntryInfo, setEntryRoots, setFocusIds, setReport, setSelectedId]);
+
   const selectAndCenter = useCallback((id: string) => {
     setSelectedId(id);
-    // Selecting a search hit should reveal its neighborhood instead of
-    // leaving an isolated card whose details look like it has no calls.
+    // A node selection is a new exploration scope: reveal only its connected
+    // slice so the node budget is spent on neighbours, not on unrelated entry
+    // points that happen to be in the previous view.
     setSearchText('');
     setFilters((current) => (current.search ? { ...current, search: '' } : current));
 
@@ -312,28 +333,39 @@ export function useGraphView({
         { zoom: Math.max(reactFlow.getZoom(), 0.7), duration: 350 },
       );
     }
-    if (!apiContext) return;
-    // DetailsPanel reads report.edges. Entry and search slices are partial, so
-    // fetch the selected node's full 1-hop relations even when the card is
-    // already on screen.
-    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], 1, 300)
-      .then((slice) => mergeSlice(slice, null))
+
+    if (!apiContext || !snapshot) {
+      // Local JSON report: filter the in-memory graph around the selection.
+      if (!report) return;
+      setEntryRoots([]);
+      setEntryInfo(null);
+      setFocusIds(neighborhood(report, id, FOCUS_DEPTH));
+      return;
+    }
+
+    // Same depth and node budget as the initial entry-point view, but only
+    // nodes reachable from the selected node are eligible.
+    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], FOCUS_DEPTH, FOCUS_LIMIT)
+      .then((slice) => showFocusedSlice(slice, id))
       .catch((caught: Error) => setError(caught.message));
-  }, [flowNodes, reactFlow, apiContext, mergeSlice, setError, setFilters, setSearchText]);
+  }, [
+    flowNodes,
+    reactFlow,
+    apiContext,
+    snapshot,
+    report,
+    showFocusedSlice,
+    setEntryInfo,
+    setEntryRoots,
+    setError,
+    setFilters,
+    setFocusIds,
+    setSearchText,
+  ]);
 
   const focusNode = useCallback((id: string) => {
-    if (!report) return;
-    setSearchText('');
-    setFilters((current) => ({ ...current, search: '' }));
-    setFocusIds(neighborhood(report, id, 2));
-    setSelectedId(id);
-    if (!apiContext) return;
-    // The in-memory neighborhood is limited to the current slice; expand it
-    // from the server so focus mode cannot hide real callers/callees.
-    void fetchSubgraph(apiContext.base, apiContext.graphId, [id], 2, 500)
-      .then((slice) => mergeSlice(slice, new Set(slice.nodes.map((node) => node.id))))
-      .catch((caught: Error) => setError(caught.message));
-  }, [report, apiContext, mergeSlice, setError, setFilters, setFocusIds, setSelectedId, setSearchText]);
+    selectAndCenter(id);
+  }, [selectAndCenter]);
 
   const clearFocus = useCallback(() => {
     setFocusIds(null);
@@ -354,22 +386,8 @@ export function useGraphView({
   }, [mergeSlice, setFilters, setSelectedId, setSearchText]);
 
   const openNeighborhood = useCallback(async (node: GraphNode) => {
-    setSearchText('');
-    setFilters((current) => (current.search ? { ...current, search: '' } : current));
-    if (!apiContext) {
-      if (!report) return;
-      setSelectedId(node.id);
-      setFocusIds(neighborhood(report, node.id, 1));
-      return;
-    }
-    try {
-      const slice = await fetchSubgraph(apiContext.base, apiContext.graphId, [node.id], 1, 300);
-      mergeSlice(slice, new Set(slice.nodes.map((sliceNode) => sliceNode.id)));
-      setSelectedId(node.id);
-    } catch (caught) {
-      setError(`Neighborhood failed: ${(caught as Error).message}`);
-    }
-  }, [apiContext, report, mergeSlice, setError, setFilters, setFocusIds, setSelectedId, setSearchText]);
+    selectAndCenter(node.id);
+  }, [selectAndCenter]);
 
   const openEntryPoints = useCallback(async () => {
     if (!apiContext || !snapshot) return;

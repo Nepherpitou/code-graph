@@ -132,7 +132,7 @@ The graph store keeps normalized rows for filtering and full node/edge payloads 
 1. **Entry points** (default) — the 8 heaviest roots, ranked by transitive fan-out (reachable callables). The API traverses outgoing calls two hops from those roots, merges shared callees, and caps the result at 180 nodes. Root cards carry a `root` chip; the sidebar shows the ranking and reach counts.
 2. **Directories** — a list of aggregated directories with node/callable/constant counts, call volume, dead-code candidates, and cycle nodes. No graph canvas.
 3. **Files** — a list of files inside the selected directory, with the same counts.
-4. **Graph** — functions in the selected file, the entry-point graph, or the neighborhood of a node opened from the table. Each card shows the container name on one line and the member name on the next. Right-click opens actions: focus 2-hop, show callers, show callees, open containing file, copy ID, copy qualified name.
+4. **Graph** — functions in the selected file, the entry-point graph, or the neighborhood of a node opened from the table. Click a card to replace the view with its connected 2-hop slice (up to 180 nodes), using the same budget as the initial entry-point view; click a node in that slice to keep drilling. **Top entries** returns to the overview. Each card shows the container name on one line and the member name on the next. Right-click opens actions: focus 2-hop, show callers, show callees, open containing file, copy ID, copy qualified name.
 
 The directory and file screens are plain lists; only the graph screens use React Flow.
 
