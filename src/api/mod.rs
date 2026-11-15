@@ -313,6 +313,7 @@ pub async fn serve(
         )
         .try_init();
 
+    tracing::info!("database: {}", db.display());
     let store = Store::open(db).await?;
     let latest = store.latest_graph().await?;
     let analyze_options = analyze_options.map(Arc::new);

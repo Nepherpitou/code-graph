@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Parser, Subcommand};
@@ -20,7 +20,7 @@ pub(super) struct Cli {
 pub(super) enum Commands {
     /// Build a call graph and metrics from a codebase.
     Analyze(AnalyzeArgs),
-    /// Start the HTTP server; reuse the latest snapshot, or analyze when the DB is empty.
+    /// Start the HTTP server; reuse the latest project snapshot, or analyze when the DB is empty.
     Up(UpArgs),
     /// Print a summary of a graph JSON file.
     Inspect(InspectArgs),
@@ -81,9 +81,9 @@ pub(super) struct AnalyzeArgs {
 pub(super) struct UpArgs {
     #[command(flatten)]
     pub(super) analysis: AnalysisArgs,
-    /// SQLite database to write the snapshot to.
-    #[arg(long, default_value = "code-graph.db")]
-    pub(super) db: PathBuf,
+    /// SQLite database to write snapshots to (default: <root>/.code-graph/code-graph.db).
+    #[arg(long)]
+    pub(super) db: Option<PathBuf>,
     /// HTTP bind address.
     #[arg(long, default_value = "127.0.0.1:8787")]
     pub(super) bind: String,
@@ -99,8 +99,8 @@ pub(super) struct InspectArgs {
 
 #[derive(Parser)]
 pub(super) struct ServeArgs {
-    /// SQLite database produced by `analyze --db`.
-    #[arg(long, default_value = "code-graph.db")]
+    /// SQLite database produced by `up` or `analyze --db`.
+    #[arg(long, default_value = ".code-graph/code-graph.db")]
     pub(super) db: PathBuf,
     /// HTTP bind address.
     #[arg(long, default_value = "127.0.0.1:8787")]
@@ -108,6 +108,10 @@ pub(super) struct ServeArgs {
     /// Built SPA directory; served at `/` when present.
     #[arg(long, default_value = "web/dist")]
     pub(super) web_dir: PathBuf,
+}
+
+pub(super) fn project_db_path(root: &Path) -> PathBuf {
+    root.join(".code-graph").join("code-graph.db")
 }
 
 pub(super) fn parse_language(value: &str) -> Result<Option<LanguageId>> {

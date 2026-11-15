@@ -3,6 +3,7 @@ target/
 /web/node_modules/
 /web/dist/
 /graph.json
+.code-graph/
 *.db
 *.db-shm
 *.db-wal

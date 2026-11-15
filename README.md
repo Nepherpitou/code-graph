@@ -15,17 +15,18 @@ npm --prefix web install
 npm --prefix web run build
 
 # One command: bind HTTP immediately, analyze in the background, stream progress.
-./target/release/code-graph up . --exclude fixtures --db code-graph.db
+./target/release/code-graph up . --exclude fixtures
 # http://127.0.0.1:8787/  (SPA auto-detects the API and reloads when ready)
+# Snapshots go to ./.code-graph/code-graph.db.
 
 # Or analyze to JSON/snapshot without a server.
 ./target/release/code-graph analyze . --exclude fixtures \
-  -o web/public/graph.json --db code-graph.db
+  -o web/public/graph.json --db .code-graph/code-graph.db
 ./target/release/code-graph analyze fixtures/ts-project -o /tmp/ts-graph.json
 ./target/release/code-graph analyze web -o web/public/graph-web.json
 
 # Serve an existing snapshot without re-analyzing.
-./target/release/code-graph serve --db code-graph.db --web-dir web/dist
+./target/release/code-graph serve --db .code-graph/code-graph.db --web-dir web/dist
 # For static JSON development: npm --prefix web run dev
 ```
 
@@ -90,7 +91,7 @@ code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 | Option | Meaning |
 |---|---|
 | `-o, --out <file>` | Output JSON (default `graph.json`). |
-| `--db <file>` | Also persist a snapshot to SQLite (WAL + FTS5). |
+| `--db <file>` | SQLite snapshot database (WAL + FTS5). `up` defaults to `<dir>/.code-graph/code-graph.db`; `analyze` persists only when this flag is given; `serve` defaults to `./.code-graph/code-graph.db`. |
 | `--lang <id>` | `typescript`, `rust`, `cpp`, `python`, `auto`. |
 | `--server-cmd <cmd>` | Override the server command; args are split on spaces. |
 | `--include-external` | Keep library/node_modules callees as `external` nodes. |
@@ -134,6 +135,8 @@ The graph store keeps normalized rows for filtering and full node/edge payloads 
 4. **Graph** — functions in the selected file, the entry-point graph, or the neighborhood of a node opened from the table. Each card shows the container name on one line and the member name on the next. Right-click opens actions: focus 2-hop, show callers, show callees, open containing file, copy ID, copy qualified name.
 
 The directory and file screens are plain lists; only the graph screens use React Flow.
+
+`up` stores snapshots inside the analyzed project at `<project>/.code-graph/code-graph.db`, so pointing it at another project cannot reuse that project's graph. The directory is hidden and excluded from source discovery. Pass `--db` to share a database explicitly.
 
 `up` binds the HTTP port first. If the database already contains a snapshot, it loads the latest one and does not re-analyze; the header shows a **Refresh** button that calls `POST /refresh`, re-reads the project, stores a new snapshot, and reloads the UI. If the database is empty, `up` analyzes immediately. Progress is printed to the terminal and exposed through `/status`; the SPA polls it, shows the current phase/message, and loads the snapshot automatically when it becomes `ready`. `serve` only exposes existing snapshots and has no Refresh button.
 

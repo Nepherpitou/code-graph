@@ -43,7 +43,10 @@ pub async fn run() -> Result<()> {
         Commands::Serve(args) => api::serve(&args.db, &args.bind, &args.web_dir, None).await,
         Commands::Up(args) => {
             let options = build_options(args.analysis)?;
-            api::serve(&args.db, &args.bind, &args.web_dir, Some(options)).await
+            let db = args
+                .db
+                .unwrap_or_else(|| args::project_db_path(&options.root));
+            api::serve(&db, &args.bind, &args.web_dir, Some(options)).await
         }
         Commands::Analyze(args) => {
             let out = args.out;
