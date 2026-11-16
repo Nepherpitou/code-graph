@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>code-graph · convergence cut</title>
+<link rel="stylesheet" href="assets/converge.css">
+<style>
+  body { background: radial-gradient(900px 500px at 65% -10%, #162b2a 0, var(--cx-bg) 62%); }
+  .ix { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 48px 0 64px; }
+  .ix-top { display: flex; align-items: center; gap: 10px; color: var(--cx-faint); font-size: 10px; margin-bottom: 44px; }
+  .ix-brand { display: flex; align-items: center; gap: 8px; color: var(--cx-fg); font-weight: 650; font-size: 12px; }
+  .ix-brand .cx-logo { width: 24px; height: 24px; font-size: 11px; border-radius: 7px; }
+  .ix-top .cx-spacer { flex: 1; }
+  .ix-kicker { color: var(--cx-accent); font-size: 9px; text-transform: uppercase; letter-spacing: .16em; }
+  .ix h1 { margin: 10px 0 0; font-size: clamp(34px, 5vw, 58px); line-height: .95; letter-spacing: -.06em; font-weight: 600; }
+  .ix h1 em { font-style: normal; color: var(--cx-accent); }
+  .ix-lede { max-width: 720px; margin-top: 16px; color: var(--cx-muted); font-size: 12.5px; line-height: 1.65; }
+  .ix-lede b { color: var(--cx-fg); font-weight: 500; }
+  .ix-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 15px; }
+  .ix-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }
+  .ix-card { display: block; padding: 16px; border: 1px solid var(--cx-line-soft); border-radius: 10px; background: color-mix(in srgb, var(--cx-panel) 82%, transparent); transition: border-color .15s, background .15s, transform .15s; }
+  .ix-card:hover { border-color: color-mix(in srgb, var(--cx-accent) 45%, var(--cx-line)); background: var(--cx-panel); transform: translateY(-2px); }
+  .ix-card-top { display: flex; justify-content: space-between; gap: 10px; color: var(--cx-faint); font-family: var(--cx-mono); font-size: 9px; }
+  .ix-card h2 { margin-top: 15px; font-size: 15px; font-weight: 550; letter-spacing: -.02em; }
+  .ix-card p { margin-top: 6px; color: var(--cx-muted); font-size: 10.5px; line-height: 1.55; }
+  .ix-card-foot { display: flex; justify-content: space-between; margin-top: 15px; padding-top: 11px; border-top: 1px solid var(--cx-line-soft); color: var(--cx-faint); font-size: 9px; }
+  .ix-card-foot b { color: var(--cx-accent); font-weight: 500; }
+  .ix-note { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--cx-line-soft); color: var(--cx-faint); font-size: 10px; line-height: 1.65; }
+  .ix-note a { color: var(--cx-muted); text-decoration: underline; text-decoration-color: var(--cx-line); text-underline-offset: 3px; }
+  @media (max-width: 760px) { .ix { width: calc(100% - 28px); padding-top: 28px; } .ix-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="ix">
+  <header class="ix-top">
+    <a class="ix-brand" href="../index.html"><span class="cx-logo">◉</span><span>code-graph</span></a>
+    <span>/</span><span>convergence cut</span>
+    <span class="cx-spacer"></span><span>8 directions · web UI</span>
+  </header>
+
+  <section>
+    <div class="ix-kicker">Design convergence · November 2026</div>
+    <h1>Eight cuts.<br><em>One local workbench.</em></h1>
+    <p class="ix-lede">The 30-page cut gave the direction. This set removes the home screens, inboxes, checklists, saved spaces and sharing artifacts, and turns the surviving ideas into <b>one graph-first web shell with four modes</b>: focus, path, impact, compare. The table, overview and command palette become supporting surfaces rather than destinations.</p>
+    <div class="ix-chips">
+      <span class="cx-pill">focus + context</span><span class="cx-pill">path</span><span class="cx-pill">impact</span><span class="cx-pill">compare</span><span class="cx-pill">linked table</span><span class="cx-pill">⌘K</span><span class="cx-pill">no home</span>
+    </div>
+  </section>
+
+  <section class="ix-grid">
+    <a class="ix-card" href="c01-focus-workbench.html">
+      <div class="ix-card-top"><span>C01</span><span>shell · focus</span></div>
+      <h2>Focus workbench</h2>
+      <p>Graph first, inspector on selection. The old all-nodes sidebar becomes search, recent work and scope. No home screen.</p>
+      <div class="ix-card-foot"><span>baseline shell</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c02-path-mode.html">
+      <div class="ix-card-top"><span>C02</span><span>mode · path</span></div>
+      <h2>Path mode</h2>
+      <p>An entry → exit strip over the canvas, a step scrubber, and a route ledger. Playback is a property of the graph, not a page.</p>
+      <div class="ix-card-foot"><span>path / route</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c03-impact-mode.html">
+      <div class="ix-card-top"><span>C03</span><span>mode · impact</span></div>
+      <h2>Impact mode</h2>
+      <p>Reverse callers, risk, evidence and an affected table on demand. No triage queue or review workflow.</p>
+      <div class="ix-card-foot"><span>blast radius</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c04-compare-pins.html">
+      <div class="ix-card-top"><span>C04</span><span>mode · compare</span></div>
+      <h2>Compare pins</h2>
+      <p>Two pinned symbols, a diff inspector, and one graph that shows shared and unique context. No IDE split.</p>
+      <div class="ix-card-foot"><span>pin / compare</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c05-table-drawer.html">
+      <div class="ix-card-top"><span>C05</span><span>surface · table</span></div>
+      <h2>Linked table</h2>
+      <p>The table is a drawer that brushes the graph. Hover a row to focus a node; collapse it when the graph is enough.</p>
+      <div class="ix-card-foot"><span>table as support</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c06-command-resume.html">
+      <div class="ix-card-top"><span>C06</span><span>surface · command</span></div>
+      <h2>Command / resume</h2>
+      <p>⌘K opens search, recent snapshots and actions. Resume is a command, not a dashboard. Local-first by default.</p>
+      <div class="ix-card-foot"><span>palette / recent</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c07-overview-inspector.html">
+      <div class="ix-card-top"><span>C07</span><span>surface · overview</span></div>
+      <h2>Overview inspector</h2>
+      <p>Health, modules and hotspots in a side inspector beside the graph. Overview is context, not a landing page.</p>
+      <div class="ix-card-foot"><span>overview as context</span><b>open ↗</b></div>
+    </a>
+    <a class="ix-card" href="c08-minimal-canvas.html">
+      <div class="ix-card-top"><span>C08</span><span>density · minimal</span></div>
+      <h2>Minimal canvas</h2>
+      <p>No permanent sidebars. A thin scope bar, the graph, and an inspector that appears on selection. Maximum signal per pixel.</p>
+      <div class="ix-card-foot"><span>chrome reduction</span><b>open ↗</b></div>
+    </a>
+  </section>
+
+  <footer class="ix-note">
+    <b>What to compare:</b> C01 is the shell bet; C02–C04 are modes inside it; C05–C07 are supporting surfaces; C08 is the density extreme. The set intentionally excludes glass/spatial shells, mobile, saved spaces, dashboards, triage boards, checklists and shareable artifacts. Previous 30 directions: <a href="../index.html">open the original gallery</a>.
+  </footer>
+</main>
+</body>
+</html>
