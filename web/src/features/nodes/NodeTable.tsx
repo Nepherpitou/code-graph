@@ -2,8 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 
 import type { GraphNode } from '../../types';
 
-const ROW_HEIGHT = 27;
-const VIEWPORT_HEIGHT = 286;
+const ROW_HEIGHT = 32;
+const VIEWPORT_HEIGHT = 320;
 
 type SortKey = 'fanIn' | 'fanOut' | 'hotspot' | 'name';
 

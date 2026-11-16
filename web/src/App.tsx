@@ -168,7 +168,7 @@ export function App() {
   ] : [];
 
   return (
-    <div className="app">
+    <div className="app density-airy">
       <header>
         <div className="brand">
           <span className="logo">◉</span>
