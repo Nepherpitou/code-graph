@@ -27,7 +27,6 @@ import type {
   PathResult,
 } from '../../types';
 import {
-  MIN_READABLE_ZOOM,
   defaultFilters,
   hiddenRelations,
   neighborhood,
@@ -152,6 +151,10 @@ export function useGraphView({
   } | null>(null);
   const [layouting, setLayouting] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
+  const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
+  const cameraZoom = useRef<number | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
@@ -277,9 +280,30 @@ export function useGraphView({
     setLayouting(true);
     const timer = window.setTimeout(async () => {
       try {
+        const previous = lastLayoutConfig.current;
+        const preserve = previous.kind === layoutKind
+          && previous.nonce === layoutNonce
+          && previous.scope === layoutScope;
+        lastLayoutConfig.current = { kind: layoutKind, nonce: layoutNonce, scope: layoutScope };
         const next = await computeLayout(layoutNodes, visible.edges, layoutKind, layoutScope);
         if (cancelled || !next) return;
-        setPositions(next);
+        setPositions((current) => {
+          if (!preserve) return next;
+          // Deep navigation only adds a focus slice. Keep already-placed nodes
+          // exactly where they are; place only the newly revealed nodes.
+          const anchorId = selectedIdRef.current && next[selectedIdRef.current]
+            ? selectedIdRef.current
+            : layoutNodes.find((node) => current[node.id] && next[node.id])?.id;
+          const anchor = anchorId ? current[anchorId] : null;
+          const anchorNext = anchorId ? next[anchorId] : null;
+          const dx = anchor && anchorNext ? anchor.x - anchorNext.x : 0;
+          const dy = anchor && anchorNext ? anchor.y - anchorNext.y : 0;
+          const merged = { ...current };
+          for (const [id, position] of Object.entries(next)) {
+            if (!(id in merged)) merged[id] = { x: position.x + dx, y: position.y + dy };
+          }
+          return merged;
+        });
         setLayouting(false);
       } catch (caught) {
         if (cancelled) return;
@@ -328,7 +352,7 @@ export function useGraphView({
     centeredPositions.current = positions;
     // Path mode fits the whole route; centering the endpoint would push the
     // entry and middle steps off-screen.
-    if ((mode === 'path' && path) || focusIds !== null) return;
+    if (mode === 'path' && path) return;
 
     const selected = selectedId
       ? flowNodes.find((node) => node.id === selectedId)
@@ -343,8 +367,11 @@ export function useGraphView({
         }
       : denseCenter(flowNodes);
     if (!center) return;
-    void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
-  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds]);
+    void reactFlow.setCenter(center.x, center.y, {
+      zoom: cameraZoom.current ?? reactFlow.getZoom(),
+      duration: 0,
+    });
+  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path]);
 
   // Path mode is about the whole route, not the endpoint under the cursor.
   useEffect(() => {
@@ -355,16 +382,6 @@ export function useGraphView({
     const timer = window.setTimeout(() => frameNodes(routeNodes), 120);
     return () => window.clearTimeout(timer);
   }, [mode, path, flowNodes, frameNodes]);
-
-  // Focus and impact are slices, not selections: frame the whole scope so the
-  // entry→exit route is not clipped by centering on the target.
-  useEffect(() => {
-    if (mode === 'path' || focusIds === null) return;
-    const scoped = flowNodes.filter((node) => focusIds.has(node.id));
-    if (scoped.length < 2) return;
-    const timer = window.setTimeout(() => frameNodes(scoped), 120);
-    return () => window.clearTimeout(timer);
-  }, [mode, focusIds, flowNodes, frameNodes]);
 
   const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
     if (!snapshot) return;
@@ -381,15 +398,16 @@ export function useGraphView({
     // route. The API slice also carries a wider context window; do not show it.
     const focus = neighborhood(focusedReport, id, FOCUS_DEPTH);
     for (const routeNode of slice.route) focus.add(routeNode);
-    setReport(focusedReport);
+    // Merge rather than replace: previously placed nodes keep their positions
+    // when the user walks deeper through the call graph.
+    mergeSlice(slice, focus);
     setEntryRoots([]);
     setEntryInfo(null);
     setPath(null);
     setPathIndexState(0);
-    setFocusIds(focus);
     setRouteIds(new Set(slice.route));
     setSelectedId(id);
-  }, [snapshot, setEntryInfo, setEntryRoots, setFocusIds, setReport, setSelectedId]);
+  }, [mergeSlice, snapshot, setEntryInfo, setEntryRoots, setSelectedId]);
 
   const selectAndCenter = useCallback((id: string) => {
     setSelectedId(id);
@@ -403,10 +421,12 @@ export function useGraphView({
     if (node) {
       const width = Number(node.width ?? 0);
       const height = Number(node.height ?? 0);
+      const zoom = reactFlow.getZoom();
+      cameraZoom.current = zoom;
       void reactFlow.setCenter(
         node.position.x + width / 2,
         node.position.y + height / 2,
-        { zoom: Math.max(reactFlow.getZoom(), 0.7), duration: 350 },
+        { zoom, duration: 300 },
       );
     }
 
