@@ -155,6 +155,38 @@ fn path_toward_root(tree: &BfsTree, node: usize, root: usize) -> Vec<usize> {
     path
 }
 
+fn ranked_candidates(
+    distance: &[usize],
+    keys: &[String],
+    node_by_key: &HashMap<&str, &GraphNode>,
+    max_distance: usize,
+    predicate: impl Fn(&GraphNode) -> bool,
+    score: impl Fn(&GraphNode) -> u32,
+) -> Vec<(usize, usize, u32)> {
+    let mut candidates: Vec<(usize, usize, u32)> = distance
+        .iter()
+        .enumerate()
+        .filter(|(_, distance)| **distance != usize::MAX && **distance <= max_distance)
+        .filter_map(|(node, distance)| {
+            let candidate = node_by_key.get(keys[node].as_str())?;
+            predicate(candidate).then_some((*distance, node, score(candidate)))
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    candidates
+}
+
+fn select_ranked(selected: &mut HashSet<usize>, candidates: &[(usize, usize, u32)], limit: usize) {
+    for (_, node, _) in candidates {
+        select_with_budget(selected, *node, limit);
+    }
+}
+
 fn direct_neighbors(index: &GraphIndex, root: usize) -> Vec<usize> {
     let mut direct = Vec::new();
     for edge_index in index.out_all[root].iter().chain(index.in_all[root].iter()) {
@@ -399,24 +431,14 @@ impl QueryService {
         let reverse = bfs_calls(&index, root_idx, true);
         let distance = &reverse.distance;
 
-        let mut entries: Vec<(usize, usize, u32)> = distance
-            .iter()
-            .enumerate()
-            .filter(|(_, distance)| **distance != usize::MAX)
-            .filter_map(|(node, distance)| {
-                let candidate = node_by_key.get(index.keys[node].as_str())?;
-                if !entry::is_entry_candidate(candidate) {
-                    return None;
-                }
-                Some((*distance, node, candidate.metrics.transitive_fan_out))
-            })
-            .collect();
-        entries.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| right.2.cmp(&left.2))
-                .then_with(|| left.1.cmp(&right.1))
-        });
+        let entries = ranked_candidates(
+            distance,
+            &index.keys,
+            &node_by_key,
+            usize::MAX,
+            entry::is_entry_candidate,
+            |node| node.metrics.transitive_fan_out,
+        );
 
         // 2. Add the caller path from the nearest entry point to the selection.
         let mut entry_distance = None;
@@ -438,24 +460,14 @@ impl QueryService {
         let forward = bfs_calls(&index, root_idx, false);
         let out_distance = &forward.distance;
 
-        let mut exits: Vec<(usize, usize, u32)> = out_distance
-            .iter()
-            .enumerate()
-            .filter(|(_, distance)| **distance != usize::MAX)
-            .filter_map(|(node, distance)| {
-                let candidate = node_by_key.get(index.keys[node].as_str())?;
-                if !entry::is_exit_candidate(candidate) {
-                    return None;
-                }
-                Some((*distance, node, candidate.metrics.height))
-            })
-            .collect();
-        exits.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| right.2.cmp(&left.2))
-                .then_with(|| left.1.cmp(&right.1))
-        });
+        let exits = ranked_candidates(
+            out_distance,
+            &index.keys,
+            &node_by_key,
+            usize::MAX,
+            entry::is_exit_candidate,
+            |node| node.metrics.height,
+        );
 
         // 3. Add the callee path from the selection to the nearest exit.
         let mut exit_distance = None;
@@ -490,45 +502,27 @@ impl QueryService {
         // component has no entry candidate, use the whole caller closure (the
         // limit still applies).
         let ancestor_limit = entry_distance.unwrap_or(usize::MAX);
-        let mut ancestors: Vec<(usize, usize, u32)> = distance
-            .iter()
-            .enumerate()
-            .filter(|(_, distance)| **distance != usize::MAX && **distance <= ancestor_limit)
-            .filter_map(|(node, distance)| {
-                let candidate = node_by_key.get(index.keys[node].as_str())?;
-                Some((*distance, node, candidate.metrics.transitive_fan_out))
-            })
-            .collect();
-        ancestors.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| right.2.cmp(&left.2))
-                .then_with(|| left.1.cmp(&right.1))
-        });
-        for (_, node, _) in ancestors {
-            select_with_budget(&mut selected, node, limit);
-        }
+        let ancestors = ranked_candidates(
+            distance,
+            &index.keys,
+            &node_by_key,
+            ancestor_limit,
+            |_| true,
+            |node| node.metrics.transitive_fan_out,
+        );
+        select_ranked(&mut selected, &ancestors, limit);
 
         // 6. Remaining callees up to the nearest exit point.
         let descendant_limit = exit_distance.unwrap_or(usize::MAX);
-        let mut descendants: Vec<(usize, usize, u32)> = out_distance
-            .iter()
-            .enumerate()
-            .filter(|(_, distance)| **distance != usize::MAX && **distance <= descendant_limit)
-            .filter_map(|(node, distance)| {
-                let candidate = node_by_key.get(index.keys[node].as_str())?;
-                Some((*distance, node, candidate.metrics.height))
-            })
-            .collect();
-        descendants.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| right.2.cmp(&left.2))
-                .then_with(|| left.1.cmp(&right.1))
-        });
-        for (_, node, _) in descendants {
-            select_with_budget(&mut selected, node, limit);
-        }
+        let descendants = ranked_candidates(
+            out_distance,
+            &index.keys,
+            &node_by_key,
+            descendant_limit,
+            |_| true,
+            |node| node.metrics.height,
+        );
+        select_ranked(&mut selected, &descendants, limit);
 
         let keys: Vec<String> = selected
             .iter()

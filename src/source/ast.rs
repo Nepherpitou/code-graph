@@ -289,17 +289,10 @@ fn contains_offset(node: Node<'_>, offset: usize) -> bool {
     node.start_byte() <= offset && offset <= node.end_byte()
 }
 
-pub fn result_used_at(
-    tree: &Tree,
-    text: &str,
-    adapter: &Adapter,
-    position: LspPosition,
-) -> Option<bool> {
-    let offset = lsp_to_byte(text, position)?;
-    let mut node = node_at(tree, text, position)?;
-    let call = loop {
+fn call_at_or_above<'a>(mut node: Node<'a>, adapter: &Adapter) -> Option<Node<'a>> {
+    loop {
         if adapter.call_nodes.contains(&node.kind()) {
-            break Some(node);
+            return Some(node);
         }
         if adapter.callable_nodes.contains(&node.kind())
             || matches!(
@@ -307,48 +300,63 @@ pub fn result_used_at(
                 "program" | "source_file" | "module" | "translation_unit"
             )
         {
-            break None;
+            return None;
         }
-        match node.parent() {
-            Some(parent) => node = parent,
-            None => break None,
-        }
-    };
-    let call = call?;
+        node = node.parent()?;
+    }
+}
 
-    let callee = adapter
+fn callee_contains_offset(call: Node<'_>, adapter: &Adapter, offset: usize) -> bool {
+    adapter
         .callee_fields
         .iter()
         .filter_map(|field| call.child_by_field_name(field))
-        .next();
-    if let Some(callee) = callee {
-        if !contains_offset(callee, offset) {
-            return None;
-        }
-    }
+        .next()
+        .is_none_or(|callee| contains_offset(callee, offset))
+}
 
+fn transparent_parent<'a>(call: Node<'a>, adapter: &Adapter) -> Option<Node<'a>> {
     let mut current = call;
     let mut parent = current.parent();
-    while let Some(p) = parent {
-        if adapter.transparent_nodes.contains(&p.kind()) {
-            current = p;
+    while let Some(node) = parent {
+        if adapter.transparent_nodes.contains(&node.kind()) {
+            current = node;
             parent = current.parent();
         } else {
             break;
         }
     }
-    let parent = parent?;
+    parent
+}
+
+fn is_void_expression(parent: Node<'_>, text: &str, adapter: &Adapter) -> bool {
+    if adapter.id != crate::languages::LanguageId::TypeScript || parent.kind() != "unary_expression"
+    {
+        return false;
+    }
+    let Some(operator) = parent.child_by_field_name("operator") else {
+        return false;
+    };
+    operator.kind() == "void" || operator.utf8_text(text.as_bytes()).ok() == Some("void")
+}
+
+pub fn result_used_at(
+    tree: &Tree,
+    text: &str,
+    adapter: &Adapter,
+    position: LspPosition,
+) -> Option<bool> {
+    let offset = lsp_to_byte(text, position)?;
+    let call = call_at_or_above(node_at(tree, text, position)?, adapter)?;
+    if !callee_contains_offset(call, adapter, offset) {
+        return None;
+    }
+    let parent = transparent_parent(call, adapter)?;
     if adapter.statement_nodes.contains(&parent.kind()) {
         return Some(false);
     }
-    if adapter.id == crate::languages::LanguageId::TypeScript && parent.kind() == "unary_expression"
-    {
-        if let Some(operator) = parent.child_by_field_name("operator") {
-            if operator.kind() == "void" || operator.utf8_text(text.as_bytes()).ok() == Some("void")
-            {
-                return Some(false);
-            }
-        }
+    if is_void_expression(parent, text, adapter) {
+        return Some(false);
     }
     Some(true)
 }

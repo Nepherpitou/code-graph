@@ -121,6 +121,75 @@ async fn collect_symbols(
     results
 }
 
+fn discover_sources(
+    root: &Path,
+    adapter: &Adapter,
+    options: &AnalyzeOptions,
+    reporter: &Reporter,
+) -> Result<(HashMap<String, SourceFile>, usize)> {
+    reporter.emit(
+        "scan",
+        format!(
+            "language: {}; scanning {}",
+            adapter.id.as_str(),
+            root.display()
+        ),
+    );
+    let discovered = discover(
+        root,
+        adapter,
+        &DiscoverOptions {
+            excludes: options.exclude.clone(),
+            ..DiscoverOptions::default()
+        },
+    );
+    if discovered.is_empty() {
+        return Err(anyhow!(
+            "no {} source files found under {}",
+            adapter.id.as_str(),
+            root.display()
+        ));
+    }
+    reporter.emit(
+        "scan",
+        format!("parsing {} files with tree-sitter", discovered.len()),
+    );
+    let count = discovered.len();
+    let sources = discovered
+        .into_iter()
+        .map(|source| (source.rel.clone(), source))
+        .collect();
+    Ok((sources, count))
+}
+
+async fn run_builder(
+    builder: &mut Builder,
+    client: &LspClient,
+    adapter: &Adapter,
+    options: &AnalyzeOptions,
+    reporter: &Reporter,
+) {
+    reporter.emit("calls", "walking call hierarchy");
+    builder.walk_calls(client, reporter).await;
+    builder.add_callback_edges();
+
+    if options.include_constants {
+        builder
+            .crawl_constants(
+                client,
+                options.max_constants,
+                adapter.id == LanguageId::Rust,
+                reporter,
+            )
+            .await;
+    }
+    if options.ref_fallback {
+        builder
+            .fallback_references(client, adapter.id == LanguageId::Rust, reporter)
+            .await;
+    }
+}
+
 pub async fn analyze(options: AnalyzeOptions) -> Result<GraphReport> {
     analyze_with_progress(options, silent_callback()).await
 }
@@ -139,38 +208,7 @@ pub async fn analyze_with_progress(
         .ok_or_else(|| anyhow!("could not detect a supported language; pass --lang"))?;
     let adapter = adapter(language);
 
-    reporter.emit(
-        "scan",
-        format!(
-            "language: {}; scanning {}",
-            adapter.id.as_str(),
-            root.display()
-        ),
-    );
-    let discovered = discover(
-        &root,
-        adapter,
-        &DiscoverOptions {
-            excludes: options.exclude.clone(),
-            ..DiscoverOptions::default()
-        },
-    );
-    if discovered.is_empty() {
-        return Err(anyhow!(
-            "no {} source files found under {}",
-            adapter.id.as_str(),
-            root.display()
-        ));
-    }
-    reporter.emit(
-        "scan",
-        format!("parsing {} files with tree-sitter", discovered.len()),
-    );
-    let source_file_count = discovered.len();
-    let mut sources: HashMap<String, SourceFile> = HashMap::new();
-    for source in discovered {
-        sources.insert(source.rel.clone(), source);
-    }
+    let (sources, source_file_count) = discover_sources(&root, adapter, &options, &reporter)?;
 
     let (command, server_args) = if let Some(custom) = &options.server_cmd {
         let mut parts = custom.split_whitespace();
@@ -279,26 +317,7 @@ pub async fn analyze_with_progress(
     local_warnings
         .extend(wait_until_ready(&client, adapter, &capabilities, &builder, &reporter).await);
 
-    reporter.emit("calls", "walking call hierarchy");
-    builder.walk_calls(&client, &reporter).await;
-    builder.add_callback_edges();
-
-    if options.include_constants {
-        builder
-            .crawl_constants(
-                &client,
-                options.max_constants,
-                adapter.id == LanguageId::Rust,
-                &reporter,
-            )
-            .await;
-    }
-
-    if options.ref_fallback {
-        builder
-            .fallback_references(&client, adapter.id == LanguageId::Rust, &reporter)
-            .await;
-    }
+    run_builder(&mut builder, &client, adapter, &options, &reporter).await;
 
     let output = builder.finish();
     let truncated = output.truncated;

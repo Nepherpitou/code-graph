@@ -404,6 +404,101 @@ impl Builder {
         Some(id)
     }
 
+    fn add_class_symbol(
+        &mut self,
+        symbol: &RawSymbol,
+        rel: &str,
+        local: &str,
+        qname: &str,
+        parent_exported: bool,
+    ) -> bool {
+        let class_key = format!(
+            "{rel}#{}:{}",
+            symbol.range.start.line, symbol.range.start.character
+        );
+        let class_key_alt = format!(
+            "{rel}#{}:{}",
+            symbol.selection.start.line, symbol.selection.start.character
+        );
+        let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
+        let class_exported = is_exported(self.adapter, &declaration, rel, local, parent_exported);
+        let constructor_id = if let Some(constructor) = symbol
+            .children
+            .iter()
+            .find(|child| child.kind == LSP_CONSTRUCTOR)
+        {
+            self.create_node(
+                constructor,
+                rel,
+                format!("{qname}.constructor"),
+                NodeKind::Constructor,
+                class_exported,
+                false,
+                false,
+                Some(qname.to_string()),
+            )
+        } else {
+            let synthetic = RawSymbol {
+                name: format!("{local}.constructor"),
+                kind: LSP_CONSTRUCTOR,
+                detail: "implicit constructor".to_string(),
+                range: symbol.range,
+                selection: symbol.selection,
+                children: Vec::new(),
+            };
+            self.create_node(
+                &synthetic,
+                rel,
+                format!("{qname}.constructor"),
+                NodeKind::Constructor,
+                class_exported,
+                true,
+                false,
+                Some(qname.to_string()),
+            )
+        };
+        if let Some(id) = constructor_id {
+            self.class_map.insert(class_key, id.clone());
+            self.class_map.insert(class_key_alt, id);
+        }
+        class_exported
+    }
+
+    fn add_leaf_symbol(
+        &mut self,
+        symbol: &RawSymbol,
+        rel: &str,
+        qname: String,
+        parent_exported: bool,
+        container: Option<&str>,
+    ) {
+        let Some(kind) = node_kind_from_symbol(symbol.kind) else {
+            return;
+        };
+        if kind.is_data() {
+            let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
+            let is_type_alias = ["type ", "export type ", "declare type "]
+                .iter()
+                .any(|prefix| declaration.starts_with(prefix));
+            if is_type_alias
+                || !self.include_constants
+                || (kind == NodeKind::Variable && container.is_some())
+            {
+                return;
+            }
+        }
+        self.create_node(
+            symbol,
+            rel,
+            qname,
+            kind,
+            parent_exported,
+            false,
+            false,
+            container.map(str::to_string),
+        );
+    }
+
     pub(crate) fn add_symbol(
         &mut self,
         symbol: &RawSymbol,
@@ -423,71 +518,20 @@ impl Builder {
         } else {
             local.clone()
         };
-
-        if symbol.kind == LSP_CLASS {
-            let class_key = format!(
-                "{rel}#{}:{}",
-                symbol.range.start.line, symbol.range.start.character
-            );
-            let class_key_alt = format!(
-                "{rel}#{}:{}",
-                symbol.selection.start.line, symbol.selection.start.character
-            );
-            let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
-            let class_exported =
-                is_exported(self.adapter, &declaration, rel, &local, parent_exported);
-            let constructor_id = if let Some(constructor) = symbol
-                .children
-                .iter()
-                .find(|child| child.kind == LSP_CONSTRUCTOR)
-            {
-                self.create_node(
-                    constructor,
-                    rel,
-                    format!("{qname}.constructor"),
-                    NodeKind::Constructor,
-                    class_exported,
-                    false,
-                    false,
-                    Some(qname.clone()),
-                )
-            } else {
-                let synthetic = RawSymbol {
-                    name: format!("{local}.constructor"),
-                    kind: LSP_CONSTRUCTOR,
-                    detail: "implicit constructor".to_string(),
-                    range: symbol.range,
-                    selection: symbol.selection,
-                    children: Vec::new(),
-                };
-                self.create_node(
-                    &synthetic,
-                    rel,
-                    format!("{qname}.constructor"),
-                    NodeKind::Constructor,
-                    class_exported,
-                    true,
-                    false,
-                    Some(qname.clone()),
-                )
-            };
-            if let Some(id) = constructor_id {
-                self.class_map.insert(class_key, id.clone());
-                self.class_map.insert(class_key_alt, id);
-            }
-            for child in &symbol.children {
-                if child.kind == LSP_CONSTRUCTOR {
-                    continue;
-                }
-                if child.kind == LSP_METHOD || child.kind == LSP_FUNCTION {
-                    self.add_symbol(child, rel, &qname, class_exported, Some(&qname));
-                }
-            }
-            return;
-        }
-
         match symbol.kind {
-            LSP_STRUCT => return, // Rust struct: a type, not a graph primitive
+            LSP_CLASS => {
+                let class_exported =
+                    self.add_class_symbol(symbol, rel, &local, &qname, parent_exported);
+                for child in &symbol.children {
+                    if child.kind == LSP_CONSTRUCTOR {
+                        continue;
+                    }
+                    if child.kind == LSP_METHOD || child.kind == LSP_FUNCTION {
+                        self.add_symbol(child, rel, &qname, class_exported, Some(&qname));
+                    }
+                }
+            }
+            LSP_STRUCT => {} // Rust struct: a type, not a graph primitive
             LSP_OBJECT => {
                 let container = normalize_container_name(&local);
                 let trait_impl = local.contains(" for ");
@@ -500,42 +544,14 @@ impl Builder {
                         Some(&container),
                     );
                 }
-                return;
             }
             LSP_INTERFACE | LSP_ENUM | LSP_MODULE | LSP_NAMESPACE | LSP_PACKAGE => {
                 for child in &symbol.children {
                     self.add_symbol(child, rel, &qname, parent_exported, Some(&qname));
                 }
-                return;
             }
-            _ => {}
+            _ => self.add_leaf_symbol(symbol, rel, qname, parent_exported, container),
         }
-
-        let Some(kind) = node_kind_from_symbol(symbol.kind) else {
-            return;
-        };
-        if kind.is_data() {
-            let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
-            let is_type_alias = ["type ", "export type ", "declare type "]
-                .iter()
-                .any(|prefix| declaration.starts_with(prefix));
-            if is_type_alias
-                || !self.include_constants
-                || (kind == NodeKind::Variable && container.is_some())
-            {
-                return;
-            }
-        }
-        self.create_node(
-            symbol,
-            rel,
-            qname.clone(),
-            kind,
-            parent_exported,
-            false,
-            false,
-            container.map(str::to_string),
-        );
     }
 }
 

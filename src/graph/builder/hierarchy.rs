@@ -53,9 +53,8 @@ async fn fetch_calls(
 }
 
 impl Builder {
-    pub(crate) async fn walk_calls(&mut self, client: &LspClient, reporter: &Reporter) {
-        let callable_ids: Vec<String> = self
-            .order
+    fn walkable_ids(&self) -> Vec<String> {
+        self.order
             .iter()
             .filter(|id| {
                 self.records
@@ -64,8 +63,80 @@ impl Builder {
                     .unwrap_or(false)
             })
             .cloned()
-            .collect();
-        let mut queue: VecDeque<String> = callable_ids.into_iter().collect();
+            .collect()
+    }
+
+    fn fetch_inputs(&self, batch: &[String]) -> Vec<FetchInput> {
+        batch
+            .iter()
+            .filter_map(|id| {
+                let record = self.records.get(id)?;
+                Some(FetchInput {
+                    id: id.clone(),
+                    rel: record.rel.clone(),
+                    uri: record.uri.clone(),
+                    selection: record.selection.start,
+                    range_start: record.range.start,
+                })
+            })
+            .collect()
+    }
+
+    fn apply_external(&mut self, input: &FetchInput, call: &OutgoingCall) {
+        if self.include_external {
+            let rel = self.to_relative(&call.to.uri);
+            let external_id = self.ensure_external_node(&call.to, rel.as_deref());
+            if let Some(caller) = self.records.get(&input.id) {
+                let rel = caller.rel.clone();
+                for range in &call.from_ranges {
+                    let site = self.call_site(&rel, *range);
+                    self.add_edge(&input.id, &external_id, site, true, false);
+                }
+            }
+            self.external_callees
+                .entry(input.id.clone())
+                .or_default()
+                .insert(external_id);
+        } else {
+            self.external_callees
+                .entry(input.id.clone())
+                .or_default()
+                .insert(format!(
+                    "{}#{}@{}:{}",
+                    call.to.uri,
+                    call.to.name,
+                    call.to.selection_range.start.line,
+                    call.to.selection_range.start.character
+                ));
+        }
+    }
+
+    fn apply_call(
+        &mut self,
+        input: &FetchInput,
+        call: OutgoingCall,
+        visited: &HashSet<String>,
+        queue: &mut VecDeque<String>,
+    ) {
+        let resolved = self.resolve_target(&call.to);
+        if resolved.external {
+            self.apply_external(input, &call);
+            return;
+        }
+        let Some(target) = resolved.id else {
+            return;
+        };
+        for range in &call.from_ranges {
+            let site = self.call_site(&input.rel, *range);
+            self.add_edge(&input.id, &target, site, false, false);
+        }
+        if resolved.created_callable && !visited.contains(&target) {
+            queue.push_back(target);
+        }
+    }
+
+    pub(crate) async fn walk_calls(&mut self, client: &LspClient, reporter: &Reporter) {
+        let mut queue: VecDeque<String> = self.walkable_ids().into_iter().collect();
         let mut visited: HashSet<String> = HashSet::new();
         let mut processed = 0usize;
 
@@ -80,18 +151,7 @@ impl Builder {
             if batch.is_empty() {
                 break;
             }
-            let mut inputs = Vec::new();
-            for id in &batch {
-                if let Some(record) = self.records.get(id) {
-                    inputs.push(FetchInput {
-                        id: id.clone(),
-                        rel: record.rel.clone(),
-                        uri: record.uri.clone(),
-                        selection: record.selection.start,
-                        range_start: record.range.start,
-                    });
-                }
-            }
+            let inputs = self.fetch_inputs(&batch);
             let results = join_all(inputs.iter().map(|input| fetch_calls(client, input))).await;
             for (input, result) in inputs.iter().zip(results) {
                 let calls = match result {
@@ -103,43 +163,7 @@ impl Builder {
                 };
                 for (_item, outgoing) in calls {
                     for call in outgoing {
-                        let resolved = self.resolve_target(&call.to);
-                        if resolved.external {
-                            if self.include_external {
-                                let rel = self.to_relative(&call.to.uri);
-                                let external_id =
-                                    self.ensure_external_node(&call.to, rel.as_deref());
-                                if let Some(caller) = self.records.get(&input.id) {
-                                    let rel = caller.rel.clone();
-                                    for range in &call.from_ranges {
-                                        let site = self.call_site(&rel, *range);
-                                        self.add_edge(&input.id, &external_id, site, true, false);
-                                    }
-                                }
-                                let set =
-                                    self.external_callees.entry(input.id.clone()).or_default();
-                                set.insert(external_id);
-                            } else {
-                                let set =
-                                    self.external_callees.entry(input.id.clone()).or_default();
-                                set.insert(format!(
-                                    "{}#{}@{}:{}",
-                                    call.to.uri,
-                                    call.to.name,
-                                    call.to.selection_range.start.line,
-                                    call.to.selection_range.start.character
-                                ));
-                            }
-                            continue;
-                        }
-                        let Some(target) = resolved.id else { continue };
-                        for range in &call.from_ranges {
-                            let site = self.call_site(&input.rel, *range);
-                            self.add_edge(&input.id, &target, site, false, false);
-                        }
-                        if resolved.created_callable && !visited.contains(&target) {
-                            queue.push_back(target);
-                        }
+                        self.apply_call(input, call, &visited, &mut queue);
                     }
                 }
             }
