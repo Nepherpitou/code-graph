@@ -85,6 +85,13 @@ On the NFL backend snapshot (883 files, 3984 TS5 nodes), the current numbers are
 code-graph analyze <dir> [options]
 code-graph up [dir] [options]
 code-graph inspect <graph.json>
+code-graph audit [path] [options]
+code-graph audit top [options]
+code-graph audit focus <symbol> [options]
+code-graph audit cycles [options]
+code-graph audit dead-code [options]
+code-graph audit search <text> [options]
+code-graph audit metrics [options]
 code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 ```
 
@@ -104,6 +111,45 @@ code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 | `--quiet` | Suppress progress output. |
 
 `inspect` prints graph stats and the top lists that the SPA also renders.
+
+### Audit CLI
+
+`audit` is the terminal path for complexity and architecture review. It is read-only after a snapshot exists, defaults to human-readable text, and does not use smell thresholds or verdicts. It reuses the latest project snapshot; if none exists it analyzes first.
+
+```bash
+# Overview: counts, cycles, dead-code candidates, top hotspot scores
+code-graph audit .
+
+# Re-analyze explicitly
+code-graph audit . --refresh
+
+# Rank callables by an existing metric
+code-graph audit top --order-by complexity --limit 10
+code-graph audit top --order-by blast-radius --file src/domain
+
+# One symbol: metrics, callers, callees, entry → exit route
+code-graph audit focus createOrder
+
+# Factual SCCs and existing dead-code candidates
+code-graph audit cycles
+code-graph audit dead-code --limit 10
+
+# Search and metric glossary
+code-graph audit search payment
+code-graph audit metrics
+```
+
+Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>`, `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`.
+
+`audit top --order-by` accepts: `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `ifc`, `betweenness`, `loc`, `params`. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
+
+`--format json` returns the same facts in a compact envelope for agents:
+
+```json
+{"kind":"audit.focus","snapshot":{...},"data":{"node":{...},"metrics":{...},"callers":[],"callees":[],"route":{...}}}
+```
+
+The audit deliberately has no `smells`, severity, or configurable thresholds yet. Cycles are SCCs; dead code is the existing candidate predicate; everything else is a raw metric ranking.
 
 ### HTTP API
 

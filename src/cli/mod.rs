@@ -2,6 +2,7 @@
 //! start the HTTP server.
 
 mod args;
+mod audit;
 mod inspect;
 
 use std::fs;
@@ -40,6 +41,7 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Inspect(args) => inspect::inspect(&args.file),
+        Commands::Audit(args) => audit::run(args).await,
         Commands::Serve(args) => api::serve(&args.db, &args.bind, &args.web_dir, None).await,
         Commands::Up(args) => {
             let options = build_options(args.analysis)?;

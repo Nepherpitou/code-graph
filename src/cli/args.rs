@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::languages::LanguageId;
 
@@ -24,6 +24,8 @@ pub(super) enum Commands {
     Up(UpArgs),
     /// Print a summary of a graph JSON file.
     Inspect(InspectArgs),
+    /// Review project complexity and architecture from the terminal.
+    Audit(AuditArgs),
     /// Serve persisted graph snapshots over HTTP.
     Serve(ServeArgs),
 }
@@ -95,6 +97,179 @@ pub(super) struct UpArgs {
 #[derive(Parser)]
 pub(super) struct InspectArgs {
     pub(super) file: PathBuf,
+}
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  code-graph audit .
+  code-graph audit top --order-by complexity
+  code-graph audit top --root ../project --file src/domain
+  code-graph audit focus createOrder
+  code-graph audit cycles
+")]
+pub(super) struct AuditArgs {
+    /// Project path for the overview; defaults to the current directory.
+    pub(super) path: Option<PathBuf>,
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    #[command(subcommand)]
+    pub(super) command: Option<AuditCommand>,
+}
+
+#[derive(Args)]
+pub(super) struct AuditCommon {
+    /// Project root to analyze or query.
+    #[arg(long, default_value = ".")]
+    pub(super) root: PathBuf,
+    /// Snapshot database (default: <root>/.code-graph/code-graph.db).
+    #[arg(long)]
+    pub(super) db: Option<PathBuf>,
+    /// Re-analyze the project before printing the report.
+    #[arg(long, conflicts_with = "snapshot")]
+    pub(super) refresh: bool,
+    /// Use an existing snapshot id, or "latest".
+    #[arg(long)]
+    pub(super) snapshot: Option<String>,
+    /// Output format: human-readable text or JSON.
+    #[arg(long, value_enum, default_value_t = AuditFormat::Text)]
+    pub(super) format: AuditFormat,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(super) enum AuditFormat {
+    Text,
+    Json,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(super) enum AuditOrder {
+    Hotspot,
+    Complexity,
+    BlastRadius,
+    FanIn,
+    FanOut,
+    Ifc,
+    Betweenness,
+    Loc,
+    Params,
+}
+
+#[derive(Subcommand)]
+pub(super) enum AuditCommand {
+    /// Rank callables by a metric.
+    Top(AuditTopArgs),
+    /// Show metrics and relations for one symbol.
+    Focus(AuditFocusArgs),
+    /// List strongly connected components with more than one callable.
+    Cycles(AuditCyclesArgs),
+    /// List existing dead-code candidates.
+    DeadCode(AuditDeadArgs),
+    /// Search symbols by name, qualified name, or file.
+    Search(AuditSearchArgs),
+    /// Explain the metrics used by the audit.
+    Metrics(AuditMetricsArgs),
+}
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  code-graph audit top --order-by complexity --limit 10
+  code-graph audit top --order-by blast-radius --file src/domain
+  code-graph audit top --order-by fan-in --kind method
+")]
+pub(super) struct AuditTopArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Metric to sort by.
+    #[arg(long, value_enum, default_value_t = AuditOrder::Hotspot)]
+    pub(super) order_by: AuditOrder,
+    /// Maximum number of rows.
+    #[arg(long, default_value_t = 10)]
+    pub(super) limit: usize,
+    /// Only show values at or above this number.
+    #[arg(long)]
+    pub(super) min: Option<f64>,
+    /// Only show nodes in a file or directory (substring match).
+    #[arg(long)]
+    pub(super) file: Option<String>,
+    /// Only show a specific kind: function, method, constructor, constant, variable.
+    #[arg(long)]
+    pub(super) kind: Option<String>,
+    /// Sort ascending instead of descending.
+    #[arg(long)]
+    pub(super) ascending: bool,
+}
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  code-graph audit focus createOrder
+  code-graph audit focus --qname OrderService.createOrder
+  code-graph audit focus --file src/domain --line 42
+  code-graph audit focus --id 'src/domain/OrderService.ts#method:...'
+")]
+pub(super) struct AuditFocusArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Symbol name, qualified name, or stable id.
+    pub(super) selector: Option<String>,
+    /// Stable id (preferred for agents).
+    #[arg(long)]
+    pub(super) id: Option<String>,
+    /// Qualified name, for example OrderService.createOrder.
+    #[arg(long)]
+    pub(super) qname: Option<String>,
+    /// Filter by file path substring.
+    #[arg(long)]
+    pub(super) file: Option<String>,
+    /// Filter by line within the declaration.
+    #[arg(long)]
+    pub(super) line: Option<u32>,
+    /// Maximum callers/callees to print.
+    #[arg(long, default_value_t = 8)]
+    pub(super) limit: usize,
+}
+
+#[derive(Args)]
+pub(super) struct AuditCyclesArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Ignore SCCs smaller than this.
+    #[arg(long, default_value_t = 2)]
+    pub(super) min_size: usize,
+    /// Maximum number of cycles to print.
+    #[arg(long, default_value_t = 20)]
+    pub(super) limit: usize,
+}
+
+#[derive(Args)]
+pub(super) struct AuditDeadArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Maximum number of candidates to print.
+    #[arg(long, default_value_t = 20)]
+    pub(super) limit: usize,
+    /// Only show candidates in a file or directory (substring match).
+    #[arg(long)]
+    pub(super) file: Option<String>,
+}
+
+#[derive(Args)]
+pub(super) struct AuditSearchArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Text to search for.
+    pub(super) query: String,
+    /// Maximum number of matches.
+    #[arg(long, default_value_t = 10)]
+    pub(super) limit: usize,
+    /// Optional kind filter.
+    #[arg(long)]
+    pub(super) kind: Option<String>,
+}
+
+#[derive(Args)]
+pub(super) struct AuditMetricsArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
 }
 
 #[derive(Parser)]
