@@ -20,7 +20,13 @@ const BETWEENNESS_WORK_LIMIT: usize = 6_000_000;
 pub(crate) fn refactor_priority(node: &GraphNode) -> f64 {
     let complexity = node.cyclomatic as f64 + (1.0 + node.sloc as f64).ln();
     let impact = 1.0 + ((1 + node.metrics.transitive_fan_in) as f64).log2();
-    complexity * impact * (1.0 + node.metrics.instability)
+    let call_edges = node.metrics.call_fan_in + node.metrics.call_fan_out;
+    let instability = if call_edges > 0 {
+        node.metrics.call_fan_out as f64 / call_edges as f64
+    } else {
+        0.0
+    };
+    complexity * impact * (1.0 + instability)
 }
 
 struct GraphAnalysis<'a> {
@@ -157,14 +163,14 @@ impl<'a> GraphAnalysis<'a> {
             } else {
                 0.0
             };
-            metrics.instability = if fan_in + fan_out > 0 {
-                fan_out as f64 / (fan_in + fan_out) as f64
+            metrics.instability = if call_fan_in + call_fan_out > 0 {
+                call_fan_out as f64 / (call_fan_in + call_fan_out) as f64
             } else {
                 0.0
             };
             if self.callable[*index] {
-                metrics.ifc =
-                    self.nodes[*index].loc as f64 + (fan_in as f64 * fan_out as f64).powi(2);
+                metrics.ifc = self.nodes[*index].loc as f64
+                    + (call_fan_in as f64 * call_fan_out as f64).powi(2);
             }
         }
     }
@@ -567,7 +573,13 @@ mod tests {
     use super::*;
     use crate::graph::NodeKind;
 
-    fn node(cyclomatic: u32, sloc: u32, transitive_fan_in: u32, instability: f64) -> GraphNode {
+    fn node(
+        cyclomatic: u32,
+        sloc: u32,
+        transitive_fan_in: u32,
+        call_fan_in: u32,
+        call_fan_out: u32,
+    ) -> GraphNode {
         GraphNode {
             id: "test#function:node".to_string(),
             name: "node".to_string(),
@@ -588,7 +600,8 @@ mod tests {
             declaration: String::new(),
             metrics: NodeMetrics {
                 transitive_fan_in,
-                instability,
+                call_fan_in,
+                call_fan_out,
                 ..NodeMetrics::default()
             },
         }
@@ -596,17 +609,17 @@ mod tests {
 
     #[test]
     fn priority_rewards_complexity_impact_and_unstable_deps() {
-        let base = refactor_priority(&node(5, 10, 10, 0.0));
-        assert!(refactor_priority(&node(10, 10, 10, 0.0)) > base);
-        assert!(refactor_priority(&node(5, 100, 10, 0.0)) > base);
-        assert!(refactor_priority(&node(5, 10, 20, 0.0)) > base);
-        assert!(refactor_priority(&node(5, 10, 10, 0.8)) > base);
+        let base = refactor_priority(&node(5, 10, 10, 0, 0));
+        assert!(refactor_priority(&node(10, 10, 10, 0, 0)) > base);
+        assert!(refactor_priority(&node(5, 100, 10, 0, 0)) > base);
+        assert!(refactor_priority(&node(5, 10, 20, 0, 0)) > base);
+        assert!(refactor_priority(&node(5, 10, 10, 2, 8)) > base);
     }
 
     #[test]
     fn stable_leaf_is_not_a_refactor_target() {
-        let leaf = refactor_priority(&node(1, 6, 0, 0.0));
-        let central = refactor_priority(&node(1, 6, 36, 0.0));
+        let leaf = refactor_priority(&node(1, 6, 0, 0, 0));
+        let central = refactor_priority(&node(1, 6, 36, 0, 0));
         assert!(leaf < 3.0);
         assert!(central > leaf);
     }

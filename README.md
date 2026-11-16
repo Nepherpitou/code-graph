@@ -141,7 +141,7 @@ code-graph audit metrics
 
 Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>`, `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`.
 
-`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `ifc`, `betweenness`, `loc`, `params`. `priority` is an absolute refactoring score: complexity times transitive impact times instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
+`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `call-fan-in`, `call-fan-out`, `data-fan-in`, `data-fan-out`, `ifc`, `betweenness`, `loc`, `params`. `fan-in`/`fan-out` are total degrees; the `call-*`/`data-*` variants split them by edge kind. `ifc` and `priority` use call edges only. `priority` is an absolute refactoring score: complexity times transitive impact times call instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
 
 `--format json` returns the same facts in a compact envelope for agents:
 
@@ -156,7 +156,7 @@ The audit deliberately has no `smells`, severity, or configurable thresholds yet
 ```text
 priority = (cyclomatic + ln(1 + sloc))
          * (1 + log2(1 + transitiveFanIn))
-         * (1 + instability)
+         * (1 + callInstability)
 ```
 
 Old snapshots that predate these fields still load; their `priority` is `0` until the project is re-analyzed.

@@ -533,6 +533,10 @@ impl AuditOrder {
             AuditOrder::BlastRadius => "transitive-in",
             AuditOrder::FanIn => "fan-in",
             AuditOrder::FanOut => "fan-out",
+            AuditOrder::CallFanIn => "call-fan-in",
+            AuditOrder::CallFanOut => "call-fan-out",
+            AuditOrder::DataFanIn => "data-fan-in",
+            AuditOrder::DataFanOut => "data-fan-out",
             AuditOrder::Ifc => "ifc",
             AuditOrder::Betweenness => "betweenness",
             AuditOrder::Loc => "loc",
@@ -548,6 +552,10 @@ impl AuditOrder {
             AuditOrder::BlastRadius => node.metrics.transitive_fan_in as f64,
             AuditOrder::FanIn => node.metrics.fan_in as f64,
             AuditOrder::FanOut => node.metrics.fan_out as f64,
+            AuditOrder::CallFanIn => node.metrics.call_fan_in as f64,
+            AuditOrder::CallFanOut => node.metrics.call_fan_out as f64,
+            AuditOrder::DataFanIn => node.metrics.data_fan_in as f64,
+            AuditOrder::DataFanOut => node.metrics.data_fan_out as f64,
             AuditOrder::Ifc => node.metrics.ifc,
             AuditOrder::Betweenness => node.metrics.betweenness,
             AuditOrder::Loc => node.loc as f64,
@@ -575,12 +583,14 @@ async fn top(args: AuditTopArgs) -> Result<()> {
     let nodes = load_nodes(&context).await?;
     let kind = args.kind.as_deref().map(parse_kind).transpose()?;
     let limit = args.limit.clamp(1, 200);
+    let default_data_rank = kind.is_none() && matches!(args.order_by, AuditOrder::DataFanIn);
 
     let mut rows: Vec<&GraphNode> = nodes
         .iter()
         .filter(|node| !node.external)
         .filter(|node| match kind {
             Some(kind) => node.kind == kind,
+            None if default_data_rank => node.kind.is_data(),
             None => node.kind.is_callable(),
         })
         .filter(|node| {
@@ -641,8 +651,14 @@ async fn top(args: AuditTopArgs) -> Result<()> {
                     args.min.unwrap_or_default()
                 );
             }
-            let show_in = !matches!(args.order_by, AuditOrder::FanIn);
-            let show_out = !matches!(args.order_by, AuditOrder::FanOut);
+            let show_in = !matches!(
+                args.order_by,
+                AuditOrder::FanIn | AuditOrder::CallFanIn | AuditOrder::DataFanIn
+            );
+            let show_out = !matches!(
+                args.order_by,
+                AuditOrder::FanOut | AuditOrder::CallFanOut | AuditOrder::DataFanOut
+            );
             let show_cyclo = !matches!(args.order_by, AuditOrder::Complexity);
             let show_loc = !matches!(args.order_by, AuditOrder::Loc);
 
@@ -916,6 +932,14 @@ async fn focus(args: AuditFocusArgs) -> Result<()> {
             println!("  hotspot        {:>8}", metric(node.metrics.hotspot));
             println!("  fan-in         {:>8}", node.metrics.fan_in);
             println!("  fan-out        {:>8}", node.metrics.fan_out);
+            println!(
+                "  call-in/out    {:>8}",
+                format!("{}/{}", node.metrics.call_fan_in, node.metrics.call_fan_out)
+            );
+            println!(
+                "  data-in/out    {:>8}",
+                format!("{}/{}", node.metrics.data_fan_in, node.metrics.data_fan_out)
+            );
             println!("  transitive-in  {:>8}", node.metrics.transitive_fan_in);
             println!("  transitive-out {:>8}", node.metrics.transitive_fan_out);
             println!("  cyclomatic     {:>8}", node.cyclomatic);
@@ -1132,7 +1156,7 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "priority",
-            "absolute refactoring priority: complexity * impact * instability",
+            "absolute refactoring priority: complexity * impact * call instability",
         ),
         (
             "hotspot",
@@ -1148,7 +1172,11 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "fan-in / fan-out",
-            "distinct call + data neighbours; call sites count multiplicity separately",
+            "total distinct call + data neighbours; call sites count multiplicity separately",
+        ),
+        (
+            "call / data fan",
+            "the same degree split by edge kind; call is the architecture view",
         ),
         (
             "sloc",
@@ -1156,7 +1184,7 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "ifc",
-            "information-flow complexity: LOC + (fan-in × fan-out)²",
+            "information-flow complexity: LOC + (call-fan-in × call-fan-out)²",
         ),
         (
             "betweenness",
@@ -1164,7 +1192,7 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "instability",
-            "fan-out / (fan-in + fan-out); 0 = depended on, 1 = depends on others",
+            "call-fan-out / (call-fan-in + call-fan-out); 0 = depended on, 1 = depends on others",
         ),
         (
             "ignored result",
