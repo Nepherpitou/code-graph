@@ -13,8 +13,9 @@ export function EntryPointsPanel({ roots, totalRoots, truncated, onSelect }: Pro
     <section className="panel entry-panel">
       <h3>Entry points</h3>
       <p className="panel-note">
-        Sorted by reachable callables (transitive fan-out).
-        Click a root to open its focus slice and dependencies.
+        Sorted by reachable callables (transitive fan-out). First-level calls
+        are filled root by root; second-level calls use the remaining node
+        budget. Click a root to open its focus slice.
       </p>
       <ol className="entry-list">
         {roots.map((root, index) => (

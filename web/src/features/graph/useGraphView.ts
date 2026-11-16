@@ -96,27 +96,44 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[
   }
   const roots = [...new Set(rootIds)].filter((id) => nodeById.has(id));
   if (roots.length > 1) {
-    // Entry overview: roots are peers, so lay them out as a compact grid
-    // instead of pretending they are call-chain depth. Any extra nodes (only
-    // present when the caller explicitly asks for a wider slice) go below.
-    const positions: Record<string, { x: number; y: number }> = {};
-    const rootColumns = 4;
-    roots.forEach((id, index) => {
-      positions[id] = {
-        x: (index % rootColumns) * columnWidth,
-        y: Math.floor(index / rootColumns) * rowHeight,
-      };
-    });
-    const rootRows = Math.ceil(roots.length / rootColumns);
+    // Entry overview: roots are peers. Put every root in a top band, then the
+    // first-level calls collected from all roots, then the second-level calls
+    // if the node budget had room. Grid bands keep fifty roots visible without
+    // turning the overview into a single endless column.
     const rootSet = new Set(roots);
-    let extra = 0;
-    for (const node of nodes) {
-      if (rootSet.has(node.id)) continue;
-      positions[node.id] = {
-        x: (extra % 8) * columnWidth,
-        y: (rootRows + 1 + Math.floor(extra / 8)) * rowHeight,
-      };
-      extra += 1;
+    const firstLevel = new Set<string>();
+    for (const edge of edges) {
+      if (rootSet.has(edge.source) && !rootSet.has(edge.target)) {
+        firstLevel.add(edge.target);
+      }
+    }
+    const secondLevel = new Set<string>();
+    for (const edge of edges) {
+      if (firstLevel.has(edge.source) && !rootSet.has(edge.target) && !firstLevel.has(edge.target)) {
+        secondLevel.add(edge.target);
+      }
+    }
+    const firstIds = new Set(firstLevel);
+    const secondIds = new Set(secondLevel);
+    const bands = [
+      roots,
+      nodes.filter((node) => firstIds.has(node.id)).map((node) => node.id),
+      nodes.filter((node) => secondIds.has(node.id)).map((node) => node.id),
+      nodes
+        .filter((node) => !rootSet.has(node.id) && !firstIds.has(node.id) && !secondIds.has(node.id))
+        .map((node) => node.id),
+    ];
+    const positions: Record<string, { x: number; y: number }> = {};
+    const columns = 10;
+    let rowOffset = 0;
+    for (const band of bands) {
+      band.forEach((id, index) => {
+        positions[id] = {
+          x: (index % columns) * columnWidth,
+          y: (rowOffset + Math.floor(index / columns)) * rowHeight,
+        };
+      });
+      if (band.length > 0) rowOffset += Math.ceil(band.length / columns) + 1;
     }
     return { positions, rowHeight };
   }
@@ -222,6 +239,8 @@ interface Input {
 
 const FOCUS_DEPTH = 1;
 const FOCUS_LIMIT = 180;
+const ENTRY_ROOTS = 50;
+const ENTRY_LIMIT = 180;
 
 export interface GraphView {
   report: GraphReport | null;
@@ -878,23 +897,20 @@ export function useGraphView({
     if (!apiContext || !snapshot) return;
     focusRequest.current += 1;
     try {
-      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, 8, 1, 180);
+      // Fill the overview root by root: every entry point gets its first-level
+      // calls; only when the node budget still has room are second-level nodes
+      // added. The API slice already uses this level ordering.
+      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, ENTRY_ROOTS, 2, ENTRY_LIMIT);
       const warnings = data.truncated
         ? [
             ...snapshot.warnings,
             `entry graph limited to ${data.nodes.length} nodes across ${data.roots.length} roots`,
           ]
         : snapshot.warnings;
-      // The entry overview is a list of entry points, not their dependency
-      // neighbourhoods. Keep only the roots here; clicking one opens its
-      // focus slice with the dependencies on demand.
-      const rootIds = new Set(data.roots.map((root) => root.id));
       setReport({
         meta: snapshot.meta,
-        nodes: data.nodes.filter((node) => rootIds.has(node.id)),
-        edges: data.edges.filter(
-          (edge) => rootIds.has(edge.source) && rootIds.has(edge.target),
-        ),
+        nodes: data.nodes,
+        edges: data.edges,
         files: [],
         stats: snapshot.stats,
         top: snapshot.top,
@@ -903,7 +919,7 @@ export function useGraphView({
       setEntryRoots(data.roots);
       setEntryInfo({
         totalRoots: data.totalRoots,
-        truncated: false,
+        truncated: data.truncated,
       });
       setSelectedId(null);
       setFocusIds(null);

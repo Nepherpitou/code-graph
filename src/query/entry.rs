@@ -28,7 +28,7 @@ pub struct EntryRanking {
 }
 
 pub fn rank_entry_points(nodes: &[GraphNode], limit: usize) -> EntryRanking {
-    let limit = limit.clamp(1, 20);
+    let limit = limit.clamp(1, 500);
     let mut candidates: Vec<&GraphNode> = nodes
         .iter()
         .filter(|node| is_entry_candidate(node))
