@@ -311,8 +311,13 @@ export function useGraphView({
 
   const rememberFocus = useCallback((id: string) => {
     const current = focusHistoryRef.current;
-    if (current[current.length - 1] === id) return;
-    const next = [...current, id];
+    const existing = current.lastIndexOf(id);
+    // Returning to an earlier node rewinds the focus history: everything after
+    // that node is a forward branch the user just discarded.
+    const next = existing >= 0 ? current.slice(0, existing + 1) : [...current, id];
+    if (next.length === current.length && next.every((value, index) => value === current[index])) {
+      return;
+    }
     focusHistoryRef.current = next;
     setFocusHistory(next);
   }, []);
