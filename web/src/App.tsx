@@ -39,6 +39,17 @@ export function App() {
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
+    if (!searchOpen) return;
+    window.history.pushState({ ...window.history.state, codeGraphSearch: true }, '');
+    const onPopState = (): void => setSearchOpen(false);
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      if (window.history.state?.codeGraphSearch) window.history.back();
+    };
+  }, [searchOpen]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       const editable = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;

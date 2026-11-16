@@ -119,6 +119,10 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (query) {
+        setQuery('');
+        return;
+      }
       onClose();
       return;
     }
@@ -179,25 +183,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
               </button>
             ) : null}
           </div>
-          <button
-            className="node-search-close"
-            type="button"
-            onClick={onClose}
-            title="Close search (Esc)"
-            aria-label="Close search"
-          >
-            ×
-          </button>
         </header>
-
-        <div className="node-search-group">
-          <span>{empty ? 'Top by audit hotspot' : 'Matching nodes'}</span>
-          <span className="node-search-count">
-            {empty
-              ? `${results.length} nodes`
-              : `${results.length}${matches.length > results.length ? ` of ${matches.length}` : ''}`}
-          </span>
-        </div>
 
         <div className="node-search-results" id="node-search-results" role="listbox">
           {results.length === 0 ? (
@@ -251,9 +237,14 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
         </div>
 
         <footer className="node-search-footer">
-          <span>{empty ? 'Ranked by hotspot, then name' : 'Ranked by match, then audit score'}</span>
+          <span className="node-search-context">
+            {empty
+              ? `Top ${results.length} nodes by audit hotspot`
+              : `${results.length}${matches.length > results.length ? ` of ${matches.length}` : ''} matches for “${query.trim()}”`}
+            {' · searching name, file, kind, and id'}
+          </span>
           <span className="node-search-hint">
-            <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close
+            <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open · <kbd>Esc</kbd> {query ? 'clear' : 'close'}
           </span>
         </footer>
       </section>
