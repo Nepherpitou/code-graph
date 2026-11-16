@@ -712,6 +712,58 @@ async function loadEntryPoints({
   }
 }
 
+interface FocusSliceDeps {
+  snapshot: GraphSummary | null;
+  focusHistoryRef: { current: string[] };
+  mergeSlice: (slice: GraphSlice, focus: Set<string> | null) => void;
+  setEntryRoots: Dispatch<SetStateAction<EntryPoint[]>>;
+  setEntryInfo: Dispatch<SetStateAction<{
+    totalRoots: number;
+    truncated: boolean;
+  } | null>>;
+  setPath: Dispatch<SetStateAction<PathResult | null>>;
+  setPathIndexState: Dispatch<SetStateAction<number>>;
+  setRouteIds: Dispatch<SetStateAction<Set<string>>>;
+  setSelectedId: Dispatch<SetStateAction<string | null>>;
+}
+
+function applyFocusedSlice(slice: FocusSlice, id: string, {
+  snapshot,
+  focusHistoryRef,
+  mergeSlice,
+  setEntryRoots,
+  setEntryInfo,
+  setPath,
+  setPathIndexState,
+  setRouteIds,
+  setSelectedId,
+}: FocusSliceDeps): void {
+  if (!snapshot) return;
+  const focusedReport: GraphReport = {
+    meta: snapshot.meta,
+    nodes: slice.nodes,
+    edges: slice.edges,
+    files: [],
+    stats: snapshot.stats,
+    top: snapshot.top,
+    warnings: snapshot.warnings,
+  };
+  // A focus selection is node + direct relations + the shortest entry→exit
+  // route. The API slice also carries a wider context window; do not show it.
+  const focus = neighborhood(focusedReport, id, FOCUS_DEPTH);
+  for (const routeNode of slice.route) focus.add(routeNode);
+  for (const historyId of focusHistoryRef.current) focus.add(historyId);
+  // Merge rather than replace: previously placed nodes keep their positions
+  // when the user walks deeper through the call graph.
+  mergeSlice(slice, focus);
+  setEntryRoots([]);
+  setEntryInfo(null);
+  setPath(null);
+  setPathIndexState(0);
+  setRouteIds(new Set(slice.route));
+  setSelectedId(id);
+}
+
 interface ResetDeps {
   focusRequest: { current: number };
   setSelectedId: Dispatch<SetStateAction<string | null>>;
@@ -1328,30 +1380,17 @@ export function useGraphView({
   }, [clearHistory, searchText]);
 
   const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
-    if (!snapshot) return;
-    const focusedReport: GraphReport = {
-      meta: snapshot.meta,
-      nodes: slice.nodes,
-      edges: slice.edges,
-      files: [],
-      stats: snapshot.stats,
-      top: snapshot.top,
-      warnings: snapshot.warnings,
-    };
-    // A focus selection is node + direct relations + the shortest entry→exit
-    // route. The API slice also carries a wider context window; do not show it.
-    const focus = neighborhood(focusedReport, id, FOCUS_DEPTH);
-    for (const routeNode of slice.route) focus.add(routeNode);
-    for (const historyId of focusHistoryRef.current) focus.add(historyId);
-    // Merge rather than replace: previously placed nodes keep their positions
-    // when the user walks deeper through the call graph.
-    mergeSlice(slice, focus);
-    setEntryRoots([]);
-    setEntryInfo(null);
-    setPath(null);
-    setPathIndexState(0);
-    setRouteIds(new Set(slice.route));
-    setSelectedId(id);
+    applyFocusedSlice(slice, id, {
+      snapshot,
+      focusHistoryRef,
+      mergeSlice,
+      setEntryRoots,
+      setEntryInfo,
+      setPath,
+      setPathIndexState,
+      setRouteIds,
+      setSelectedId,
+    });
   }, [mergeSlice, snapshot, setEntryInfo, setEntryRoots, setSelectedId]);
 
   const selectAndCenter = useCallback((id: string) => {
