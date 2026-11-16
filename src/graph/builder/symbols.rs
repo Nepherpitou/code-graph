@@ -221,7 +221,126 @@ fn ensure_unique(base: String, used: &mut HashSet<String>) -> String {
     }
 }
 
+struct NodeShape {
+    declaration: String,
+    params: u32,
+    cyclomatic: u32,
+    resolved_kind: NodeKind,
+    sloc: u32,
+}
+
 impl Builder {
+    fn reserve_node(&mut self) -> bool {
+        if self.records.len() >= self.max_nodes {
+            self.truncated = true;
+            false
+        } else {
+            true
+        }
+    }
+
+    fn node_shape(
+        &self,
+        symbol: &RawSymbol,
+        rel: &str,
+        kind: NodeKind,
+        synthetic: bool,
+    ) -> Option<NodeShape> {
+        let source = self.sources.get(rel);
+        let mut declaration = declaration_line(source, symbol.range.start.line);
+        if declaration.is_empty() {
+            declaration = symbol.detail.clone();
+        }
+        let mut shape = NodeShape {
+            declaration,
+            params: 0,
+            cyclomatic: 0,
+            resolved_kind: kind,
+            sloc: if synthetic {
+                0
+            } else {
+                source_sloc(source, symbol.range.start.line, symbol.range.end.line)
+            },
+        };
+        let Some(source) = source else {
+            return Some(shape);
+        };
+        let Some(tree) = &source.tree else {
+            return Some(shape);
+        };
+        if !synthetic && kind.is_callable() {
+            if let Some((params, complexity)) =
+                describe_function(tree, &source.text, self.adapter, symbol.selection.start)
+            {
+                if !declares_callable(tree, &source.text, self.adapter, symbol.selection.start) {
+                    return None; // e.g. JSX branches TypeScript reports as methods
+                }
+                shape.params = params;
+                shape.cyclomatic = complexity;
+            } else {
+                let (params, complexity) =
+                    variable_callable(tree, &source.text, self.adapter, symbol.selection.start)?;
+                shape.params = params;
+                shape.cyclomatic = complexity;
+            }
+        } else if kind.is_data() {
+            if self.adapter.id == LanguageId::TypeScript
+                && !declares_data(tree, &source.text, self.adapter, symbol.selection.start)
+            {
+                return None;
+            }
+            if let Some((params, complexity)) =
+                variable_callable(tree, &source.text, self.adapter, symbol.selection.start)
+            {
+                shape.resolved_kind = NodeKind::Function;
+                shape.params = params;
+                shape.cyclomatic = complexity;
+            }
+        }
+        Some(shape)
+    }
+
+    fn node_signature(
+        &self,
+        symbol: &RawSymbol,
+        rel: &str,
+        resolved_kind: NodeKind,
+        synthetic: bool,
+    ) -> Option<String> {
+        if !resolved_kind.is_callable() || synthetic {
+            return None;
+        }
+        self.sources
+            .get(rel)
+            .and_then(|source| {
+                source.tree.as_ref().and_then(|tree| {
+                    signature_at(tree, &source.text, self.adapter, symbol.selection.start)
+                })
+            })
+            .or_else(|| {
+                let detail = symbol.detail.trim();
+                (!detail.is_empty()).then(|| detail.to_string())
+            })
+    }
+
+    fn node_id(
+        &mut self,
+        rel: &str,
+        qname: &str,
+        resolved_kind: NodeKind,
+        signature: Option<&str>,
+    ) -> String {
+        let base = match signature.filter(|value| !value.is_empty()) {
+            Some(signature) => format!(
+                "{rel}#{}:{qname}@{:016x}",
+                resolved_kind.as_str(),
+                signature_hash(signature)
+            ),
+            None => format!("{rel}#{}:{qname}", resolved_kind.as_str()),
+        };
+        ensure_unique(base, &mut self.used_ids)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn create_node(
         &mut self,
@@ -234,117 +353,26 @@ impl Builder {
         lazy: bool,
         _class_name: Option<String>,
     ) -> Option<String> {
-        if self.records.len() >= self.max_nodes {
-            self.truncated = true;
+        if !self.reserve_node() {
             return None;
         }
-        let (declaration, params, cyclomatic, resolved_kind) = {
-            let source = self.sources.get(rel);
-            let mut declaration = declaration_line(source, symbol.range.start.line);
-            if declaration.is_empty() {
-                declaration = symbol.detail.clone();
-            }
-            let mut params = 0;
-            let mut cyclomatic = 0;
-            let mut resolved_kind = kind;
-            if let Some(source) = source {
-                if let Some(tree) = &source.tree {
-                    if !synthetic && kind.is_callable() {
-                        if let Some((p, c)) = describe_function(
-                            tree,
-                            &source.text,
-                            self.adapter,
-                            symbol.selection.start,
-                        ) {
-                            if !declares_callable(
-                                tree,
-                                &source.text,
-                                self.adapter,
-                                symbol.selection.start,
-                            ) {
-                                return None; // e.g. JSX branches TypeScript reports as methods
-                            }
-                            params = p;
-                            cyclomatic = c;
-                        } else if let Some((p, c)) = variable_callable(
-                            tree,
-                            &source.text,
-                            self.adapter,
-                            symbol.selection.start,
-                        ) {
-                            params = p;
-                            cyclomatic = c;
-                        } else {
-                            return None;
-                        }
-                    } else if kind.is_data() {
-                        if self.adapter.id == LanguageId::TypeScript
-                            && !declares_data(
-                                tree,
-                                &source.text,
-                                self.adapter,
-                                symbol.selection.start,
-                            )
-                        {
-                            return None;
-                        }
-                        if let Some((p, c)) = variable_callable(
-                            tree,
-                            &source.text,
-                            self.adapter,
-                            symbol.selection.start,
-                        ) {
-                            resolved_kind = NodeKind::Function;
-                            params = p;
-                            cyclomatic = c;
-                        }
-                    }
-                }
-            }
-            (declaration, params, cyclomatic, resolved_kind)
-        };
+        let shape = self.node_shape(symbol, rel, kind, synthetic)?;
         let name = symbol.name.clone();
-        let exported = is_exported(self.adapter, &declaration, rel, &name, parent_exported);
+        let exported = is_exported(
+            self.adapter,
+            &shape.declaration,
+            rel,
+            &name,
+            parent_exported,
+        );
+        let signature = self.node_signature(symbol, rel, shape.resolved_kind, synthetic);
+        let id = self.node_id(rel, &qname, shape.resolved_kind, signature.as_deref());
         let line = symbol.selection.start.line;
-        // Deliberately no line/column: IDs must survive edits above the symbol.
-        let signature = if resolved_kind.is_callable() && !synthetic {
-            self.sources
-                .get(rel)
-                .and_then(|source| {
-                    source.tree.as_ref().and_then(|tree| {
-                        signature_at(tree, &source.text, self.adapter, symbol.selection.start)
-                    })
-                })
-                .or_else(|| {
-                    let detail = symbol.detail.trim();
-                    (!detail.is_empty()).then(|| detail.to_string())
-                })
-        } else {
-            None
-        };
-        let base = match signature.as_deref().filter(|value| !value.is_empty()) {
-            Some(signature) => format!(
-                "{rel}#{}:{qname}@{:016x}",
-                resolved_kind.as_str(),
-                signature_hash(signature)
-            ),
-            None => format!("{rel}#{}:{qname}", resolved_kind.as_str()),
-        };
-        let id = ensure_unique(base, &mut self.used_ids);
-        let sloc = if synthetic {
-            0
-        } else {
-            source_sloc(
-                self.sources.get(rel),
-                symbol.range.start.line,
-                symbol.range.end.line,
-            )
-        };
         let node = GraphNode {
             id: id.clone(),
             name,
             qname: qname.clone(),
-            kind: resolved_kind,
+            kind: shape.resolved_kind,
             file: rel.to_string(),
             line: line + 1,
             end_line: symbol.range.end.line + 1,
@@ -354,15 +382,15 @@ impl Builder {
                 .line
                 .saturating_sub(symbol.range.start.line)
                 + 1,
-            sloc,
-            params,
-            cyclomatic,
+            sloc: shape.sloc,
+            params: shape.params,
+            cyclomatic: shape.cyclomatic,
             exported,
             external: false,
             lazy,
             synthetic,
-            is_entry_like: resolved_kind.is_callable() && is_entry_like(&qname, rel),
-            declaration,
+            is_entry_like: shape.resolved_kind.is_callable() && is_entry_like(&qname, rel),
+            declaration: shape.declaration,
             metrics: NodeMetrics::default(),
         };
         let uri = self.uri_for_rel(rel);
