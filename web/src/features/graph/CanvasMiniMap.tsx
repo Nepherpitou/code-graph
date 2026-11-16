@@ -6,14 +6,14 @@ import {
   useViewport,
 } from '@xyflow/react';
 
-import { KIND_COLORS, type AnyFlowNode, type FlowNodeData } from './graph';
+import { KIND_COLORS, type FlowNode, type FlowNodeData } from './graph';
 
 const WIDTH = 180;
 const HEIGHT = 120;
 const PADDING = 6;
 
 interface Props {
-  nodes: AnyFlowNode[];
+  nodes: FlowNode[];
 }
 
 interface Projection {

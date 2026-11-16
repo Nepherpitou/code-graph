@@ -126,8 +126,8 @@ export function FilterPanel({
           <span className="legend-item" title="shortest entry → exit route through the focused node">
             <i className="line route" />execution route
           </span>
-          <span className="legend-item" title="connections outside the current slice">
-            <i className="line dashed ghost" />hidden relations
+          <span className="legend-item" title="neighbours outside the current slice">
+            <span className="card-chip hidden">+N</span>hidden neighbours
           </span>
         </div>
       </div>

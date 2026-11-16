@@ -25,7 +25,7 @@ function moduleLabel(file: string): string {
 }
 
 export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<FlowNode>) {
-  const { node, dimmed, highlighted, entryPoint, route } = data;
+  const { node, dimmed, highlighted, entryPoint, route, hidden } = data;
   const isSelected = selected || data.selected;
   const metrics = node.metrics;
   const dead = metrics.deadCodeCandidate && !entryPoint;
@@ -40,12 +40,17 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
     entryPoint ? 'entry-root' : '',
     route ? 'route' : '',
   ].filter(Boolean).join(' ');
+  const hiddenTitle = hidden
+    ? `${hidden.hidden} neighbour${hidden.hidden === 1 ? '' : 's'} outside this slice\n`
+      + `${hidden.hiddenIn} incoming · ${hidden.hiddenOut} outgoing`
+    : '';
   const tooltip = [
     `${node.qname}  (${node.kind})`,
     `${node.file}:${node.line}`,
     `fan-in ${metrics.fanIn} · fan-out ${metrics.fanOut} · reach ${metrics.transitiveFanOut} · cyclomatic ${node.cyclomatic} · loc ${node.loc}`,
     dead ? 'dead-code candidate' : '',
     metrics.inCycle ? `in a cycle (SCC ${metrics.sccSize})` : '',
+    hiddenTitle,
   ].filter(Boolean).join('\n');
   const split = node.qname.lastIndexOf('.');
   const container = split > 0 ? node.qname.slice(0, split) : '';
@@ -72,6 +77,11 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
           {metrics.inCycle ? <span className="card-chip cycle">cycle</span> : null}
           {dead ? <span className="card-chip danger">dead</span> : null}
           {node.isEntryLike ? <span className="card-chip success">entry</span> : null}
+          {hidden ? (
+            <span className="card-chip hidden" title={hiddenTitle}>
+              +{hidden.hidden}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="card-meta">

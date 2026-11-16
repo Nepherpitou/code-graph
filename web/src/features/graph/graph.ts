@@ -40,6 +40,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   highlighted: boolean;
   entryPoint: boolean;
   route: boolean;
+  hidden: HiddenRelations | null;
 }
 
 export interface EdgeObstacle {
@@ -60,27 +61,8 @@ export interface FlowEdgeData extends Record<string, unknown> {
   lane?: number;
 }
 
-export interface GhostNodeData extends Record<string, unknown> {
-  ghost: true;
-  hidden: number;
-  hiddenIn: number;
-  hiddenOut: number;
-}
-
-export interface GhostEdgeData extends Record<string, unknown> {
-  ghost: true;
-  hidden: number;
-  nodeWidth: number;
-  nodeHeight: number;
-}
-
 export type FlowNode = Node<FlowNodeData, 'card'>;
-export type GhostFlowNode = Node<GhostNodeData, 'ghost'>;
-export type AnyFlowNode = FlowNode | GhostFlowNode;
-export type FlowEdge = Edge<FlowEdgeData | GhostEdgeData>;
-
-/** Length of the fading stub that points at connections outside the slice. */
-export const GHOST_STUB = 42;
+export type FlowEdge = Edge<FlowEdgeData>;
 
 export function defaultFilters(): Filters {
   return {
@@ -161,6 +143,7 @@ export function toFlowNodes(
   neighborIds: Set<string>,
   entryIds: Set<string> | null,
   routeIds: Set<string> = new Set(),
+  hidden: Map<string, HiddenRelations> = new Map(),
 ): FlowNode[] {
   return nodes.map((node) => {
     const size = nodeSize(node);
@@ -178,6 +161,7 @@ export function toFlowNodes(
         highlighted: selectedId !== null && (node.id === selectedId || neighborIds.has(node.id) || routeIds.has(node.id)),
         entryPoint: entryIds?.has(node.id) ?? false,
         route: routeIds.has(node.id),
+        hidden: hidden.get(node.id) ?? null,
       },
     };
   });
@@ -219,66 +203,6 @@ export function hiddenRelations(
     }
   }
   return hidden;
-}
-
-export function toGhostNodes(
-  nodes: GraphNode[],
-  hidden: Map<string, HiddenRelations>,
-  positions: Record<string, { x: number; y: number }>,
-): GhostFlowNode[] {
-  return nodes.flatMap((node) => {
-    const relation = hidden.get(node.id);
-    const position = positions[node.id];
-    if (!relation || !position) return [];
-    const size = nodeSize(node);
-    return [{
-      id: `ghost:${node.id}`,
-      type: 'ghost',
-      position: {
-        x: position.x + size.width + GHOST_STUB,
-        y: position.y + size.height / 2,
-      },
-      width: 1,
-      height: 1,
-      style: { width: 1, height: 1, opacity: 0, pointerEvents: 'none' },
-      selectable: false,
-      draggable: false,
-      focusable: false,
-      data: {
-        ghost: true,
-        hidden: relation.hidden,
-        hiddenIn: relation.hiddenIn,
-        hiddenOut: relation.hiddenOut,
-      },
-    }];
-  });
-}
-
-export function toGhostEdges(
-  nodes: GraphNode[],
-  hidden: Map<string, HiddenRelations>,
-  positions: Record<string, { x: number; y: number }>,
-): FlowEdge[] {
-  return nodes.flatMap((node) => {
-    const relation = hidden.get(node.id);
-    if (!relation || !positions[node.id]) return [];
-    const size = nodeSize(node);
-    return [{
-      id: `ghost-edge:${node.id}`,
-      source: node.id,
-      target: `ghost:${node.id}`,
-      type: 'ghost',
-      selectable: false,
-      focusable: false,
-      interactionWidth: 0,
-      data: {
-        ghost: true,
-        hidden: relation.hidden,
-        nodeWidth: size.width,
-        nodeHeight: size.height,
-      },
-    }];
-  });
 }
 
 export function toFlowEdges(

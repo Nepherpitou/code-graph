@@ -257,7 +257,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .legend-item .line.success { border-top-color: var(--success); color: var(--success); }
 .legend-item .line.route { border-top-color: var(--route); color: var(--route); }
 .legend-item .line.history { border-top-color: var(--danger); color: var(--danger); }
-.legend-item .line.ghost { border-top-color: var(--muted); color: var(--muted); opacity: 0.6; }
 .legend-item .line.dashed { border-top-style: dashed; }
 
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
@@ -644,6 +643,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .card-chip.warning, .card-chip.cycle { color: var(--warning); }
 .card-chip.success, .card-chip.entry { color: var(--success); }
 .card-chip.accent { color: var(--accent); }
+.card-chip.hidden { color: var(--muted); border-style: dashed; }
 
 .node-card.entry-root {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
@@ -817,24 +817,6 @@ button.directory-row:hover { background: var(--panel-2); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
 }
-.ghost-edge-label {
-  position: absolute;
-  z-index: 6;
-  color: var(--fg);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 1px 5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  line-height: 1.4;
-  opacity: 0.95;
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--border) 60%, transparent);
-  pointer-events: none;
-  white-space: nowrap;
-}
-.ghost-node { width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-
 .flow-status { display: flex; align-items: center; gap: 6px; }
 .chip-button {
   border: none;

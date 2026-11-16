@@ -33,12 +33,10 @@ import {
   nodeSize,
   toFlowEdges,
   toFlowNodes,
-  toGhostEdges,
-  toGhostNodes,
   visibleGraph,
-  type AnyFlowNode,
   type Filters,
   type FlowEdge,
+  type FlowNode,
 } from './graph';
 import { cancelLayout, computeLayout, type LayoutKind } from './layout';
 
@@ -47,7 +45,7 @@ import { cancelLayout, computeLayout, type LayoutKind } from './layout';
  * all nodes would land in an empty gap between separated components; choose
  * the densest bucket instead.
  */
-function denseCenter(nodes: AnyFlowNode[]): { x: number; y: number } | null {
+function denseCenter(nodes: FlowNode[]): { x: number; y: number } | null {
   if (nodes.length === 0) return null;
   const cell = 900;
   const buckets = new Map<string, { x: number; y: number; count: number }>();
@@ -249,7 +247,7 @@ export interface GraphView {
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   neighborIds: Set<string>;
-  flowNodes: AnyFlowNode[];
+  flowNodes: FlowNode[];
   flowEdges: FlowEdge[];
   filters: Filters;
   setFilters: React.Dispatch<React.SetStateAction<Filters>>;
@@ -369,25 +367,12 @@ export function useGraphView({
     [visible],
   );
 
-  const ghostNodes = useMemo(
-    () => toGhostNodes(visible.nodes, hidden, positions),
-    [visible.nodes, hidden, positions],
-  );
-
-  const flowNodes = useMemo<AnyFlowNode[]>(
-    () => [
-      ...toFlowNodes(visible.nodes, selectedId, neighborIds, entryIds, routeIds).map((node) => ({
-        ...node,
-        position: positions[node.id] ?? node.position,
-      })),
-      ...ghostNodes,
-    ],
-    [visible.nodes, selectedId, neighborIds, entryIds, routeIds, positions, ghostNodes],
-  );
-
-  const ghostEdges = useMemo(
-    () => toGhostEdges(visible.nodes, hidden, positions),
-    [visible.nodes, hidden, positions],
+  const flowNodes = useMemo<FlowNode[]>(
+    () => toFlowNodes(visible.nodes, selectedId, neighborIds, entryIds, routeIds, hidden).map((node) => ({
+      ...node,
+      position: positions[node.id] ?? node.position,
+    })),
+    [visible.nodes, selectedId, neighborIds, entryIds, routeIds, hidden, positions],
   );
 
   const obstacles = useMemo(
@@ -401,11 +386,8 @@ export function useGraphView({
   );
 
   const flowEdges = useMemo<FlowEdge[]>(
-    () => [
-      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, mode),
-      ...ghostEdges,
-    ],
-    [visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, ghostEdges, mode],
+    () => toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, mode),
+    [visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, mode],
   );
 
   const rememberFocus = useCallback((id: string) => {
@@ -661,7 +643,7 @@ export function useGraphView({
     };
   }, [viewKey, layoutScope, canonicalPositions, entryRoots]);
 
-  const frameNodes = useCallback((nodes: AnyFlowNode[]) => {
+  const frameNodes = useCallback((nodes: FlowNode[]) => {
     if (nodes.length < 2) return;
     const box = nodes.reduce((acc, node) => {
       const x = node.position.x;
@@ -701,7 +683,7 @@ export function useGraphView({
     // of centering the first root, which leaves most of it off-screen.
     if (selectedId === null && entryRoots.length > 0) {
       const timer = window.setTimeout(() => {
-        frameNodes(flowNodes.filter((node) => node.type !== 'ghost'));
+        frameNodes(flowNodes);
       }, 120);
       return () => window.clearTimeout(timer);
     }

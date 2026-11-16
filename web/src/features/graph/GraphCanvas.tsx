@@ -17,13 +17,11 @@ import {
   type FlowNodeData,
 } from './graph';
 import { NodeCard } from './NodeCard';
-import { GhostNode } from './GhostNode';
-import { GhostEdge } from './GhostEdge';
 import { LaneEdge } from './LaneEdge';
 import type { GraphView } from './useGraphView';
 
-const nodeTypes = { card: NodeCard, ghost: GhostNode } as unknown as NodeTypes;
-const edgeTypes = { ghost: GhostEdge, lane: LaneEdge } as unknown as EdgeTypes;
+const nodeTypes = { card: NodeCard } as unknown as NodeTypes;
+const edgeTypes = { lane: LaneEdge } as unknown as EdgeTypes;
 
 interface Props {
   view: GraphView;
