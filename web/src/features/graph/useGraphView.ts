@@ -94,8 +94,34 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[
     target.push({ id: edge.source, delta: -1 });
     neighbors.set(edge.target, target);
   }
-  const columnById = new Map<string, number>();
   const roots = [...new Set(rootIds)].filter((id) => nodeById.has(id));
+  if (roots.length > 1) {
+    // Entry overview: roots are peers, so lay them out as a compact grid
+    // instead of pretending they are call-chain depth. Any extra nodes (only
+    // present when the caller explicitly asks for a wider slice) go below.
+    const positions: Record<string, { x: number; y: number }> = {};
+    const rootColumns = 4;
+    roots.forEach((id, index) => {
+      positions[id] = {
+        x: (index % rootColumns) * columnWidth,
+        y: Math.floor(index / rootColumns) * rowHeight,
+      };
+    });
+    const rootRows = Math.ceil(roots.length / rootColumns);
+    const rootSet = new Set(roots);
+    let extra = 0;
+    for (const node of nodes) {
+      if (rootSet.has(node.id)) continue;
+      positions[node.id] = {
+        x: (extra % 8) * columnWidth,
+        y: (rootRows + 1 + Math.floor(extra / 8)) * rowHeight,
+      };
+      extra += 1;
+    }
+    return { positions, rowHeight };
+  }
+
+  const columnById = new Map<string, number>();
   const queue: string[] = [];
   for (const rootId of roots) {
     columnById.set(rootId, 0);
@@ -217,7 +243,7 @@ export interface GraphView {
   layouting: boolean;
   focusIds: Set<string> | null;
   entryRoots: EntryPoint[];
-  entryInfo: { totalRoots: number; depth: number; truncated: boolean } | null;
+  entryInfo: { totalRoots: number; truncated: boolean } | null;
   openEntryPoints: () => Promise<void>;
   mergeSlice: (slice: GraphSlice, focus: Set<string> | null) => void;
   focusNode: (id: string) => void;
@@ -266,7 +292,6 @@ export function useGraphView({
   const [entryRoots, setEntryRoots] = useState<EntryPoint[]>([]);
   const [entryInfo, setEntryInfo] = useState<{
     totalRoots: number;
-    depth: number;
     truncated: boolean;
   } | null>(null);
   const [layouting, setLayouting] = useState(false);
@@ -860,10 +885,16 @@ export function useGraphView({
             `entry graph limited to ${data.nodes.length} nodes across ${data.roots.length} roots`,
           ]
         : snapshot.warnings;
+      // The entry overview is a list of entry points, not their dependency
+      // neighbourhoods. Keep only the roots here; clicking one opens its
+      // focus slice with the dependencies on demand.
+      const rootIds = new Set(data.roots.map((root) => root.id));
       setReport({
         meta: snapshot.meta,
-        nodes: data.nodes,
-        edges: data.edges,
+        nodes: data.nodes.filter((node) => rootIds.has(node.id)),
+        edges: data.edges.filter(
+          (edge) => rootIds.has(edge.source) && rootIds.has(edge.target),
+        ),
         files: [],
         stats: snapshot.stats,
         top: snapshot.top,
@@ -872,8 +903,7 @@ export function useGraphView({
       setEntryRoots(data.roots);
       setEntryInfo({
         totalRoots: data.totalRoots,
-        depth: data.depth,
-        truncated: data.truncated,
+        truncated: false,
       });
       setSelectedId(null);
       setFocusIds(null);

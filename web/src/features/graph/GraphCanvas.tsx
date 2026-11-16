@@ -65,6 +65,11 @@ export function GraphCanvas({ view, onContextMenu }: Props) {
       <Controls showInteractive={false} />
       <Panel position="top-left" className="flow-status">
         {view.layouting ? <span className="badge accent">layout…</span> : null}
+        {view.entryInfo ? (
+          <span className="badge accent">
+            entry points · {view.entryRoots.length} roots
+          </span>
+        ) : null}
         {view.focusIds ? (
           <span className="badge accent">
             focus · {view.focusIds.size} nodes

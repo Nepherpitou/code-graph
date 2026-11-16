@@ -3,19 +3,18 @@ import type { EntryPoint } from '../../types';
 interface Props {
   roots: EntryPoint[];
   totalRoots: number;
-  depth: number;
   truncated: boolean;
   onSelect: (id: string) => void;
 }
 
-export function EntryPointsPanel({ roots, totalRoots, depth, truncated, onSelect }: Props) {
+export function EntryPointsPanel({ roots, totalRoots, truncated, onSelect }: Props) {
   if (roots.length === 0) return null;
   return (
     <section className="panel entry-panel">
       <h3>Entry points</h3>
       <p className="panel-note">
-        Sorted by reachable callables (transitive fan-out), {depth}-hop overview.
-        Click a root to open its neighbourhood.
+        Sorted by reachable callables (transitive fan-out).
+        Click a root to open its focus slice and dependencies.
       </p>
       <ol className="entry-list">
         {roots.map((root, index) => (

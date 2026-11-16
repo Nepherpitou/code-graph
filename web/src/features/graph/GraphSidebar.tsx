@@ -15,12 +15,11 @@ export function GraphSidebar({ view }: Props) {
         <details className="panel-fold">
           <summary>
             Entry points
-            <span>{view.entryRoots.length} roots · depth {view.entryInfo.depth}</span>
+            <span>{view.entryRoots.length} roots</span>
           </summary>
           <EntryPointsPanel
             roots={view.entryRoots}
             totalRoots={view.entryInfo.totalRoots}
-            depth={view.entryInfo.depth}
             truncated={view.entryInfo.truncated}
             onSelect={view.selectAndCenter}
           />
