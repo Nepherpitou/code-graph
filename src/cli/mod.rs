@@ -3,10 +3,12 @@
 
 mod args;
 mod audit;
+mod audit_diff;
 mod inspect;
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -37,18 +39,25 @@ fn build_options(args: AnalysisArgs) -> Result<AnalyzeOptions> {
     })
 }
 
-pub async fn run() -> Result<()> {
+pub async fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Inspect(args) => inspect::inspect(&args.file),
+        Commands::Inspect(args) => {
+            inspect::inspect(&args.file)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Audit(args) => audit::run(args).await,
-        Commands::Serve(args) => api::serve(&args.db, &args.bind, &args.web_dir, None).await,
+        Commands::Serve(args) => {
+            api::serve(&args.db, &args.bind, &args.web_dir, None).await?;
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Up(args) => {
             let options = build_options(args.analysis)?;
             let db = args
                 .db
                 .unwrap_or_else(|| args::project_db_path(&options.root));
-            api::serve(&db, &args.bind, &args.web_dir, Some(options)).await
+            api::serve(&db, &args.bind, &args.web_dir, Some(options)).await?;
+            Ok(ExitCode::SUCCESS)
         }
         Commands::Analyze(args) => {
             let out = args.out;
@@ -81,7 +90,7 @@ pub async fn run() -> Result<()> {
             for warning in &report.warnings {
                 eprintln!("[code-graph] warning: {warning}");
             }
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
     }
 }

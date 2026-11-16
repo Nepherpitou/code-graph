@@ -7,6 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::process::ExitCode;
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
@@ -17,31 +18,50 @@ use crate::query::QueryService;
 use crate::store::{GraphSummary, Store};
 
 use super::args::{
-    AuditArgs, AuditCommand, AuditCommon, AuditCyclesArgs, AuditDeadArgs, AuditFocusArgs,
-    AuditFormat, AuditMetricsArgs, AuditOrder, AuditSearchArgs, AuditTopArgs,
+    AuditArgs, AuditCommand, AuditCommon, AuditCyclesArgs, AuditDeadArgs,
+    AuditFocusArgs, AuditFormat, AuditMetricsArgs, AuditOrder, AuditSearchArgs, AuditTopArgs,
 };
+use super::audit_diff;
 
-pub(super) async fn run(args: AuditArgs) -> Result<()> {
+pub(super) async fn run(args: AuditArgs) -> Result<ExitCode> {
     let mut common = args.common;
     if let Some(path) = args.path {
         common.root = path;
     }
 
     match args.command {
-        None => overview(common).await,
-        Some(AuditCommand::Top(args)) => top(args).await,
-        Some(AuditCommand::Focus(args)) => focus(args).await,
-        Some(AuditCommand::Cycles(args)) => cycles(args).await,
-        Some(AuditCommand::DeadCode(args)) => dead_code(args).await,
-        Some(AuditCommand::Search(args)) => search(args).await,
-        Some(AuditCommand::Metrics(args)) => metrics(args),
+        None => overview(common).await?,
+        Some(AuditCommand::Top(args)) => top(args).await?,
+        Some(AuditCommand::Focus(args)) => focus(args).await?,
+        Some(AuditCommand::Cycles(args)) => cycles(args).await?,
+        Some(AuditCommand::DeadCode(args)) => dead_code(args).await?,
+        Some(AuditCommand::Search(args)) => search(args).await?,
+        Some(AuditCommand::Metrics(args)) => metrics(args)?,
+        Some(AuditCommand::Diff(args)) => return audit_diff::run(args).await,
     }
+    Ok(ExitCode::SUCCESS)
 }
 
 struct AuditContext {
     store: Store,
     graph_id: i64,
     summary: GraphSummary,
+}
+
+pub(super) fn analysis_options(root: &Path) -> AnalyzeOptions {
+    AnalyzeOptions {
+        root: root.to_path_buf(),
+        lang: None,
+        server_cmd: None,
+        include_external: false,
+        include_constants: true,
+        ref_fallback: true,
+        max_nodes: 20_000,
+        max_constants: 500,
+        exclude: Vec::new(),
+        verbose: false,
+        quiet: true,
+    }
 }
 
 async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
@@ -84,20 +104,7 @@ async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
     }
 
     eprintln!("[code-graph] analyzing {} ...", root.display());
-    let options = AnalyzeOptions {
-        root: root.clone(),
-        lang: None,
-        server_cmd: None,
-        include_external: false,
-        include_constants: true,
-        ref_fallback: true,
-        max_nodes: 20_000,
-        max_constants: 500,
-        exclude: Vec::new(),
-        verbose: false,
-        quiet: true,
-    };
-    let report = analyze(options).await?;
+    let report = analyze(analysis_options(&root)).await?;
     let store = Store::open(&db).await?;
     let graph_id = store.insert_report(&report).await?;
     let summary = store
@@ -151,9 +158,10 @@ async fn load_edges(context: &AuditContext) -> Result<Vec<GraphEdge>> {
     context.store.all_edges(context.graph_id).await
 }
 
-fn snapshot_json(summary: &GraphSummary) -> Value {
+pub(super) fn snapshot_json(summary: &GraphSummary) -> Value {
     json!({
         "id": summary.id,
+        "createdAt": summary.created_at,
         "root": summary.meta.root,
         "language": summary.meta.language,
         "generatedAt": summary.meta.generated_at,
@@ -163,7 +171,7 @@ fn snapshot_json(summary: &GraphSummary) -> Value {
     })
 }
 
-fn print_json(value: &Value) -> Result<()> {
+pub(super) fn print_json(value: &Value) -> Result<()> {
     println!("{}", serde_json::to_string(value)?);
     Ok(())
 }
@@ -189,7 +197,7 @@ fn text_header(summary: &GraphSummary) {
     println!("root: {}", summary.meta.root);
 }
 
-fn fit(value: &str, width: usize) -> String {
+pub(super) fn fit(value: &str, width: usize) -> String {
     if value.chars().count() <= width {
         return value.to_string();
     }
@@ -204,12 +212,12 @@ fn fit(value: &str, width: usize) -> String {
     clipped
 }
 
-fn pad(value: &str, width: usize) -> String {
+pub(super) fn pad(value: &str, width: usize) -> String {
     let value = fit(value, width);
     format!("{value:<width$}")
 }
 
-fn metric(value: f64) -> String {
+pub(super) fn metric(value: f64) -> String {
     if value.fract().abs() < f64::EPSILON {
         format!("{value:.0}")
     } else if value.abs() < 10.0 {
@@ -221,7 +229,7 @@ fn metric(value: f64) -> String {
     }
 }
 
-fn metric_json(value: f64) -> f64 {
+pub(super) fn metric_json(value: f64) -> f64 {
     let scale = if value.fract().abs() < f64::EPSILON {
         1.0
     } else if value.abs() < 10.0 {
@@ -525,7 +533,7 @@ async fn overview(common: AuditCommon) -> Result<()> {
 }
 
 impl AuditOrder {
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             AuditOrder::Hotspot => "hotspot",
             AuditOrder::Priority => "priority",
@@ -540,11 +548,12 @@ impl AuditOrder {
             AuditOrder::Ifc => "ifc",
             AuditOrder::Betweenness => "betweenness",
             AuditOrder::Loc => "loc",
+            AuditOrder::Sloc => "sloc",
             AuditOrder::Params => "params",
         }
     }
 
-    fn value(self, node: &GraphNode) -> f64 {
+    pub(super) fn value(self, node: &GraphNode) -> f64 {
         match self {
             AuditOrder::Hotspot => node.metrics.hotspot,
             AuditOrder::Priority => node.metrics.refactor_priority,
@@ -559,12 +568,13 @@ impl AuditOrder {
             AuditOrder::Ifc => node.metrics.ifc,
             AuditOrder::Betweenness => node.metrics.betweenness,
             AuditOrder::Loc => node.loc as f64,
+            AuditOrder::Sloc => node.sloc as f64,
             AuditOrder::Params => node.params as f64,
         }
     }
 }
 
-fn parse_kind(value: &str) -> Result<NodeKind> {
+pub(super) fn parse_kind(value: &str) -> Result<NodeKind> {
     match value {
         "function" | "fn" => Ok(NodeKind::Function),
         "method" => Ok(NodeKind::Method),
@@ -660,7 +670,7 @@ async fn top(args: AuditTopArgs) -> Result<()> {
                 AuditOrder::FanOut | AuditOrder::CallFanOut | AuditOrder::DataFanOut
             );
             let show_cyclo = !matches!(args.order_by, AuditOrder::Complexity);
-            let show_loc = !matches!(args.order_by, AuditOrder::Loc);
+            let show_loc = !matches!(args.order_by, AuditOrder::Loc | AuditOrder::Sloc);
 
             print!(
                 "  {:>3}  {} {} {:>8}",

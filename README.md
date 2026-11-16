@@ -92,6 +92,7 @@ code-graph audit cycles [options]
 code-graph audit dead-code [options]
 code-graph audit search <text> [options]
 code-graph audit metrics [options]
+code-graph audit diff [options]
 code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 ```
 
@@ -137,11 +138,15 @@ code-graph audit dead-code --limit 10
 # Search and metric glossary
 code-graph audit search payment
 code-graph audit metrics
+
+# Compare two snapshots
+code-graph audit diff --from 1 --to 12
+code-graph audit diff --refresh
 ```
 
-Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>`, `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`.
+Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>` (all audit subcommands except `diff`), `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`. `audit diff` selects snapshots with `--from`/`--to` instead of `--snapshot`.
 
-`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `call-fan-in`, `call-fan-out`, `data-fan-in`, `data-fan-out`, `ifc`, `betweenness`, `loc`, `params`. `fan-in`/`fan-out` are total degrees; the `call-*`/`data-*` variants split them by edge kind. `ifc` and `priority` use call edges only. `priority` is an absolute refactoring score: complexity times transitive impact times call instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
+`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `call-fan-in`, `call-fan-out`, `data-fan-in`, `data-fan-out`, `ifc`, `betweenness`, `loc`, `sloc`, `params`. `fan-in`/`fan-out` are total degrees; the `call-*`/`data-*` variants split them by edge kind. `ifc` and `priority` use call edges only. `priority` is an absolute refactoring score: complexity times transitive impact times call instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
 
 `--format json` returns the same facts in a compact envelope for agents:
 
@@ -160,6 +165,52 @@ priority = (cyclomatic + ln(1 + sloc))
 ```
 
 Old snapshots that predate these fields still load; their `priority` is `0` until the project is re-analyzed.
+
+#### Snapshot diff
+
+`audit diff` compares two persisted snapshots. It is VCS-agnostic: the command never invokes
+Git, creates worktrees, or guesses commits. Select snapshots by id, `latest`, or `previous`:
+
+```bash
+# Latest two snapshots
+code-graph audit diff
+
+# Explicit pair
+code-graph audit diff --from 1 --to 12
+
+# Analyze the current tree, store a new snapshot, and compare it with the previous latest
+code-graph audit diff --refresh
+```
+
+Without `--refresh`, `--from` defaults to `previous` and `--to` to `latest`. With `--refresh`,
+the current latest snapshot is the baseline, the project is analyzed again, and the new snapshot
+is the target. `--refresh` cannot be combined with `--to`.
+
+Rows are matched by stable id first, then `(file, kind, qname)` for signature changes, then
+unique `(kind, qname)` for moves. Added/removed symbols are reported separately. The default
+report hides rows whose only change is a graph-wide metric such as hotspot drift; use
+`--all-metrics` to include them.
+
+`--order-by` uses the same metric names as `audit top` (`priority`, `complexity`, `sloc`, `loc`,
+`fan-in`, ...), plus `name`. In `audit diff`, metric values are **deltas**: positive means the
+value increased. Added rows sort by their new absolute value, removed rows by their old absolute
+value.
+
+Generic filters make commit/PR review possible without coupling the tool to Git:
+
+```bash
+# Paths are relative to the analysis root; a suffix match also supports subdirectory roots.
+git diff --name-only base...head > /tmp/changed.txt
+code-graph audit diff --from previous --to latest --changed-files /tmp/changed.txt
+
+# Machine-readable output
+code-graph audit diff --from 11 --to 12 --format json
+```
+
+The tool only reads the path list; producing it is the caller's responsibility. For two commits,
+analyze each checkout/worktree into the same database and run `audit diff`; for a PR, use the
+merge-base as the baseline. `--edges` adds call/data edge deltas, and `--exit-code` exits 1 when
+the filtered diff contains any rows.
 
 ### HTTP API
 

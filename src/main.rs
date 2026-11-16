@@ -19,9 +19,11 @@ mod report;
 mod source;
 mod store;
 
+use std::process::ExitCode;
+
 use anyhow::Result;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
     cli::run().await
 }

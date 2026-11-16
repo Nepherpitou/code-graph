@@ -184,6 +184,16 @@ impl Store {
         row.map(summary_from_row).transpose()
     }
 
+    pub async fn previous_graph(&self) -> Result<Option<GraphSummary>> {
+        let row = sqlx::query(
+            "SELECT id, created_at, meta_json, stats_json, top_json, warnings_json
+             FROM graphs ORDER BY id DESC LIMIT 1 OFFSET 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(summary_from_row).transpose()
+    }
+
     pub async fn search_nodes(
         &self,
         graph_id: i64,

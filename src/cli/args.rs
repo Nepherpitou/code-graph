@@ -156,8 +156,38 @@ pub(super) enum AuditOrder {
     Ifc,
     Betweenness,
     Loc,
+    Sloc,
     Params,
 }
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(super) enum AuditDiffOrder {
+    Priority,
+    Complexity,
+    Sloc,
+    Loc,
+    BlastRadius,
+    FanIn,
+    FanOut,
+    CallFanIn,
+    CallFanOut,
+    DataFanIn,
+    DataFanOut,
+    Ifc,
+    Betweenness,
+    Hotspot,
+    Params,
+    Name,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(super) enum AuditDiffStatus {
+    Changed,
+    Added,
+    Removed,
+    Moved,
+}
+
 
 #[derive(Subcommand)]
 pub(super) enum AuditCommand {
@@ -173,6 +203,8 @@ pub(super) enum AuditCommand {
     Search(AuditSearchArgs),
     /// Explain the metrics used by the audit.
     Metrics(AuditMetricsArgs),
+    /// Compare two persisted snapshots.
+    Diff(AuditDiffArgs),
 }
 
 #[derive(Args)]
@@ -275,6 +307,67 @@ pub(super) struct AuditSearchArgs {
 pub(super) struct AuditMetricsArgs {
     #[command(flatten)]
     pub(super) common: AuditCommon,
+}
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  code-graph audit diff
+  code-graph audit diff --from 1 --to 12
+  code-graph audit diff --refresh
+  code-graph audit diff --from previous --to latest --changed-files changed.txt
+")]
+pub(super) struct AuditDiffArgs {
+    /// Project root to analyze or query.
+    #[arg(long, default_value = ".")]
+    pub(super) root: PathBuf,
+    /// Snapshot database (default: <root>/.code-graph/code-graph.db).
+    #[arg(long)]
+    pub(super) db: Option<PathBuf>,
+    /// Baseline snapshot id, "latest", or "previous" (default: previous).
+    #[arg(long)]
+    pub(super) from: Option<String>,
+    /// Target snapshot id, "latest", or "previous" (default: latest).
+    #[arg(long, conflicts_with = "refresh")]
+    pub(super) to: Option<String>,
+    /// Analyze the current root and use the new snapshot as the target.
+    #[arg(long)]
+    pub(super) refresh: bool,
+    /// Output format: human-readable text or JSON.
+    #[arg(long, value_enum, default_value_t = AuditFormat::Text)]
+    pub(super) format: AuditFormat,
+    /// Sort changed rows by a metric delta, or by name.
+    #[arg(long, value_enum, default_value_t = AuditDiffOrder::Priority)]
+    pub(super) order_by: AuditDiffOrder,
+    /// Maximum number of rows to print.
+    #[arg(long, default_value_t = 50)]
+    pub(super) limit: usize,
+    /// Suppress changed rows whose selected delta is below this absolute value.
+    #[arg(long)]
+    pub(super) min_delta: Option<f64>,
+    /// Only show nodes in a file or directory (substring match).
+    #[arg(long)]
+    pub(super) file: Option<String>,
+    /// Only show a specific kind: function, method, constructor, constant, variable.
+    #[arg(long)]
+    pub(super) kind: Option<String>,
+    /// Only show changed, added, removed, or moved rows.
+    #[arg(long, value_enum)]
+    pub(super) status: Vec<AuditDiffStatus>,
+    /// Newline-separated paths, relative to the analysis root.
+    #[arg(long)]
+    pub(super) changed_files: Option<PathBuf>,
+    /// Include rows whose only changes are graph-wide metrics.
+    #[arg(long)]
+    pub(super) all_metrics: bool,
+    /// Include added and removed call/data edges.
+    #[arg(long)]
+    pub(super) edges: bool,
+    /// Sort ascending instead of descending.
+    #[arg(long)]
+    pub(super) ascending: bool,
+    /// Exit with code 1 when any rows are reported.
+    #[arg(long)]
+    pub(super) exit_code: bool,
 }
 
 #[derive(Parser)]
