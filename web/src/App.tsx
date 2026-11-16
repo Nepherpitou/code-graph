@@ -234,6 +234,14 @@ export function App() {
           )}
         </div>
         <div className="actions">
+          <button
+            className="button"
+            onClick={() => setSearchOpen(true)}
+            disabled={state.allNodes.length === 0}
+            title="Search all nodes (/)"
+          >
+            Search
+          </button>
           {canRefresh ? (
             <button
               className="button"
@@ -244,14 +252,6 @@ export function App() {
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           ) : null}
-          <button
-            className="button"
-            onClick={() => setSearchOpen(true)}
-            disabled={state.allNodes.length === 0}
-            title="Search all nodes (/)"
-          >
-            Search
-          </button>
           {state.apiContext ? (
             <button className="button" onClick={() => void openEntryPoints()}>Top entries</button>
           ) : null}

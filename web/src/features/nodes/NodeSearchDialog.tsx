@@ -5,6 +5,7 @@ import { moduleLabel, splitNodeName } from '../../shared/format';
 
 const ROW_HEIGHT = 118;
 const OVERSCAN = 4;
+const RESULT_LIMIT = 100;
 
 interface Props {
   nodes: GraphNode[];
@@ -29,6 +30,17 @@ function sortedNodes(nodes: GraphNode[]): GraphNode[] {
     || left.id.localeCompare(right.id));
 }
 
+/** Same triage order as `audit top --order-by hotspot`. */
+function auditTopNodes(nodes: GraphNode[]): GraphNode[] {
+  return nodes
+    .filter((node) => !node.external)
+    .sort((left, right) =>
+      right.metrics.hotspot - left.metrics.hotspot
+      || left.qname.localeCompare(right.qname)
+      || left.id.localeCompare(right.id))
+    .slice(0, RESULT_LIMIT);
+}
+
 export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [scrollTop, setScrollTop] = useState(0);
@@ -38,14 +50,17 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ordered = useMemo(() => sortedNodes(nodes), [nodes]);
+  const auditTop = useMemo(() => auditTopNodes(nodes), [nodes]);
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const results = useMemo(() => {
-    if (terms.length === 0) return ordered;
+  const matches = useMemo(() => {
+    if (terms.length === 0) return [];
     return ordered.filter((node) => {
       const haystack = searchText(node);
       return terms.every((term) => haystack.includes(term));
     });
   }, [ordered, terms]);
+  const empty = terms.length === 0;
+  const results = empty ? auditTop : matches.slice(0, RESULT_LIMIT);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -117,7 +132,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   return (
     <div className="node-search-overlay" onMouseDown={onClose}>
       <section
-        className="node-search-dialog"
+        className={`node-search-dialog${empty ? ' is-empty' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="Search nodes"
@@ -125,26 +140,54 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
         onKeyDown={handleKeyDown}
       >
         <header className="node-search-header">
-          <input
-            ref={inputRef}
-            className="node-search-input"
-            type="search"
-            value={query}
-            placeholder="Search by class, member, file, kind, or node id…"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search nodes"
-          />
-          <span className="node-search-count">
-            {results.length} / {nodes.length} nodes
-          </span>
-          <button className="button" type="button" onClick={onClose}>Close</button>
+          <div className="node-search-field">
+            <svg className="node-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-4.2-4.2" />
+            </svg>
+            <input
+              ref={inputRef}
+              className="node-search-input"
+              type="search"
+              value={query}
+              placeholder="Search by class, member, file, kind, or node id…"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search nodes"
+            />
+            {query ? (
+              <button
+                className="node-search-clear"
+                type="button"
+                title="Clear search"
+                aria-label="Clear search"
+                onClick={() => setQuery('')}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          <button
+            className="node-search-close"
+            type="button"
+            onClick={onClose}
+            title="Close search (Esc)"
+            aria-label="Close search"
+          >
+            Close
+          </button>
         </header>
 
-        <div className="node-search-hint">
-          <span>{terms.length ? 'matching all words' : 'all nodes'}</span>
-          <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close</span>
+        <div className="node-search-summary">
+          <span className="node-search-count">
+            {empty
+              ? `${results.length} top nodes by audit hotspot`
+              : `${results.length}${matches.length > results.length ? ` of ${matches.length}` : ''} matching nodes`}
+          </span>
+          <span className="node-search-hint">
+            <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close
+          </span>
         </div>
 
         <div
