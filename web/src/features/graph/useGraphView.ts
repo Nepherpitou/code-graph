@@ -68,6 +68,65 @@ function denseCenter(nodes: AnyFlowNode[]): { x: number; y: number } | null {
   return best ? { x: best.x / best.count, y: best.y / best.count } : null;
 }
 
+interface CompactLayout {
+  positions: Record<string, { x: number; y: number }>;
+  rowHeight: number;
+}
+
+function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
+  if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
+  const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
+  const maxWidth = Math.max(180, ...nodes.map((node) => sizes.get(node.id)!.width));
+  const maxHeight = Math.max(72, ...nodes.map((node) => sizes.get(node.id)!.height));
+  const columnWidth = maxWidth + 140;
+  const rowHeight = maxHeight + 56;
+  const layers = new Map<number, GraphNode[]>();
+  for (const node of nodes) {
+    const depth = Number.isFinite(node.metrics.depth)
+      ? Math.max(0, Math.round(node.metrics.depth))
+      : 0;
+    const bucket = layers.get(depth) ?? [];
+    bucket.push(node);
+    layers.set(depth, bucket);
+  }
+  const incoming = new Map<string, string[]>();
+  for (const edge of edges) {
+    const sources = incoming.get(edge.target) ?? [];
+    sources.push(edge.source);
+    incoming.set(edge.target, sources);
+  }
+  const positions: Record<string, { x: number; y: number }> = {};
+  const rowById = new Map<string, number>();
+  for (const depth of [...layers.keys()].sort((left, right) => left - right)) {
+    const layerNodes = layers.get(depth) ?? [];
+    const score = new Map<string, number>();
+    for (const node of layerNodes) {
+      const parentRows = (incoming.get(node.id) ?? [])
+        .map((id) => rowById.get(id))
+        .filter((row): row is number => row !== undefined);
+      score.set(node.id, parentRows.length > 0 ? Math.min(...parentRows) : Infinity);
+    }
+    layerNodes.sort((left, right) => {
+      const leftScore = score.get(left.id) ?? Infinity;
+      const rightScore = score.get(right.id) ?? Infinity;
+      if (Number.isFinite(leftScore) !== Number.isFinite(rightScore)) {
+        return Number.isFinite(leftScore) ? -1 : 1;
+      }
+      if (Number.isFinite(leftScore) && leftScore !== rightScore) return leftScore - rightScore;
+      return Number(right.isEntryLike) - Number(left.isEntryLike)
+        || left.file.localeCompare(right.file)
+        || left.line - right.line
+        || left.qname.localeCompare(right.qname)
+        || left.id.localeCompare(right.id);
+    });
+    layerNodes.forEach((node, row) => {
+      positions[node.id] = { x: depth * columnWidth, y: row * rowHeight };
+      rowById.set(node.id, row);
+    });
+  }
+  return { positions, rowHeight };
+}
+
 export type GraphMode = 'focus' | 'path' | 'impact';
 
 interface Input {
@@ -158,6 +217,9 @@ export function useGraphView({
   const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
+  const positionsRef = useRef<Record<string, { x: number; y: number }>>({});
+  positionsRef.current = positions;
+  const visibleIdsRef = useRef<Set<string>>(new Set());
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
@@ -346,7 +408,81 @@ export function useGraphView({
       return;
     }
     if (layoutKind === 'layered') {
-      setPositions(canonicalPositions);
+      const visibleIds = new Set(visible.nodes.map((node) => node.id));
+      const previousIds = visibleIdsRef.current;
+      const newIds = [...visibleIds].filter((id) => !previousIds.has(id));
+      const local = compactLayered(visible.nodes, visible.edges);
+      const selected = selectedIdRef.current;
+      const viewport = reactFlow.getViewport();
+      const host = document.querySelector('.react-flow')?.getBoundingClientRect();
+      const center = host
+        ? {
+            x: (host.width / 2 - viewport.x) / viewport.zoom,
+            y: (host.height / 2 - viewport.y) / viewport.zoom,
+          }
+        : { x: 0, y: 0 };
+      const selectedNode = selected ? visible.nodes.find((node) => node.id === selected) : null;
+      const anchor = selected && previousIds.has(selected) && positionsRef.current[selected]
+        ? positionsRef.current[selected]
+        : selectedNode
+          ? {
+              x: center.x - nodeSize(selectedNode).width / 2,
+              y: center.y - nodeSize(selectedNode).height / 2,
+            }
+          : center;
+      const localAnchorId = selected && local.positions[selected] ? selected : visible.nodes[0]?.id;
+      const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
+      const dx = localAnchor ? anchor.x - localAnchor.x : 0;
+      const dy = localAnchor ? anchor.y - localAnchor.y : 0;
+      const sizes = new Map(visible.nodes.map((node) => [node.id, nodeSize(node)]));
+      const gap = 24;
+      const occupied = visible.nodes
+        .filter((node) => !newIds.includes(node.id))
+        .flatMap((node) => {
+          const position = positionsRef.current[node.id];
+          if (!position) return [];
+          const size = sizes.get(node.id)!;
+          return [{ x: position.x, y: position.y, width: size.width, height: size.height }];
+        });
+      const free = (x: number, y: number, width: number, height: number): boolean =>
+        !occupied.some((box) => x < box.x + box.width + gap
+          && x + width + gap > box.x
+          && y < box.y + box.height + gap
+          && y + height + gap > box.y);
+      const added: Record<string, { x: number; y: number }> = {};
+      const newSet = new Set(newIds);
+      const orderedNew = [...newIds].sort((left, right) => {
+        if (left === selected) return -1;
+        if (right === selected) return 1;
+        return (local.positions[left]?.y ?? 0) - (local.positions[right]?.y ?? 0)
+          || left.localeCompare(right);
+      });
+      for (const id of orderedNew) {
+        const size = sizes.get(id)!;
+        const proposed = local.positions[id];
+        if (!proposed) continue;
+        let x = proposed.x + dx;
+        let y = proposed.y + dy;
+        let placed = false;
+        for (let step = 0; step <= 18 && !placed; step += 1) {
+          const candidates = step === 0
+            ? [{ x, y }]
+            : [{ x, y: y - step * local.rowHeight }, { x, y: y + step * local.rowHeight }];
+          for (const candidate of candidates) {
+            if (!free(candidate.x, candidate.y, size.width, size.height)) continue;
+            x = candidate.x;
+            y = candidate.y;
+            placed = true;
+            break;
+          }
+        }
+        added[id] = { x, y };
+        occupied.push({ x, y, width: size.width, height: size.height });
+      }
+      if (newSet.size > 0) {
+        setPositions((current) => ({ ...current, ...added }));
+      }
+      visibleIdsRef.current = visibleIds;
       setLayouting(false);
       return;
     }
