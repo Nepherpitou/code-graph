@@ -14,7 +14,8 @@ export function EntryPointsPanel({ roots, totalRoots, depth, truncated, onSelect
     <section className="panel entry-panel">
       <h3>Entry points</h3>
       <p className="panel-note">
-        Sorted by reachable callables (transitive fan-out), {depth}-hop subgraph.
+        Sorted by reachable callables (transitive fan-out), {depth}-hop overview.
+        Click a root to open its neighbourhood.
       </p>
       <ol className="entry-list">
         {roots.map((root, index) => (
@@ -32,7 +33,7 @@ export function EntryPointsPanel({ roots, totalRoots, depth, truncated, onSelect
         ))}
       </ol>
       <p className="panel-note">
-        {roots.length} of {totalRoots} roots
+        Top {roots.length} of {totalRoots} roots · click a root to drill in
         {truncated ? ' · graph capped by node limit' : ''}
       </p>
     </section>

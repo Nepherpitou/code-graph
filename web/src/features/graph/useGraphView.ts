@@ -73,7 +73,7 @@ interface CompactLayout {
   rowHeight: number;
 }
 
-function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string | null): CompactLayout {
+function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[]): CompactLayout {
   if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
   const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
   const maxWidth = Math.max(180, ...nodes.map((node) => sizes.get(node.id)!.width));
@@ -95,24 +95,30 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string |
     neighbors.set(edge.target, target);
   }
   const columnById = new Map<string, number>();
-  if (rootId && nodeById.has(rootId)) {
+  const roots = [...new Set(rootIds)].filter((id) => nodeById.has(id));
+  const queue: string[] = [];
+  for (const rootId of roots) {
     columnById.set(rootId, 0);
-    const queue = [rootId];
-    for (let head = 0; head < queue.length; head += 1) {
-      const id = queue[head];
-      const column = columnById.get(id)!;
-      for (const next of neighbors.get(id) ?? []) {
-        if (columnById.has(next.id)) continue;
-        columnById.set(next.id, column + next.delta);
-        queue.push(next.id);
-      }
+    queue.push(rootId);
+  }
+  for (let head = 0; head < queue.length; head += 1) {
+    const id = queue[head];
+    const column = columnById.get(id)!;
+    for (const next of neighbors.get(id) ?? []) {
+      if (columnById.has(next.id)) continue;
+      columnById.set(next.id, column + next.delta);
+      queue.push(next.id);
     }
   }
-  const rootDepth = rootId && nodeById.has(rootId) ? nodeById.get(rootId)!.metrics.depth : null;
+  const rootDepths = roots
+    .map((id) => nodeById.get(id)!.metrics.depth)
+    .filter((depth) => Number.isFinite(depth))
+    .map((depth) => Math.round(depth));
+  const rootDepth = rootDepths.length > 0 ? Math.min(...rootDepths) : null;
   for (const node of nodes) {
     if (columnById.has(node.id)) continue;
     const depth = Number.isFinite(node.metrics.depth) ? Math.round(node.metrics.depth) : 0;
-    columnById.set(node.id, rootDepth !== null && Number.isFinite(rootDepth) ? depth - Math.round(rootDepth) : depth);
+    columnById.set(node.id, rootDepth !== null ? depth - rootDepth : depth);
   }
 
   const layers = new Map<number, GraphNode[]>();
@@ -131,7 +137,11 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string |
   const positions: Record<string, { x: number; y: number }> = {};
   const rowById = new Map<string, number>();
   const columns = [...layers.keys()].sort((left, right) => left - right);
-  const columnByKey = new Map(columns.map((column, index) => [column, index]));
+  // An entry-point overview has one column per depth for *all* roots. With a
+  // wide fan-out that becomes a single 4,000px-tall strip, so split long layers
+  // into side-by-side chunks and keep the whole overview readable.
+  const maxRows = roots.length > 1 ? 8 : Number.POSITIVE_INFINITY;
+  let physicalColumn = 0;
   for (const column of columns) {
     const layerNodes = layers.get(column) ?? [];
     const score = new Map<string, number>();
@@ -154,10 +164,19 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string |
         || left.qname.localeCompare(right.qname)
         || left.id.localeCompare(right.id);
     });
-    layerNodes.forEach((node, row) => {
-      positions[node.id] = { x: columnByKey.get(column)! * columnWidth, y: row * rowHeight };
-      rowById.set(node.id, row);
-    });
+    const rowsPerChunk = Number.isFinite(maxRows) ? maxRows : layerNodes.length;
+    const chunkCount = Math.max(1, Math.ceil(layerNodes.length / rowsPerChunk));
+    for (let chunk = 0; chunk < chunkCount; chunk += 1) {
+      const chunkNodes = layerNodes.slice(chunk * rowsPerChunk, (chunk + 1) * rowsPerChunk);
+      chunkNodes.forEach((node, row) => {
+        positions[node.id] = {
+          x: (physicalColumn + chunk) * columnWidth,
+          y: row * rowHeight,
+        };
+        rowById.set(node.id, row);
+      });
+    }
+    physicalColumn += chunkCount;
   }
   return { positions, rowHeight };
 }
@@ -482,7 +501,10 @@ export function useGraphView({
     }
     if (layoutKind === 'layered') {
       const selected = selectedIdRef.current;
-      const local = compactLayered(visible.nodes, visible.edges, selected);
+      const roots = selected
+        ? [selected]
+        : entryRoots.map((root) => root.id);
+      const local = compactLayered(visible.nodes, visible.edges, roots);
       const viewport = reactFlow.getViewport();
       const host = document.querySelector('.react-flow')?.getBoundingClientRect();
       const center = host
@@ -498,7 +520,9 @@ export function useGraphView({
             y: center.y - nodeSize(selectedNode).height / 2,
           }
         : center;
-      const localAnchorId = selected && local.positions[selected] ? selected : visible.nodes[0]?.id;
+      const localAnchorId = selected && local.positions[selected]
+        ? selected
+        : roots.find((id) => local.positions[id]) ?? visible.nodes[0]?.id;
       const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
       const dx = localAnchor ? anchor.x - localAnchor.x : 0;
       const dy = localAnchor ? anchor.y - localAnchor.y : 0;
@@ -591,7 +615,7 @@ export function useGraphView({
       window.clearTimeout(timer);
       cancelLayout();
     };
-  }, [viewKey, layoutScope, canonicalPositions]);
+  }, [viewKey, layoutScope, canonicalPositions, entryRoots]);
 
   const frameNodes = useCallback((nodes: AnyFlowNode[]) => {
     if (nodes.length < 2) return;
@@ -629,6 +653,15 @@ export function useGraphView({
     // entry and middle steps off-screen.
     if ((mode === 'path' && path) || focusIds !== null) return;
 
+    // Entry points are an overview: fit the whole visible slice once instead
+    // of centering the first root, which leaves most of it off-screen.
+    if (selectedId === null && entryRoots.length > 0) {
+      const timer = window.setTimeout(() => {
+        frameNodes(flowNodes.filter((node) => node.type !== 'ghost'));
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+
     const selected = selectedId
       ? flowNodes.find((node) => node.id === selectedId)
       : null;
@@ -643,7 +676,7 @@ export function useGraphView({
       : denseCenter(flowNodes);
     if (!center) return;
     void reactFlow.setCenter(center.x, center.y, { zoom: reactFlow.getZoom(), duration: 0 });
-  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds]);
+  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds, frameNodes]);
 
   // Path mode is about the whole route, not the endpoint under the cursor.
   useEffect(() => {
@@ -820,7 +853,7 @@ export function useGraphView({
     if (!apiContext || !snapshot) return;
     focusRequest.current += 1;
     try {
-      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, 8, 2, 180);
+      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, 8, 1, 180);
       const warnings = data.truncated
         ? [
             ...snapshot.warnings,

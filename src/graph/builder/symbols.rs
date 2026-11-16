@@ -6,7 +6,8 @@ use serde_json::Value;
 use crate::languages::{Adapter, LanguageId};
 use crate::lsp::LspRange;
 use crate::source::ast::{
-    declares_callable, declares_data, describe_function, signature_at, variable_callable,
+    declares_callable, declares_data, declares_type_only, describe_function, signature_at,
+    variable_callable,
 };
 use crate::source::SourceFile;
 
@@ -404,6 +405,17 @@ impl Builder {
         Some(id)
     }
 
+    fn is_type_only_symbol(&self, symbol: &RawSymbol, rel: &str) -> bool {
+        self.sources
+            .get(rel)
+            .and_then(|source| {
+                source.tree.as_ref().map(|tree| {
+                    declares_type_only(tree, &source.text, symbol.selection.start)
+                })
+            })
+            .unwrap_or(false)
+    }
+
     fn add_class_symbol(
         &mut self,
         symbol: &RawSymbol,
@@ -520,6 +532,12 @@ impl Builder {
         };
         match symbol.kind {
             LSP_CLASS => {
+                // Type aliases and interfaces are not instantiable. Do not
+                // invent a synthetic constructor (and do not walk their
+                // members) when the LSP reports them as LSP_CLASS.
+                if self.is_type_only_symbol(symbol, rel) {
+                    return;
+                }
                 let class_exported =
                     self.add_class_symbol(symbol, rel, &local, &qname, parent_exported);
                 for child in &symbol.children {

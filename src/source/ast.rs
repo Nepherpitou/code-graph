@@ -75,6 +75,38 @@ pub fn declares_callable(
     callable.start_position().row == position.line as usize
 }
 
+/// True when the symbol at `position` is a type-only declaration (type alias,
+/// interface, enum). Some LSP servers report these with the same symbol kind
+/// as a class; treating them as classes invents callable constructors for
+/// types that can never be instantiated.
+pub fn declares_type_only(tree: &Tree, text: &str, position: LspPosition) -> bool {
+    let Some(mut node) = node_at(tree, text, position) else {
+        return false;
+    };
+    loop {
+        if matches!(
+            node.kind(),
+            "type_alias_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "type_item"
+                | "union_item"
+        ) {
+            return true;
+        }
+        if matches!(
+            node.kind(),
+            "program" | "source_file" | "module" | "translation_unit"
+        ) {
+            return false;
+        }
+        match node.parent() {
+            Some(parent) => node = parent,
+            None => return false,
+        }
+    }
+}
+
 pub fn declares_data(tree: &Tree, text: &str, adapter: &Adapter, position: LspPosition) -> bool {
     let Some(mut node) = node_at(tree, text, position) else {
         return false;
@@ -359,4 +391,29 @@ pub fn result_used_at(
         return Some(false);
     }
     Some(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::languages::{grammar, LanguageId};
+    use tree_sitter::Parser;
+
+    fn position_of(text: &str, needle: &str) -> LspPosition {
+        byte_to_lsp(text, text.find(needle).expect("needle in source"))
+    }
+
+    #[test]
+    fn distinguishes_type_aliases_from_classes() {
+        let text = "export type UserEntity = { id: string };\nexport interface Actor { id: string }\nexport class Service {}\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&grammar(LanguageId::TypeScript, "sample.ts"))
+            .expect("typescript grammar");
+        let tree = parser.parse(text, None).expect("parsed source");
+
+        assert!(declares_type_only(&tree, text, position_of(text, "UserEntity")));
+        assert!(declares_type_only(&tree, text, position_of(text, "Actor")));
+        assert!(!declares_type_only(&tree, text, position_of(text, "Service")));
+    }
 }
