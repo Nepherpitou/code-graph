@@ -175,3 +175,59 @@ fieldset input[type="checkbox"], fieldset input[type="radio"] { accent-color: va
   .wb-meta { display: none; }
   .wb-feedback-float { bottom: 34px; }
 }
+
+/* Airy density selected in the C09 review. More breathing room, same three
+   columns: keep the table and details inspector, do not shrink the graph away. */
+.wb-app.density-airy { grid-template-columns: 310px minmax(0, 1fr) 350px; grid-template-rows: 58px minmax(0, 1fr); }
+.wb-app.density-airy .wb-header { padding: 0 18px; gap: 16px; }
+.wb-app.density-airy .wb-brand { font-size: 13px; }
+.wb-app.density-airy .wb-tag { font-size: 9.5px; padding: 3px 8px; }
+.wb-app.density-airy .wb-meta { gap: 7px; font-size: 10.5px; }
+.wb-app.density-airy .wb-local { font-size: 9px; }
+.wb-app.density-airy .wb-feedback-open { height: 29px; padding: 0 12px; font-size: 10.5px; }
+.wb-app.density-airy .wb-side-head { padding: 16px 15px 11px; font-size: 9.5px; }
+.wb-app.density-airy .wb-sort { padding: 0 12px 10px; gap: 4px; }
+.wb-app.density-airy .wb-sort button { font-size: 9.5px; padding: 4px 7px; }
+.wb-app.density-airy .wb-node-row { padding: 10px 14px; }
+.wb-app.density-airy .wb-node-main b { font-size: 10.5px; }
+.wb-app.density-airy .wb-node-main span { font-size: 8.5px; margin-top: 3px; }
+.wb-app.density-airy .wb-node-nums span { font-size: 8.5px; min-width: 13px; }
+.wb-app.density-airy .wb-side-section { padding: 14px 15px; }
+.wb-app.density-airy .wb-side-label { font-size: 8.5px; margin-bottom: 8px; }
+.wb-app.density-airy .wb-check { font-size: 10.5px; margin: 6px 0; }
+.wb-app.density-airy .wb-side-foot { padding: 12px 15px; font-size: 9px; }
+.wb-app.density-airy .wb-modebar { flex-basis: 46px; padding: 0 15px; gap: 10px; }
+.wb-app.density-airy .wb-modes { padding: 4px; gap: 3px; }
+.wb-app.density-airy .wb-mode { height: 27px; padding: 0 10px; font-size: 10.5px; }
+.wb-app.density-airy .wb-mode-hint { font-size: 9.5px; }
+.wb-app.density-airy .wb-mode-count { font-size: 9px; }
+.wb-app.density-airy .wb-context { flex-basis: 43px; padding: 0 15px; gap: 9px; }
+.wb-app.density-airy .wb-context-label { font-size: 8.5px; }
+.wb-app.density-airy .wb-context-note { font-size: 9.5px; }
+.wb-app.density-airy .wb-path-step { height: 26px; padding: 0 7px; font-size: 9.5px; }
+.wb-app.density-airy .wb-bottom { flex-basis: 29px; padding: 0 15px; font-size: 8.5px; }
+.wb-app.density-airy .wb-details { padding: 18px; }
+.wb-app.density-airy .wb-details-head h2 { font-size: 14px; margin-top: 6px; }
+.wb-app.density-airy .wb-details-label { font-size: 8.5px; }
+.wb-app.density-airy .wb-file { font-size: 9.5px; margin-top: 5px; }
+.wb-app.density-airy .wb-facts { gap: 8px; margin: 16px 0; }
+.wb-app.density-airy .wb-facts > div { padding: 9px; }
+.wb-app.density-airy .wb-facts b { font-size: 14px; }
+.wb-app.density-airy .wb-facts span { font-size: 8.5px; }
+.wb-app.density-airy .wb-details-section { margin: 16px 0; }
+.wb-app.density-airy .wb-rel { padding: 6px 5px; font-size: 10px; }
+.wb-app.density-airy .wb-details-actions { gap: 5px; margin: 13px 0; }
+.wb-app.density-airy .wb-details-actions button { padding: 8px; font-size: 10px; }
+.wb-app.density-airy .wb-details-foot { margin-top: 18px; padding-top: 12px; font-size: 9px; }
+.wb-app.density-airy .wb-compare-card { padding: 11px 11px 10px 33px; margin-top: 10px; }
+.wb-app.density-airy .wb-diff { padding: 7px 0; font-size: 9.5px; }
+.wb-app.density-airy .wb-feedback-float { bottom: 44px; height: 30px; padding: 0 12px; font-size: 10px; }
+@media (max-width: 1200px) {
+  .wb-app.density-airy { grid-template-columns: 280px minmax(0, 1fr) 320px; }
+}
+@media (max-width: 900px) {
+  .wb-app.density-airy { grid-template-columns: minmax(0, 1fr) 320px; }
+}
+@media (max-width: 700px) {
+  .wb-app.density-airy { grid-template-columns: minmax(0, 1fr); }
+}

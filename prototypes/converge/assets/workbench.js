@@ -216,8 +216,8 @@
             </fieldset>
             <fieldset><legend>Плотность</legend>
               <label><input type="radio" name="density" value="compact"> компактная</label>
-              <label><input type="radio" name="density" value="current" checked> текущая</label>
-              <label><input type="radio" name="density" value="airy"> воздушная</label>
+              <label><input type="radio" name="density" value="current"> текущая</label>
+              <label><input type="radio" name="density" value="airy" checked> воздушная</label>
             </fieldset>
             <fieldset><legend>Что делать следующим</legend>
               <label><input type="checkbox" name="next" value="path" checked> Path</label>
@@ -250,7 +250,7 @@
 
   function shell() {
     return `
-      <div class="wb-app">
+      <div class="wb-app density-airy">
         ${header()}
         ${sidebar()}
         <main class="wb-main">
