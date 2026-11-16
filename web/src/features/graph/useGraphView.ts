@@ -29,6 +29,7 @@ import type {
 import {
   defaultFilters,
   hiddenRelations,
+  MIN_READABLE_ZOOM,
   neighborhood,
   nodeSize,
   toFlowEdges,
@@ -713,6 +714,18 @@ export function useGraphView({
     const timer = window.setTimeout(() => frameNodes(routeNodes), 120);
     return () => window.clearTimeout(timer);
   }, [mode, path, flowNodes, frameNodes]);
+
+  // Navigating from a zoomed-out entry overview leaves a small focus slice at
+  // the old overview zoom (cards become 83x34px). Keep the normal "focus does
+  // not move the viewport" rule, but fit small focus slices when the current
+  // zoom would make their labels unreadable.
+  useEffect(() => {
+    if (mode !== 'focus' || focusIds === null || selectedId === null) return;
+    if (flowNodes.length === 0 || flowNodes.length > 40) return;
+    if (reactFlow.getZoom() >= MIN_READABLE_ZOOM) return;
+    const timer = window.setTimeout(() => frameNodes(flowNodes), 120);
+    return () => window.clearTimeout(timer);
+  }, [mode, focusIds, selectedId, flowNodes, reactFlow, frameNodes]);
 
   const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
     if (!snapshot) return;
