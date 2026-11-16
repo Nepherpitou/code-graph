@@ -208,24 +208,46 @@ impl Builder {
         self.order.len()
     }
 
-    pub(crate) fn readiness_sample(&self) -> Option<(String, String, LspPosition)> {
-        self.order
-            .iter()
-            .filter_map(|id| self.records.get(id))
-            .find(|record| record.node.kind.is_callable())
-            .map(|record| {
-                (
-                    record
-                        .node
-                        .qname
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or("main")
-                        .to_string(),
-                    record.uri.clone(),
-                    record.selection.start,
-                )
-            })
+    /// One callable per file, for the Rust readiness probe.
+    ///
+    /// The first file is not always part of the LSP workspace: nested crates
+    /// (fixtures, examples) can be discovered but never loaded, and their
+    /// `prepareCallHierarchy` result stays empty forever. Rotating over several
+    /// files lets the probe find a loaded one instead of sleeping for 60s.
+    pub(crate) fn readiness_samples(&self) -> Vec<(String, String, LspPosition)> {
+        const MAX_SAMPLES: usize = 24;
+        let mut seen_files = HashSet::new();
+        let mut samples = Vec::new();
+        for id in &self.order {
+            let Some(record) = self.records.get(id) else {
+                continue;
+            };
+            if !record.node.kind.is_callable()
+                || record.node.synthetic
+                || record.node.external
+                || !seen_files.insert(record.rel.as_str())
+            {
+                continue;
+            }
+            samples.push((
+                record
+                    .node
+                    .qname
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("main")
+                    .to_string(),
+                record.uri.clone(),
+                record.selection.start,
+            ));
+        }
+        if samples.len() > MAX_SAMPLES {
+            let total = samples.len();
+            samples = (0..MAX_SAMPLES)
+                .map(|index| samples[index * total / MAX_SAMPLES].clone())
+                .collect();
+        }
+        samples
     }
 
     pub(crate) fn finish(mut self) -> BuilderOutput {

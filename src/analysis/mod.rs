@@ -31,7 +31,8 @@ async fn wait_until_ready(
     reporter: &Reporter,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    let Some((sample_name, sample_uri, sample_position)) = builder.readiness_sample() else {
+    let samples = builder.readiness_samples();
+    let Some((sample_name, _, _)) = samples.first() else {
         return warnings;
     };
     reporter.emit(
@@ -41,12 +42,12 @@ async fn wait_until_ready(
     let mut ready = false;
     if adapter.id == LanguageId::Rust {
         // rust-analyzer answers empty call hierarchy while the crate graph loads;
-        // asking for one real item is the only reliable readiness check.
-        for _ in 0..600 {
-            match client
-                .prepare_call_hierarchy_quick(&sample_uri, sample_position)
-                .await
-            {
+        // asking for real items is the only reliable readiness check. Rotate over
+        // files because the first discovered file can be a nested crate that the
+        // root workspace never loads.
+        for attempt in 0..600 {
+            let (_, uri, position) = &samples[attempt % samples.len()];
+            match client.prepare_call_hierarchy_quick(uri, *position).await {
                 Ok(items) if !items.is_empty() => {
                     ready = true;
                     break;
@@ -65,7 +66,7 @@ async fn wait_until_ready(
         }
     } else if capabilities.get("workspaceSymbolProvider").is_some() {
         for _ in 0..3 {
-            if let Ok(count) = client.workspace_symbol_count(&sample_name).await {
+            if let Ok(count) = client.workspace_symbol_count(sample_name).await {
                 if count > 0 {
                     break;
                 }
