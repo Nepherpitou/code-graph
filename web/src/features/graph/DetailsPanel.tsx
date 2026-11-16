@@ -89,7 +89,7 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
         <ul className="hints">
           <li><b>Click</b> a card to focus its direct neighbours and shortest entry→exit route.</li>
           <li><b>Red path</b> is the focus-navigation history; <b>amber</b> is the shortest route.</li>
-          <li><b>Double-click</b> to focus the same connected slice.</li>
+          <li><b>Double-click</b> focuses the slice and starts a fresh history.</li>
           <li><b>Top entries</b> returns to the entry-point overview.</li>
           <li>Arrowheads point at callees; a second arrowhead means the result is used.</li>
           <li>Dashed edges are reference fallback or constant usage.</li>

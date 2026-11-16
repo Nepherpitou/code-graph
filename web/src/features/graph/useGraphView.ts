@@ -169,6 +169,7 @@ export interface GraphView {
   openEntryPoints: () => Promise<void>;
   mergeSlice: (slice: GraphSlice, focus: Set<string> | null) => void;
   focusNode: (id: string) => void;
+  focusWithoutHistory: (id: string) => void;
   clearFocus: () => void;
   clearSelection: () => void;
   selectAndCenter: (id: string) => void;
@@ -221,6 +222,7 @@ export function useGraphView({
   const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
+  const clickTimer = useRef<number | null>(null);
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
@@ -690,6 +692,11 @@ export function useGraphView({
     selectAndCenter(id);
   }, [selectAndCenter]);
 
+  const focusWithoutHistory = useCallback((id: string) => {
+    clearHistory();
+    selectAndCenter(id);
+  }, [clearHistory, selectAndCenter]);
+
   const clearFocus = useCallback(() => {
     setFocusIds(null);
     setSelectedId(null);
@@ -852,10 +859,23 @@ export function useGraphView({
       setSelectedId(node.id);
       return;
     }
-    selectAndCenter(node.id);
+    // Give a double-click a chance to cancel the single-click focus. Focusing
+    // immediately repacks the grid, so the second click would land elsewhere.
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      selectAndCenter(node.id);
+    }, 220);
   };
   const onNodeDoubleClick: NodeMouseHandler = (_event, node) => {
-    focusNode(node.id);
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    focusWithoutHistory(node.id);
   };
   const resetGraphView = useCallback(() => {
     setSelectedId(null);
@@ -895,6 +915,7 @@ export function useGraphView({
     openEntryPoints,
     mergeSlice,
     focusNode,
+    focusWithoutHistory,
     clearFocus,
     clearSelection,
     selectAndCenter,

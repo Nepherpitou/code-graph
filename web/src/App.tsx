@@ -168,6 +168,7 @@ export function App() {
   const canRefresh = Boolean(state.apiContext && state.analysisStatus?.canAnalyze);
   const menuActions: ContextAction[] = contextMenu ? [
     { label: 'Focus connected slice', onSelect: () => graph.focusNode(contextMenu.node.id) },
+    { label: 'Focus without history', onSelect: () => graph.focusWithoutHistory(contextMenu.node.id) },
     { label: 'Show callers', onSelect: () => void graph.showImpact(contextMenu.node, 'in') },
     { label: 'Show callees', onSelect: () => void graph.showImpact(contextMenu.node, 'out') },
     { label: 'Open containing file', onSelect: () => void openFileSlice(contextMenu.node.file) },
