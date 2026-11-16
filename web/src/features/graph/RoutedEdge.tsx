@@ -9,11 +9,23 @@ import {
 
 import type { EdgeObstacle, FlowEdgeData } from './graph';
 
-const CELL = 24;
-const MARGIN = 22;
+const CELL = 8;
+const MARGIN = 8;
 const PAD = 48;
+const APPROACH = 28;
+const HANDLE_GAP = 5;
 
 interface Point { x: number; y: number }
+
+function approach(point: Point, position: string, distance: number): Point {
+  switch (position) {
+    case 'top': return { x: point.x, y: point.y - distance };
+    case 'bottom': return { x: point.x, y: point.y + distance };
+    case 'left': return { x: point.x - distance, y: point.y };
+    case 'right': return { x: point.x + distance, y: point.y };
+    default: return { x: point.x, y: point.y + distance };
+  }
+}
 
 function hitsObstacle(x: number, y: number, obstacles: EdgeObstacle[]): boolean {
   return obstacles.some((box) =>
@@ -42,6 +54,83 @@ function simplify(points: Point[]): Point[] {
   }
   result.push(compact[compact.length - 1]);
   return result;
+}
+
+function clearApproach(
+  point: Point,
+  position: string,
+  distance: number,
+  obstacles: EdgeObstacle[],
+): Point {
+  let candidate = approach(point, position, distance);
+  for (let step = 0; step < 12 && hitsObstacle(candidate.x, candidate.y, obstacles); step += 1) {
+    candidate = approach(point, position, distance + step * CELL);
+  }
+  return candidate;
+}
+
+function segmentBlocked(start: Point, end: Point, obstacles: EdgeObstacle[]): boolean {
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  const steps = Math.max(1, Math.ceil(length / 4));
+  for (let index = 1; index < steps; index += 1) {
+    const t = index / steps;
+    if (hitsObstacle(start.x + (end.x - start.x) * t, start.y + (end.y - start.y) * t, obstacles)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function visibilityRoute(
+  source: Point,
+  target: Point,
+  obstacles: EdgeObstacle[],
+): Point[] | null {
+  const points: Point[] = [source, target];
+  for (const box of obstacles) {
+    points.push(
+      { x: box.x - MARGIN, y: box.y - MARGIN },
+      { x: box.x + box.width + MARGIN, y: box.y - MARGIN },
+      { x: box.x - MARGIN, y: box.y + box.height + MARGIN },
+      { x: box.x + box.width + MARGIN, y: box.y + box.height + MARGIN },
+    );
+  }
+  const count = points.length;
+  const distance = new Array<number>(count).fill(Infinity);
+  const previous = new Array<number>(count).fill(-1);
+  const visited = new Uint8Array(count);
+  distance[0] = 0;
+  for (let round = 0; round < count; round += 1) {
+    let current = -1;
+    let best = Infinity;
+    for (let index = 0; index < count; index += 1) {
+      if (!visited[index] && distance[index] < best) {
+        best = distance[index];
+        current = index;
+      }
+    }
+    if (current === -1 || current === 1) break;
+    visited[current] = 1;
+    for (let next = 0; next < count; next += 1) {
+      if (visited[next] || next === current) continue;
+      if (segmentBlocked(points[current], points[next], obstacles)) continue;
+      const dx = points[current].x - points[next].x;
+      const dy = points[current].y - points[next].y;
+      const candidate = distance[current] + Math.hypot(dx, dy);
+      if (candidate >= distance[next]) continue;
+      distance[next] = candidate;
+      previous[next] = current;
+    }
+  }
+  if (!Number.isFinite(distance[1])) return null;
+  const result: Point[] = [];
+  let cursor = 1;
+  while (cursor !== -1) {
+    result.push(points[cursor]);
+    if (cursor === 0) break;
+    cursor = previous[cursor];
+  }
+  return simplify(result.reverse());
 }
 
 function routeAround(
@@ -118,11 +207,25 @@ function routeAround(
     cursor = parent[cursor];
   }
   cells.reverse();
+  // The grid center nearest a handle can sit slightly behind the handle. Use
+  // the exact approach points for the first/last cell so the path leaves and
+  // enters the card in the handle's direction instead of kinking backwards.
+  if (cells.length > 0) {
+    cells[0] = source;
+    cells[cells.length - 1] = target;
+  }
   return simplify([source, ...cells, target]);
 }
 
 function pathFromPoints(points: Point[]): string {
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ');
+}
+
+function pathClear(points: Point[], obstacles: EdgeObstacle[]): boolean {
+  for (let index = 1; index < points.length; index += 1) {
+    if (segmentBlocked(points[index - 1], points[index], obstacles)) return false;
+  }
+  return true;
 }
 
 export function RoutedEdge({
@@ -146,22 +249,38 @@ export function RoutedEdge({
   labelBgBorderRadius,
 }: EdgeProps<Edge<FlowEdgeData>>) {
   const routing = useMemo(() => {
+    // The route starts and ends outside the handles. Keep the endpoint cards
+    // out of pathfinding so a dense neighbour cannot trap the route inside the
+    // source/target card.
     const obstacles = (data?.obstacles ?? []).filter((box) => box.id !== source && box.id !== target);
     const sourcePoint = { x: sourceX, y: sourceY };
     const targetPoint = { x: targetX, y: targetY };
+    // Lift both markers just outside the cards. A marker whose tip sits exactly
+    // on the handle can be covered by the opaque card and its shadow.
+    const sourceEnd = approach(sourcePoint, sourcePosition, HANDLE_GAP);
+    const targetEnd = approach(targetPoint, targetPosition, HANDLE_GAP);
     if (obstacles.length > 0) {
-      const points = routeAround(sourcePoint, targetPoint, obstacles);
-      if (points) {
-        const middle = points[Math.floor(points.length / 2)];
-        return { path: pathFromPoints(points), labelX: middle.x, labelY: middle.y };
+      const sourceApproach = clearApproach(sourcePoint, sourcePosition, APPROACH, obstacles);
+      const targetApproach = clearApproach(targetPoint, targetPosition, APPROACH, obstacles);
+      const candidates = [
+        routeAround(sourceApproach, targetApproach, obstacles),
+        visibilityRoute(sourceApproach, targetApproach, obstacles),
+      ];
+      for (const points of candidates) {
+        if (!points) continue;
+        const full = simplify([sourceEnd, ...points, targetEnd]);
+        if (pathClear(full, obstacles)) {
+          const middle = full[Math.floor(full.length / 2)];
+          return { path: pathFromPoints(full), labelX: middle.x, labelY: middle.y };
+        }
       }
     }
     const [path, labelX, labelY] = getSmoothStepPath({
-      sourceX,
-      sourceY,
+      sourceX: sourceEnd.x,
+      sourceY: sourceEnd.y,
       sourcePosition,
-      targetX,
-      targetY,
+      targetX: targetEnd.x,
+      targetY: targetEnd.y,
       targetPosition,
       borderRadius: 12,
       offset: 24,

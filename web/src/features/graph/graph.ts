@@ -318,16 +318,16 @@ export function toFlowEdges(
       markerEnd: {
         type: 'arrowclosed',
         color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-        width: 16,
-        height: 16,
+        width: 20,
+        height: 20,
         markerUnits: 'userSpaceOnUse',
       },
       markerStart: returnsValue
         ? {
             type: 'arrowclosed',
             color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-            width: 16,
-            height: 16,
+            width: 20,
+            height: 20,
             markerUnits: 'userSpaceOnUse',
           }
         : undefined,
