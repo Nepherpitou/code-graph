@@ -632,6 +632,132 @@ function createNodeClickHandlers({
   return { onNodeClick, onNodeDoubleClick };
 }
 
+interface EntryLoadingDeps {
+  apiContext: { base: string; graphId: string } | null;
+  snapshot: GraphSummary | null;
+  focusRequest: { current: number };
+  setReport: Dispatch<SetStateAction<GraphReport | null>>;
+  setEntryRoots: Dispatch<SetStateAction<EntryPoint[]>>;
+  setEntryInfo: Dispatch<SetStateAction<{
+    totalRoots: number;
+    truncated: boolean;
+  } | null>>;
+  setSelectedId: Dispatch<SetStateAction<string | null>>;
+  setFocusIds: Dispatch<SetStateAction<Set<string> | null>>;
+  clearHistory: () => void;
+  setRouteIds: Dispatch<SetStateAction<Set<string>>>;
+  setPath: Dispatch<SetStateAction<PathResult | null>>;
+  setPathIndexState: Dispatch<SetStateAction<number>>;
+  setFilters: Dispatch<SetStateAction<Filters>>;
+  setSearchText: Dispatch<SetStateAction<string>>;
+  setError: (message: string | null) => void;
+}
+
+async function loadEntryPoints({
+  apiContext,
+  snapshot,
+  focusRequest,
+  setReport,
+  setEntryRoots,
+  setEntryInfo,
+  setSelectedId,
+  setFocusIds,
+  clearHistory,
+  setRouteIds,
+  setPath,
+  setPathIndexState,
+  setFilters,
+  setSearchText,
+  setError,
+}: EntryLoadingDeps): Promise<void> {
+  if (!apiContext || !snapshot) return;
+  focusRequest.current += 1;
+  try {
+    // Fill the overview root by root: every entry point gets its first-level
+    // calls; only when the node budget still has room are second-level nodes
+    // added. The API slice already uses this level ordering.
+    const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, ENTRY_ROOTS, 2, ENTRY_LIMIT);
+    const warnings = data.truncated
+      ? [
+          ...snapshot.warnings,
+          `entry graph limited to ${data.nodes.length} nodes across ${data.roots.length} roots`,
+        ]
+      : snapshot.warnings;
+    setReport({
+      meta: snapshot.meta,
+      nodes: data.nodes,
+      edges: data.edges,
+      files: [],
+      stats: snapshot.stats,
+      top: snapshot.top,
+      warnings,
+    });
+    setEntryRoots(data.roots);
+    setEntryInfo({
+      totalRoots: data.totalRoots,
+      truncated: data.truncated,
+    });
+    setSelectedId(null);
+    setFocusIds(null);
+    clearHistory();
+    setRouteIds(new Set());
+    setPath(null);
+    setPathIndexState(0);
+    setFilters(defaultFilters());
+    setSearchText('');
+    // Do not clear positions here: a second identical entry-point response
+    // would leave an empty position map without changing the layout key.
+  } catch (caught) {
+    setError(`Entry points failed: ${(caught as Error).message}`);
+  }
+}
+
+interface ResetDeps {
+  focusRequest: { current: number };
+  setSelectedId: Dispatch<SetStateAction<string | null>>;
+  setFocusIds: Dispatch<SetStateAction<Set<string> | null>>;
+  clearHistory: () => void;
+  setRouteIds: Dispatch<SetStateAction<Set<string>>>;
+  setPath: Dispatch<SetStateAction<PathResult | null>>;
+  setPathIndexState: Dispatch<SetStateAction<number>>;
+  setEntryRoots: Dispatch<SetStateAction<EntryPoint[]>>;
+  setEntryInfo: Dispatch<SetStateAction<{
+    totalRoots: number;
+    truncated: boolean;
+  } | null>>;
+  setFilters: Dispatch<SetStateAction<Filters>>;
+  setSearchText: Dispatch<SetStateAction<string>>;
+  resetPositions: () => void;
+}
+
+function resetViewState({
+  focusRequest,
+  setSelectedId,
+  setFocusIds,
+  clearHistory,
+  setRouteIds,
+  setPath,
+  setPathIndexState,
+  setEntryRoots,
+  setEntryInfo,
+  setFilters,
+  setSearchText,
+  resetPositions,
+}: ResetDeps): void {
+  focusRequest.current += 1;
+  setSelectedId(null);
+  setFocusIds(null);
+  clearHistory();
+  setRouteIds(new Set());
+  setPath(null);
+  setPathIndexState(0);
+  setEntryRoots([]);
+  setEntryInfo(null);
+  setFilters(defaultFilters());
+  setSearchText('');
+  resetPositions();
+}
+
 interface Input {
   report: GraphReport | null;
   snapshot: GraphSummary | null;
@@ -1328,48 +1454,23 @@ export function useGraphView({
     selectAndCenter(node.id);
   }, [selectAndCenter]);
 
-  const openEntryPoints = useCallback(async () => {
-    if (!apiContext || !snapshot) return;
-    focusRequest.current += 1;
-    try {
-      // Fill the overview root by root: every entry point gets its first-level
-      // calls; only when the node budget still has room are second-level nodes
-      // added. The API slice already uses this level ordering.
-      const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, ENTRY_ROOTS, 2, ENTRY_LIMIT);
-      const warnings = data.truncated
-        ? [
-            ...snapshot.warnings,
-            `entry graph limited to ${data.nodes.length} nodes across ${data.roots.length} roots`,
-          ]
-        : snapshot.warnings;
-      setReport({
-        meta: snapshot.meta,
-        nodes: data.nodes,
-        edges: data.edges,
-        files: [],
-        stats: snapshot.stats,
-        top: snapshot.top,
-        warnings,
-      });
-      setEntryRoots(data.roots);
-      setEntryInfo({
-        totalRoots: data.totalRoots,
-        truncated: data.truncated,
-      });
-      setSelectedId(null);
-      setFocusIds(null);
-      clearHistory();
-      setRouteIds(new Set());
-      setPath(null);
-      setPathIndexState(0);
-      setFilters(defaultFilters());
-      setSearchText('');
-      // Do not clear positions here: a second identical entry-point response
-      // would leave an empty position map without changing the layout key.
-    } catch (caught) {
-      setError(`Entry points failed: ${(caught as Error).message}`);
-    }
-  }, [apiContext, clearHistory, snapshot, setError, setReport]);
+  const openEntryPoints = useCallback(() => loadEntryPoints({
+    apiContext,
+    snapshot,
+    focusRequest,
+    setReport,
+    setEntryRoots,
+    setEntryInfo,
+    setSelectedId,
+    setFocusIds,
+    clearHistory,
+    setRouteIds,
+    setPath,
+    setPathIndexState,
+    setFilters,
+    setSearchText,
+    setError,
+  }), [apiContext, clearHistory, snapshot, setError, setReport]);
 
   const showImpact = useCallback(async (node: GraphNode, direction: 'in' | 'out') => {
     if (!apiContext) return;
@@ -1396,20 +1497,20 @@ export function useGraphView({
     clickTimer,
   });
 
-  const resetGraphView = useCallback(() => {
-    focusRequest.current += 1;
-    setSelectedId(null);
-    setFocusIds(null);
-    clearHistory();
-    setRouteIds(new Set());
-    setPath(null);
-    setPathIndexState(0);
-    setEntryRoots([]);
-    setEntryInfo(null);
-    setFilters(defaultFilters());
-    setSearchText('');
-    resetPositions();
-  }, [clearHistory, resetPositions]);
+  const resetGraphView = useCallback(() => resetViewState({
+    focusRequest,
+    setSelectedId,
+    setFocusIds,
+    clearHistory,
+    setRouteIds,
+    setPath,
+    setPathIndexState,
+    setEntryRoots,
+    setEntryInfo,
+    setFilters,
+    setSearchText,
+    resetPositions,
+  }), [clearHistory, resetPositions]);
 
   return {
     report,
