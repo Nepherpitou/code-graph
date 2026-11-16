@@ -298,9 +298,48 @@ export function useGraphView({
           const anchorNext = anchorId ? next[anchorId] : null;
           const dx = anchor && anchorNext ? anchor.x - anchorNext.x : 0;
           const dy = anchor && anchorNext ? anchor.y - anchorNext.y : 0;
+          const sizes = new Map(layoutNodes.map((node) => [node.id, { width: node.width, height: node.height }]));
+          const gap = 18;
+          const stepX = Math.max(160, ...layoutNodes.map((node) => node.width)) + gap;
+          const stepY = Math.max(64, ...layoutNodes.map((node) => node.height)) + gap;
+          const occupied = Object.entries(current).map(([id, position]) => ({
+            x: position.x,
+            y: position.y,
+            width: sizes.get(id)?.width ?? 170,
+            height: sizes.get(id)?.height ?? 68,
+          }));
+          const free = (x: number, y: number, width: number, height: number): boolean =>
+            !occupied.some((box) => x < box.x + box.width + gap
+              && x + width + gap > box.x
+              && y < box.y + box.height + gap
+              && y + height + gap > box.y);
           const merged = { ...current };
-          for (const [id, position] of Object.entries(next)) {
-            if (!(id in merged)) merged[id] = { x: position.x + dx, y: position.y + dy };
+          const newIds = Object.keys(next).filter((id) => !(id in current)).sort();
+          for (const id of newIds) {
+            const size = sizes.get(id) ?? { width: 170, height: 68 };
+            const proposed = next[id];
+            let x = proposed.x + dx;
+            let y = proposed.y + dy;
+            if (!free(x, y, size.width, size.height)) {
+              const originX = x;
+              const originY = y;
+              let placed = false;
+              for (let radius = 1; radius <= 24 && !placed; radius += 1) {
+                for (let row = -radius; row <= radius && !placed; row += 1) {
+                  for (let column = -radius; column <= radius && !placed; column += 1) {
+                    if (Math.max(Math.abs(column), Math.abs(row)) !== radius) continue;
+                    const candidateX = originX + column * stepX;
+                    const candidateY = originY + row * stepY;
+                    if (!free(candidateX, candidateY, size.width, size.height)) continue;
+                    x = candidateX;
+                    y = candidateY;
+                    placed = true;
+                  }
+                }
+              }
+            }
+            merged[id] = { x, y };
+            occupied.push({ x, y, width: size.width, height: size.height });
           }
           return merged;
         });
