@@ -6,6 +6,24 @@ function fileBase(file: string): string {
   return file.split('/').at(-1) ?? file;
 }
 
+const GENERIC_MODULE_STEMS: Record<string, true> = {
+  mod: true,
+  index: true,
+  __init__: true,
+  init: true,
+};
+
+/** Top-level functions have no class; use their source module as the container label. */
+function moduleLabel(file: string): string {
+  const parts = file.split(/[\\/]/).filter(Boolean);
+  const base = parts.pop() ?? file;
+  const stem = base.replace(/\.[^.]+$/, '');
+  if (GENERIC_MODULE_STEMS[stem.toLowerCase()]) {
+    return parts.at(-1) ?? stem;
+  }
+  return stem;
+}
+
 export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<FlowNode>) {
   const { node, dimmed, highlighted, entryPoint, route } = data;
   const isSelected = selected || data.selected;
@@ -32,6 +50,8 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
   const split = node.qname.lastIndexOf('.');
   const container = split > 0 ? node.qname.slice(0, split) : '';
   const member = split > 0 ? node.qname.slice(split + 1) : node.qname;
+  const module = moduleLabel(node.file);
+  const label = container || (module.toLowerCase() === member.toLowerCase() ? '' : module);
 
   return (
     <div className={classes} title={tooltip}>
@@ -42,7 +62,7 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
       <div className="card-top">
         <span className="card-dot" />
         <div className="card-title">
-          {container ? <span className="card-class" title={container}>{container}</span> : null}
+          {label ? <span className="card-class" title={container || node.file}>{label}</span> : null}
           <span className="card-name">{member}</span>
         </div>
         <div className="card-chips">
