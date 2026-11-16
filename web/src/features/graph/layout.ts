@@ -74,7 +74,13 @@ export async function computeLayout(
     return positions;
   }
 
-  const key = cacheKey(nodes, edges, kind, scope);
+  // Canonicalize before both cacheKey and ELK. The API may return the same
+  // slice in a different order, which otherwise changes layering and positions.
+  const orderedNodes = [...nodes].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const orderedEdges = [...edges].sort((left, right) => left.source.localeCompare(right.source)
+    || left.target.localeCompare(right.target)
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  const key = cacheKey(orderedNodes, orderedEdges, kind, scope);
   const cached = layoutCache.get(key);
   if (cached) return cached;
   const generation = layoutGeneration;
@@ -97,12 +103,12 @@ export async function computeLayout(
       'elk.aspectRatio': '1.6',
       'elk.edgeRouting': 'SPLINES',
     },
-    children: nodes.map((node) => ({
+    children: orderedNodes.map((node) => ({
       id: node.id,
       width: node.width,
       height: node.height,
     })),
-    edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
+    edges: orderedEdges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
   };
 
   const instance = elk();

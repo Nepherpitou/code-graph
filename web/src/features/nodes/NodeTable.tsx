@@ -34,10 +34,11 @@ export function NodeTable({ nodes, total, onOpen }: Props) {
     return [...rows].sort((left, right) => {
       const a = metric(left, sortKey);
       const b = metric(right, sortKey);
+      const byId = left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
       if (typeof a === 'string' || typeof b === 'string') {
-        return String(a).localeCompare(String(b));
+        return String(a).localeCompare(String(b)) || byId;
       }
-      return b - a || left.qname.localeCompare(right.qname);
+      return b - a || left.qname.localeCompare(right.qname) || byId;
     });
   }, [nodes, query, sortKey]);
 

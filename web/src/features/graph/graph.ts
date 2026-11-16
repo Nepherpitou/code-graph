@@ -98,10 +98,20 @@ export function isVisible(node: GraphNode, filters: Filters, focusIds: Set<strin
   return true;
 }
 
+function byId(left: { id: string }, right: { id: string }): number {
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
 export function visibleGraph(report: GraphReport, filters: Filters, focusIds: Set<string> | null): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const nodes = report.nodes.filter((node) => isVisible(node, filters, focusIds));
+  // API maps have no render order. Keep the visible graph canonical so the same
+  // selection always feeds ELK the same input and produces the same layout.
+  const nodes = report.nodes.filter((node) => isVisible(node, filters, focusIds)).sort(byId);
   const ids = new Set(nodes.map((node) => node.id));
-  const edges = report.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
+  const edges = report.edges
+    .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+    .sort((left, right) => left.source.localeCompare(right.source)
+      || left.target.localeCompare(right.target)
+      || byId(left, right));
   return { nodes, edges };
 }
 

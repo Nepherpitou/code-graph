@@ -50,10 +50,16 @@ function RelationList({
 }: { title: string; edges: GraphEdge[]; side: 'source' | 'target'; report: GraphReport; onSelect: (id: string) => void }) {
   if (edges.length === 0) return null;
   const nodes = new Map(report.nodes.map((node) => [node.id, node]));
+  // Relation order is part of the view, not of the API map iteration order.
+  const ordered = [...edges].sort((left, right) => {
+    const leftName = nodes.get(side === 'source' ? left.source : left.target)?.qname ?? '';
+    const rightName = nodes.get(side === 'source' ? right.source : right.target)?.qname ?? '';
+    return leftName.localeCompare(rightName) || left.sites - right.sites || left.id.localeCompare(right.id);
+  });
   return (
     <div className="relation-group">
       <h4>{title} <span className="count">{edges.length}</span></h4>
-      {edges.slice(0, 40).map((edge) => {
+      {ordered.slice(0, 40).map((edge) => {
         const other = nodes.get(side === 'source' ? edge.source : edge.target);
         if (!other) return null;
         const badge = edge.kind === 'data' ? '⇢' : edge.inferred ? '⋯' : edge.resultUsed === 'none' ? '→' : edge.resultUsed === 'unknown' ? '?' : '↔';

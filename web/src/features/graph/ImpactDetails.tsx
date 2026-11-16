@@ -34,7 +34,10 @@ export function ImpactDetails({ report, node, onSelect, onClearSelection }: Prop
   const dataIn = report.edges.filter((edge) => edge.target === node.id && edge.kind === 'data');
   const callers = incoming
     .map((edge) => ({ edge, other: nodes.get(edge.source) }))
-    .filter((entry): entry is { edge: GraphEdge; other: GraphNode } => Boolean(entry.other));
+    .filter((entry): entry is { edge: GraphEdge; other: GraphNode } => Boolean(entry.other))
+    .sort((left, right) => left.other.qname.localeCompare(right.other.qname)
+      || left.edge.sites - right.edge.sites
+      || left.edge.id.localeCompare(right.edge.id));
 
   return (
     <section className="panel details impact-details" id="details">
@@ -69,7 +72,14 @@ export function ImpactDetails({ report, node, onSelect, onClearSelection }: Prop
         {dataIn.length > 0 ? (
           <div className="relation-group">
             <h4>Data references <span className="count">{dataIn.length}</span></h4>
-            {dataIn.slice(0, 20).map((edge) => {
+            {[...dataIn]
+              .sort((left, right) => {
+                const leftName = nodes.get(left.source)?.qname ?? '';
+                const rightName = nodes.get(right.source)?.qname ?? '';
+                return leftName.localeCompare(rightName) || left.id.localeCompare(right.id);
+              })
+              .slice(0, 20)
+              .map((edge) => {
               const other = nodes.get(edge.source);
               if (!other) return null;
               return (
