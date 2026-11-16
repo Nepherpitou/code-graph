@@ -40,7 +40,7 @@ export function FilterPanel({
           id="search"
           type="search"
           value={searchText}
-          placeholder="name, file…  (press /)"
+          placeholder="name, file…"
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => onSearch(event.target.value)}

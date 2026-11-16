@@ -93,7 +93,7 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
           <li><b>Top entries</b> returns to the entry-point overview.</li>
           <li>Arrowheads point at callees; a second arrowhead means the result is used.</li>
           <li>Dashed edges are reference fallback or constant usage.</li>
-          <li>Press <kbd>/</kbd> to search, <kbd>Esc</kbd> to clear.</li>
+          <li>Press <kbd>/</kbd> to search all nodes, <kbd>Esc</kbd> to close.</li>
         </ul>
       </section>
     );

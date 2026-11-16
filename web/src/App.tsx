@@ -6,6 +6,7 @@ import { DirectoryScreen } from './features/directories/DirectoryScreen';
 import { FileScreen } from './features/files/FileScreen';
 import { NodeTable } from './features/nodes/NodeTable';
 import { NodeContextMenu, type ContextAction } from './features/nodes/NodeContextMenu';
+import { NodeSearchDialog } from './features/nodes/NodeSearchDialog';
 import { GraphCanvas } from './features/graph/GraphCanvas';
 import { GraphSidebar } from './features/graph/GraphSidebar';
 import { GraphModeBar } from './features/graph/GraphModeBar';
@@ -35,6 +36,20 @@ export function App() {
   const [directory, setDirectory] = useState<OverviewNode | null>(null);
   const [scopeLabel, setScopeLabel] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      const editable = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
+      if (event.key === '/' && !editable && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const openEntryPoints = useCallback(async () => {
     setDirectory(null);
@@ -229,6 +244,14 @@ export function App() {
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           ) : null}
+          <button
+            className="button"
+            onClick={() => setSearchOpen(true)}
+            disabled={state.allNodes.length === 0}
+            title="Search all nodes (/)"
+          >
+            Search
+          </button>
           {state.apiContext ? (
             <button className="button" onClick={() => void openEntryPoints()}>Top entries</button>
           ) : null}
@@ -365,6 +388,17 @@ export function App() {
           y={contextMenu.y}
           actions={menuActions}
           onClose={() => setContextMenu(null)}
+        />
+      ) : null}
+
+      {searchOpen ? (
+        <NodeSearchDialog
+          nodes={state.allNodes}
+          onSelect={(node) => {
+            setSearchOpen(false);
+            void openNode(node);
+          }}
+          onClose={() => setSearchOpen(false)}
         />
       ) : null}
     </div>

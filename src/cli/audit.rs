@@ -1098,6 +1098,17 @@ async fn dead_code(args: AuditDeadArgs) -> Result<()> {
     Ok(())
 }
 
+fn search_class(node: &GraphNode) -> String {
+    if let Some((class, _)) = node.qname.rsplit_once('.') {
+        return class.to_string();
+    }
+    Path::new(&node.file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(node.file.as_str())
+        .to_string()
+}
+
 async fn search(args: AuditSearchArgs) -> Result<()> {
     let context = open_context(&args.common).await?;
     let kind = args.kind.as_deref().map(parse_kind).transpose()?;
@@ -1124,25 +1135,45 @@ async fn search(args: AuditSearchArgs) -> Result<()> {
             if nodes.is_empty() {
                 println!("  no matches");
             } else {
-                println!(
-                    "  {:>3}  {} {} {} {:>6} {:>7}",
-                    "#",
-                    pad("symbol", 32),
-                    pad("kind", 10),
-                    pad("file", 38),
-                    "in",
-                    "hotspot"
-                );
                 for (index, node) in nodes.iter().enumerate() {
+                    if index > 0 {
+                        println!();
+                    }
+                    println!("  [{}] {}", index + 1, node.qname);
                     println!(
-                        "  {:>3}  {} {} {} {:>6} {:>7}",
-                        index + 1,
-                        pad(&node.qname, 32),
-                        pad(node.kind.as_str(), 10),
-                        pad(&node.file, 38),
+                        "      kind: {:<12} class: {}",
+                        node.kind.as_str(),
+                        search_class(node)
+                    );
+                    println!("      file: {}:{}", node.file, node.line);
+                    println!(
+                        "      fan-in {} · fan-out {} · reach {} · depth {} · height {} · cc {} · loc {} · hotspot {}",
                         node.metrics.fan_in,
+                        node.metrics.fan_out,
+                        node.metrics.transitive_fan_out,
+                        node.metrics.depth,
+                        node.metrics.height,
+                        node.cyclomatic,
+                        node.loc,
                         metric(node.metrics.hotspot)
                     );
+                    let mut tags = Vec::new();
+                    if node.is_entry_like {
+                        tags.push("entry");
+                    }
+                    if node.metrics.in_cycle {
+                        tags.push("cycle");
+                    }
+                    if node.metrics.dead_code_candidate {
+                        tags.push("dead-code candidate");
+                    }
+                    if node.synthetic {
+                        tags.push("synthetic");
+                    }
+                    if !tags.is_empty() {
+                        println!("      tags: {}", tags.join(" · "));
+                    }
+                    println!("      id: {}", node.id);
                 }
             }
             println!();
