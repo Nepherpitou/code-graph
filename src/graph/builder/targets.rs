@@ -1,16 +1,19 @@
 use crate::lsp::CallHierarchyItem;
 
-use super::{Builder, NodeRecord, RawSymbol, Resolved};
+use super::{
+    Builder, NodeRecord, RawSymbol, Resolved, LSP_CLASS, LSP_CONSTANT, LSP_CONSTRUCTOR,
+    LSP_FUNCTION, LSP_METHOD, LSP_VARIABLE,
+};
 use crate::graph::model::{GraphNode, NodeKind, NodeMetrics};
 
 fn node_kind_from_lsp(kind: u32) -> Option<NodeKind> {
     match kind {
-        5 => Some(NodeKind::Constructor),
-        6 => Some(NodeKind::Method),
-        9 => Some(NodeKind::Constructor),
-        12 => Some(NodeKind::Function),
-        13 => Some(NodeKind::Variable),
-        14 => Some(NodeKind::Constant),
+        LSP_CLASS => Some(NodeKind::Constructor),
+        LSP_METHOD => Some(NodeKind::Method),
+        LSP_CONSTRUCTOR => Some(NodeKind::Constructor),
+        LSP_FUNCTION => Some(NodeKind::Function),
+        LSP_VARIABLE => Some(NodeKind::Variable),
+        LSP_CONSTANT => Some(NodeKind::Constant),
         _ => None,
     }
 }
@@ -35,6 +38,7 @@ impl Builder {
             line: item.selection_range.start.line + 1,
             end_line: item.range.end.line + 1,
             loc: item.range.end.line.saturating_sub(item.range.start.line) + 1,
+            sloc: 0,
             params: 0,
             cyclomatic: 0,
             exported: true,
@@ -156,7 +160,7 @@ impl Builder {
                 created_callable: false,
             };
         };
-        if kind == NodeKind::Constructor && item.kind == 5 {
+        if kind == NodeKind::Constructor && item.kind == LSP_CLASS {
             if self.records.len() >= self.max_nodes {
                 self.truncated = true;
                 return Resolved {
@@ -167,7 +171,7 @@ impl Builder {
             }
             let symbol = RawSymbol {
                 name: format!("{}.constructor", item.name),
-                kind: 9,
+                kind: LSP_CONSTRUCTOR,
                 detail: "implicit constructor".to_string(),
                 range: item.range,
                 selection: item.selection_range,

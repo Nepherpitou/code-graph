@@ -40,6 +40,14 @@ impl NodeKind {
 pub struct NodeMetrics {
     pub fan_in: u32,
     pub fan_out: u32,
+    #[serde(default)]
+    pub call_fan_in: u32,
+    #[serde(default)]
+    pub call_fan_out: u32,
+    #[serde(default)]
+    pub data_fan_in: u32,
+    #[serde(default)]
+    pub data_fan_out: u32,
     pub call_in: u32,
     pub call_out: u32,
     pub transitive_fan_in: u32,
@@ -61,6 +69,8 @@ pub struct NodeMetrics {
     pub ifc: f64,
     pub dead_code_candidate: bool,
     pub hotspot: f64,
+    #[serde(default)]
+    pub refactor_priority: f64,
 }
 
 impl Default for NodeMetrics {
@@ -68,6 +78,10 @@ impl Default for NodeMetrics {
         Self {
             fan_in: 0,
             fan_out: 0,
+            call_fan_in: 0,
+            call_fan_out: 0,
+            data_fan_in: 0,
+            data_fan_out: 0,
             call_in: 0,
             call_out: 0,
             transitive_fan_in: 0,
@@ -89,6 +103,7 @@ impl Default for NodeMetrics {
             ifc: 0.0,
             dead_code_candidate: false,
             hotspot: 0.0,
+            refactor_priority: 0.0,
         }
     }
 }
@@ -104,6 +119,8 @@ pub struct GraphNode {
     pub line: u32,
     pub end_line: u32,
     pub loc: u32,
+    #[serde(default)]
+    pub sloc: u32,
     pub params: u32,
     pub cyclomatic: u32,
     pub exported: bool,

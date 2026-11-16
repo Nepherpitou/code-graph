@@ -76,6 +76,103 @@ fn select_with_budget(selected: &mut HashSet<usize>, node: usize, limit: usize) 
     }
 }
 
+#[derive(Default)]
+struct BfsTree {
+    distance: Vec<usize>,
+    parent: Vec<Option<(usize, i64)>>,
+}
+
+fn bfs_calls(index: &GraphIndex, root: usize, reverse: bool) -> BfsTree {
+    let n = index.keys.len();
+    let mut tree = BfsTree {
+        distance: vec![usize::MAX; n],
+        parent: vec![None; n],
+    };
+    let adjacency = if reverse {
+        &index.in_call
+    } else {
+        &index.out_call
+    };
+    tree.distance[root] = 0;
+    let mut queue = VecDeque::new();
+    queue.push_back(root);
+    while let Some(node) = queue.pop_front() {
+        let next_distance = tree.distance[node] + 1;
+        for edge_index in &adjacency[node] {
+            let edge = &index.edges[*edge_index];
+            let next = if reverse { edge.source } else { edge.target };
+            if tree.distance[next] != usize::MAX {
+                continue;
+            }
+            tree.distance[next] = next_distance;
+            tree.parent[next] = Some((node, edge.id));
+            queue.push_back(next);
+        }
+    }
+    tree
+}
+
+fn bfs_undirected(index: &GraphIndex, root: usize, max_depth: usize) -> Vec<usize> {
+    let mut distance = vec![usize::MAX; index.keys.len()];
+    distance[root] = 0;
+    let mut queue = VecDeque::new();
+    queue.push_back(root);
+    while let Some(node) = queue.pop_front() {
+        let next_distance = distance[node] + 1;
+        if next_distance > max_depth {
+            continue;
+        }
+        for edge_index in index.out_all[node].iter().chain(index.in_all[node].iter()) {
+            let edge = &index.edges[*edge_index];
+            let next = if edge.source == node {
+                edge.target
+            } else {
+                edge.source
+            };
+            if next == node || distance[next] != usize::MAX {
+                continue;
+            }
+            distance[next] = next_distance;
+            queue.push_back(next);
+        }
+    }
+    distance
+}
+
+fn path_toward_root(tree: &BfsTree, node: usize, root: usize) -> Vec<usize> {
+    let mut path = Vec::new();
+    let mut cursor = node;
+    loop {
+        path.push(cursor);
+        if cursor == root {
+            break;
+        }
+        let Some((next, _)) = tree.parent[cursor] else {
+            break;
+        };
+        cursor = next;
+    }
+    path
+}
+
+fn direct_neighbors(index: &GraphIndex, root: usize) -> Vec<usize> {
+    let mut direct = Vec::new();
+    for edge_index in index.out_all[root].iter().chain(index.in_all[root].iter()) {
+        let edge = &index.edges[*edge_index];
+        let next = if edge.source == root {
+            edge.target
+        } else {
+            edge.source
+        };
+        if next != root {
+            direct.push(next);
+        }
+    }
+    direct.sort_unstable();
+    direct.dedup();
+    direct
+}
+
 struct GraphIndex {
     keys: Vec<String>,
     key_to_idx: HashMap<String, usize>,
@@ -294,46 +391,13 @@ impl QueryService {
         select_with_budget(&mut selected, root_idx, limit);
 
         // 1. Direct neighbours, both incoming and outgoing, all edge kinds.
-        let mut direct = Vec::new();
-        for edge_index in index.out_all[root_idx]
-            .iter()
-            .chain(index.in_all[root_idx].iter())
-        {
-            let edge = &index.edges[*edge_index];
-            let next = if edge.source == root_idx {
-                edge.target
-            } else {
-                edge.source
-            };
-            if next != root_idx {
-                direct.push(next);
-            }
-        }
-        direct.sort_unstable();
-        direct.dedup();
-        for next in direct {
+        for next in direct_neighbors(&index, root_idx) {
             select_with_budget(&mut selected, next, limit);
         }
 
         // Reverse call BFS: distance from the selected node to each caller.
-        let mut distance = vec![usize::MAX; index.keys.len()];
-        let mut parent: Vec<Option<(usize, i64)>> = vec![None; index.keys.len()];
-        distance[root_idx] = 0;
-        let mut queue = VecDeque::new();
-        queue.push_back(root_idx);
-        while let Some(node) = queue.pop_front() {
-            let next_distance = distance[node] + 1;
-            for edge_index in &index.in_call[node] {
-                let edge = &index.edges[*edge_index];
-                let caller = edge.source;
-                if distance[caller] != usize::MAX {
-                    continue;
-                }
-                distance[caller] = next_distance;
-                parent[caller] = Some((node, edge.id));
-                queue.push_back(caller);
-            }
-        }
+        let reverse = bfs_calls(&index, root_idx, true);
+        let distance = &reverse.distance;
 
         let mut entries: Vec<(usize, usize, u32)> = distance
             .iter()
@@ -361,18 +425,7 @@ impl QueryService {
         if let Some((nearest_distance, entry_idx, _)) = entries.first().copied() {
             entry_distance = Some(nearest_distance);
             entry_node = Some(entry_idx);
-            let mut cursor = entry_idx;
-            let mut path = Vec::new();
-            loop {
-                path.push(cursor);
-                if cursor == root_idx {
-                    break;
-                }
-                let Some((next, _)) = parent[cursor] else {
-                    break;
-                };
-                cursor = next;
-            }
+            let path = path_toward_root(&reverse, entry_idx, root_idx);
             // Root-to-entry order keeps the budget concentrated near the
             // selected node when the path itself is larger than the limit.
             for node in path.iter().rev() {
@@ -382,24 +435,8 @@ impl QueryService {
         }
 
         // Forward call BFS: shortest callee paths from the selected node.
-        let mut out_distance = vec![usize::MAX; index.keys.len()];
-        let mut out_parent: Vec<Option<(usize, i64)>> = vec![None; index.keys.len()];
-        out_distance[root_idx] = 0;
-        let mut queue = VecDeque::new();
-        queue.push_back(root_idx);
-        while let Some(node) = queue.pop_front() {
-            let next_distance = out_distance[node] + 1;
-            for edge_index in &index.out_call[node] {
-                let edge = &index.edges[*edge_index];
-                let callee = edge.target;
-                if out_distance[callee] != usize::MAX {
-                    continue;
-                }
-                out_distance[callee] = next_distance;
-                out_parent[callee] = Some((node, edge.id));
-                queue.push_back(callee);
-            }
-        }
+        let forward = bfs_calls(&index, root_idx, false);
+        let out_distance = &forward.distance;
 
         let mut exits: Vec<(usize, usize, u32)> = out_distance
             .iter()
@@ -427,18 +464,7 @@ impl QueryService {
         if let Some((nearest_distance, exit_idx, _)) = exits.first().copied() {
             exit_distance = Some(nearest_distance);
             exit_node = Some(exit_idx);
-            let mut cursor = exit_idx;
-            let mut path = Vec::new();
-            loop {
-                path.push(cursor);
-                if cursor == root_idx {
-                    break;
-                }
-                let Some((previous, _)) = out_parent[cursor] else {
-                    break;
-                };
-                cursor = previous;
-            }
+            let path = path_toward_root(&forward, exit_idx, root_idx);
             // Root-to-exit order, same budget rule as the caller path.
             for node in path.iter().rev() {
                 select_with_budget(&mut selected, *node, limit);
@@ -447,29 +473,7 @@ impl QueryService {
         }
 
         // 4. Second-level neighbours in the undirected slice.
-        let mut undirected = vec![usize::MAX; index.keys.len()];
-        undirected[root_idx] = 0;
-        let mut queue = VecDeque::new();
-        queue.push_back(root_idx);
-        while let Some(node) = queue.pop_front() {
-            let next_distance = undirected[node] + 1;
-            if next_distance > 2 {
-                continue;
-            }
-            for edge_index in index.out_all[node].iter().chain(index.in_all[node].iter()) {
-                let edge = &index.edges[*edge_index];
-                let next = if edge.source == node {
-                    edge.target
-                } else {
-                    edge.source
-                };
-                if next == node || undirected[next] != usize::MAX {
-                    continue;
-                }
-                undirected[next] = next_distance;
-                queue.push_back(next);
-            }
-        }
+        let undirected = bfs_undirected(&index, root_idx, 2);
         let mut second: Vec<(usize, usize)> = undirected
             .iter()
             .enumerate()

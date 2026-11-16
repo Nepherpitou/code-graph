@@ -144,6 +144,7 @@ pub(super) enum AuditFormat {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(super) enum AuditOrder {
     Hotspot,
+    Priority,
     Complexity,
     BlastRadius,
     FanIn,
@@ -180,7 +181,7 @@ pub(super) struct AuditTopArgs {
     #[command(flatten)]
     pub(super) common: AuditCommon,
     /// Metric to sort by.
-    #[arg(long, value_enum, default_value_t = AuditOrder::Hotspot)]
+    #[arg(long, value_enum, default_value_t = AuditOrder::Priority)]
     pub(super) order_by: AuditOrder,
     /// Maximum number of rows.
     #[arg(long, default_value_t = 10)]

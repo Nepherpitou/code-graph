@@ -10,7 +10,11 @@ use crate::source::ast::{
 };
 use crate::source::SourceFile;
 
-use super::{Builder, NodeRecord, RawSymbol};
+use super::{
+    Builder, NodeRecord, RawSymbol, LSP_CLASS, LSP_CONSTANT, LSP_CONSTRUCTOR, LSP_ENUM,
+    LSP_FUNCTION, LSP_INTERFACE, LSP_METHOD, LSP_MODULE, LSP_NAMESPACE, LSP_OBJECT, LSP_PACKAGE,
+    LSP_STRUCT, LSP_VARIABLE,
+};
 use crate::graph::model::{GraphNode, NodeKind, NodeMetrics};
 
 fn parse_range(value: &Value) -> Option<LspRange> {
@@ -60,11 +64,11 @@ pub(crate) fn parse_symbols(value: &Value) -> Vec<RawSymbol> {
 
 fn node_kind_from_symbol(kind: u32) -> Option<NodeKind> {
     match kind {
-        12 => Some(NodeKind::Function),
-        6 => Some(NodeKind::Method),
-        9 => Some(NodeKind::Constructor),
-        14 => Some(NodeKind::Constant),
-        13 => Some(NodeKind::Variable),
+        LSP_FUNCTION => Some(NodeKind::Function),
+        LSP_METHOD => Some(NodeKind::Method),
+        LSP_CONSTRUCTOR => Some(NodeKind::Constructor),
+        LSP_CONSTANT => Some(NodeKind::Constant),
+        LSP_VARIABLE => Some(NodeKind::Variable),
         _ => None,
     }
 }
@@ -74,6 +78,33 @@ fn declaration_line(source: Option<&SourceFile>, line: u32) -> String {
         .and_then(|source| source.text.lines().nth(line as usize))
         .map(|text| text.trim().chars().take(200).collect())
         .unwrap_or_default()
+}
+
+/// Count non-empty, non-comment lines in a declaration range.
+///
+/// This is deliberately a naive, language-agnostic heuristic. It is only used
+/// for ranking; it is not part of the dead-code predicate.
+fn source_sloc(source: Option<&SourceFile>, start: u32, end: u32) -> u32 {
+    let Some(source) = source else {
+        return 0;
+    };
+    if end < start {
+        return 0;
+    }
+    source
+        .text
+        .lines()
+        .skip(start as usize)
+        .take((end - start + 1) as usize)
+        .filter(|line| {
+            let line = line.trim();
+            !line.is_empty()
+                && !line.starts_with("//")
+                && !line.starts_with("/*")
+                && !line.starts_with('*')
+                && !(line.starts_with('#') && !line.starts_with("#["))
+        })
+        .count() as u32
 }
 
 fn is_exported(
@@ -146,7 +177,10 @@ fn is_entry_like(name: &str, rel: &str) -> bool {
 }
 
 fn normalize_container_name(name: &str) -> String {
-    let mut cleaned = name.trim_start_matches("impl ").trim_start().to_string();
+    let mut cleaned = name.trim().to_string();
+    if let Some(rest) = cleaned.strip_prefix("impl") {
+        cleaned = rest.trim_start().to_string();
+    }
     if cleaned.starts_with('<') {
         if let Some(end) = cleaned.find('>') {
             cleaned = cleaned[end + 1..].trim().to_string();
@@ -155,7 +189,13 @@ fn normalize_container_name(name: &str) -> String {
     if let Some((_, rest)) = cleaned.split_once(" for ") {
         cleaned = rest.trim().to_string();
     }
-    cleaned.replace(['<', '>'], "").trim().to_string()
+    let cleaned = cleaned.replace(['<', '>'], "");
+    cleaned
+        .split('\'')
+        .next()
+        .unwrap_or(&cleaned)
+        .trim()
+        .to_string()
 }
 
 fn signature_hash(signature: &str) -> u64 {
@@ -291,6 +331,15 @@ impl Builder {
             None => format!("{rel}#{}:{qname}", resolved_kind.as_str()),
         };
         let id = ensure_unique(base, &mut self.used_ids);
+        let sloc = if synthetic {
+            0
+        } else {
+            source_sloc(
+                self.sources.get(rel),
+                symbol.range.start.line,
+                symbol.range.end.line,
+            )
+        };
         let node = GraphNode {
             id: id.clone(),
             name,
@@ -305,6 +354,7 @@ impl Builder {
                 .line
                 .saturating_sub(symbol.range.start.line)
                 + 1,
+            sloc,
             params,
             cyclomatic,
             exported,
@@ -346,7 +396,7 @@ impl Builder {
             local.clone()
         };
 
-        if symbol.kind == 5 {
+        if symbol.kind == LSP_CLASS {
             let class_key = format!(
                 "{rel}#{}:{}",
                 symbol.range.start.line, symbol.range.start.character
@@ -358,47 +408,50 @@ impl Builder {
             let declaration = declaration_line(self.sources.get(rel), symbol.range.start.line);
             let class_exported =
                 is_exported(self.adapter, &declaration, rel, &local, parent_exported);
-            let constructor_id =
-                if let Some(constructor) = symbol.children.iter().find(|child| child.kind == 9) {
-                    self.create_node(
-                        constructor,
-                        rel,
-                        format!("{qname}.constructor"),
-                        NodeKind::Constructor,
-                        class_exported,
-                        false,
-                        false,
-                        Some(qname.clone()),
-                    )
-                } else {
-                    let synthetic = RawSymbol {
-                        name: format!("{local}.constructor"),
-                        kind: 9,
-                        detail: "implicit constructor".to_string(),
-                        range: symbol.range,
-                        selection: symbol.selection,
-                        children: Vec::new(),
-                    };
-                    self.create_node(
-                        &synthetic,
-                        rel,
-                        format!("{qname}.constructor"),
-                        NodeKind::Constructor,
-                        class_exported,
-                        true,
-                        false,
-                        Some(qname.clone()),
-                    )
+            let constructor_id = if let Some(constructor) = symbol
+                .children
+                .iter()
+                .find(|child| child.kind == LSP_CONSTRUCTOR)
+            {
+                self.create_node(
+                    constructor,
+                    rel,
+                    format!("{qname}.constructor"),
+                    NodeKind::Constructor,
+                    class_exported,
+                    false,
+                    false,
+                    Some(qname.clone()),
+                )
+            } else {
+                let synthetic = RawSymbol {
+                    name: format!("{local}.constructor"),
+                    kind: LSP_CONSTRUCTOR,
+                    detail: "implicit constructor".to_string(),
+                    range: symbol.range,
+                    selection: symbol.selection,
+                    children: Vec::new(),
                 };
+                self.create_node(
+                    &synthetic,
+                    rel,
+                    format!("{qname}.constructor"),
+                    NodeKind::Constructor,
+                    class_exported,
+                    true,
+                    false,
+                    Some(qname.clone()),
+                )
+            };
             if let Some(id) = constructor_id {
                 self.class_map.insert(class_key, id.clone());
                 self.class_map.insert(class_key_alt, id);
             }
             for child in &symbol.children {
-                if child.kind == 9 {
+                if child.kind == LSP_CONSTRUCTOR {
                     continue;
                 }
-                if child.kind == 6 || child.kind == 12 {
+                if child.kind == LSP_METHOD || child.kind == LSP_FUNCTION {
                     self.add_symbol(child, rel, &qname, class_exported, Some(&qname));
                 }
             }
@@ -406,8 +459,8 @@ impl Builder {
         }
 
         match symbol.kind {
-            23 => return, // Rust struct: a type, not a graph primitive
-            19 => {
+            LSP_STRUCT => return, // Rust struct: a type, not a graph primitive
+            LSP_OBJECT => {
                 let container = normalize_container_name(&local);
                 let trait_impl = local.contains(" for ");
                 for child in &symbol.children {
@@ -421,7 +474,7 @@ impl Builder {
                 }
                 return;
             }
-            11 | 10 | 2 | 3 | 4 => {
+            LSP_INTERFACE | LSP_ENUM | LSP_MODULE | LSP_NAMESPACE | LSP_PACKAGE => {
                 for child in &symbol.children {
                     self.add_symbol(child, rel, &qname, parent_exported, Some(&qname));
                 }
@@ -454,6 +507,37 @@ impl Builder {
             false,
             false,
             container.map(str::to_string),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn source(text: &str) -> SourceFile {
+        SourceFile {
+            abs: PathBuf::new(),
+            rel: "test.rs".to_string(),
+            text: text.to_string(),
+            tree: None,
+        }
+    }
+
+    #[test]
+    fn sloc_skips_blank_and_comment_lines() {
+        let source = source("fn f() {\n    // comment\n\n    let x = 1;\n}\n");
+        assert_eq!(source_sloc(Some(&source), 0, 3), 2);
+        assert_eq!(source_sloc(None, 0, 4), 0);
+    }
+
+    #[test]
+    fn container_name_drops_rust_lifetimes() {
+        assert_eq!(normalize_container_name("GraphAnalysis'a"), "GraphAnalysis");
+        assert_eq!(
+            normalize_container_name("impl<'a> GraphAnalysis<'a>"),
+            "GraphAnalysis"
         );
     }
 }

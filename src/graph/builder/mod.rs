@@ -60,6 +60,22 @@ pub(super) struct Resolved {
     created_callable: bool,
 }
 
+// LSP SymbolKind values used by document symbols. These are protocol constants,
+// not language-specific guesses.
+pub(super) const LSP_MODULE: u32 = 2;
+pub(super) const LSP_NAMESPACE: u32 = 3;
+pub(super) const LSP_PACKAGE: u32 = 4;
+pub(super) const LSP_CLASS: u32 = 5;
+pub(super) const LSP_METHOD: u32 = 6;
+pub(super) const LSP_CONSTRUCTOR: u32 = 9;
+pub(super) const LSP_ENUM: u32 = 10;
+pub(super) const LSP_INTERFACE: u32 = 11;
+pub(super) const LSP_FUNCTION: u32 = 12;
+pub(super) const LSP_VARIABLE: u32 = 13;
+pub(super) const LSP_CONSTANT: u32 = 14;
+pub(super) const LSP_OBJECT: u32 = 19;
+pub(super) const LSP_STRUCT: u32 = 23;
+
 pub(crate) struct Builder {
     root: PathBuf,
     adapter: &'static Adapter,

@@ -141,7 +141,7 @@ code-graph audit metrics
 
 Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>`, `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`.
 
-`audit top --order-by` accepts: `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `ifc`, `betweenness`, `loc`, `params`. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
+`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `ifc`, `betweenness`, `loc`, `params`. `priority` is an absolute refactoring score: complexity times transitive impact times instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
 
 `--format json` returns the same facts in a compact envelope for agents:
 
@@ -150,6 +150,16 @@ Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|
 ```
 
 The audit deliberately has no `smells`, severity, or configurable thresholds yet. Cycles are SCCs; dead code is the existing candidate predicate; everything else is a raw metric ranking.
+
+`priority` is snapshot-independent and uses SLOC (non-empty, non-comment lines) rather than the declaration span:
+
+```text
+priority = (cyclomatic + ln(1 + sloc))
+         * (1 + log2(1 + transitiveFanIn))
+         * (1 + instability)
+```
+
+Old snapshots that predate these fields still load; their `priority` is `0` until the project is re-analyzed.
 
 ### HTTP API
 

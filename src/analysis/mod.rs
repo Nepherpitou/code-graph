@@ -79,6 +79,48 @@ async fn wait_until_ready(
     warnings
 }
 
+async fn collect_symbols(
+    client: &LspClient,
+    files: &[(String, String)],
+    reporter: &Reporter,
+) -> Vec<(String, Result<Vec<RawSymbol>, String>)> {
+    let query = |files: Vec<(String, String)>| async move {
+        stream::iter(files.into_iter().map(|(rel, uri)| async move {
+            let result = client
+                .document_symbols(&uri)
+                .await
+                .map(|value| parse_symbols(&value))
+                .map_err(|error| error.to_string());
+            (rel, result)
+        }))
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await
+    };
+
+    let mut results = query(files.to_vec()).await;
+    results.sort_by(|left, right| left.0.cmp(&right.0));
+    let empty = results
+        .iter()
+        .filter(|(_, result)| {
+            result
+                .as_ref()
+                .map(|symbols| symbols.is_empty())
+                .unwrap_or(false)
+        })
+        .count();
+    if empty == results.len() && results.len() > 1 {
+        reporter.emit(
+            "symbols",
+            "all symbol queries were empty; retrying after server warm-up",
+        );
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        results = query(files.to_vec()).await;
+        results.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    results
+}
+
 pub async fn analyze(options: AnalyzeOptions) -> Result<GraphReport> {
     analyze_with_progress(options, silent_callback()).await
 }
@@ -202,50 +244,7 @@ pub async fn analyze_with_progress(
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
     reporter.emit("symbols", "collecting document symbols");
-    let client_ref = &client;
-    let mut symbol_results: Vec<(String, Result<Vec<RawSymbol>, String>)> =
-        stream::iter(files.clone().into_iter().map(|(rel, uri)| async move {
-            let result = client_ref
-                .document_symbols(&uri)
-                .await
-                .map(|value| parse_symbols(&value))
-                .map_err(|error| error.to_string());
-            (rel, result)
-        }))
-        .buffer_unordered(8)
-        .collect()
-        .await;
-    symbol_results.sort_by(|left, right| left.0.cmp(&right.0));
-
-    let empty = symbol_results
-        .iter()
-        .filter(|(_, result)| {
-            result
-                .as_ref()
-                .map(|symbols| symbols.is_empty())
-                .unwrap_or(false)
-        })
-        .count();
-    if empty == symbol_results.len() && symbol_results.len() > 1 {
-        reporter.emit(
-            "symbols",
-            "all symbol queries were empty; retrying after server warm-up",
-        );
-        tokio::time::sleep(Duration::from_millis(800)).await;
-        symbol_results = stream::iter(files.clone().into_iter().map(|(rel, uri)| async move {
-            let result = client_ref
-                .document_symbols(&uri)
-                .await
-                .map(|value| parse_symbols(&value))
-                .map_err(|error| error.to_string());
-            (rel, result)
-        }))
-        .buffer_unordered(8)
-        .collect()
-        .await;
-        symbol_results.sort_by(|left, right| left.0.cmp(&right.0));
-    }
-
+    let symbol_results = collect_symbols(&client, &files, &reporter).await;
     let symbol_count: usize = symbol_results
         .iter()
         .map(|(_, result)| result.as_ref().map(Vec::len).unwrap_or(0))

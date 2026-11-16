@@ -258,6 +258,10 @@ fn node_row(node: &GraphNode, value: f64) -> Value {
         "value": metric_json(value),
         "fanIn": node.metrics.fan_in,
         "fanOut": node.metrics.fan_out,
+        "callFanIn": node.metrics.call_fan_in,
+        "callFanOut": node.metrics.call_fan_out,
+        "dataFanIn": node.metrics.data_fan_in,
+        "dataFanOut": node.metrics.data_fan_out,
         "transitiveFanIn": node.metrics.transitive_fan_in,
         "transitiveFanOut": node.metrics.transitive_fan_out,
         "callIn": node.metrics.call_in,
@@ -265,6 +269,7 @@ fn node_row(node: &GraphNode, value: f64) -> Value {
         "moduleRefs": node.metrics.module_refs,
         "cyclomatic": node.cyclomatic,
         "loc": node.loc,
+        "sloc": node.sloc,
         "params": node.params,
         "hotspot": metric_json(node.metrics.hotspot),
         "ifc": metric_json(node.metrics.ifc),
@@ -275,6 +280,7 @@ fn node_row(node: &GraphNode, value: f64) -> Value {
         "sccSize": node.metrics.scc_size,
         "inCycle": node.metrics.in_cycle,
         "deadCodeCandidate": node.metrics.dead_code_candidate,
+        "refactorPriority": metric_json(node.metrics.refactor_priority),
     })
 }
 
@@ -522,6 +528,7 @@ impl AuditOrder {
     fn label(self) -> &'static str {
         match self {
             AuditOrder::Hotspot => "hotspot",
+            AuditOrder::Priority => "priority",
             AuditOrder::Complexity => "cyclomatic",
             AuditOrder::BlastRadius => "transitive-in",
             AuditOrder::FanIn => "fan-in",
@@ -536,6 +543,7 @@ impl AuditOrder {
     fn value(self, node: &GraphNode) -> f64 {
         match self {
             AuditOrder::Hotspot => node.metrics.hotspot,
+            AuditOrder::Priority => node.metrics.refactor_priority,
             AuditOrder::Complexity => node.cyclomatic as f64,
             AuditOrder::BlastRadius => node.metrics.transitive_fan_in as f64,
             AuditOrder::FanIn => node.metrics.fan_in as f64,
@@ -901,6 +909,10 @@ async fn focus(args: AuditFocusArgs) -> Result<()> {
             }
             println!();
             println!("Metrics");
+            println!(
+                "  priority       {:>8}",
+                metric(node.metrics.refactor_priority)
+            );
             println!("  hotspot        {:>8}", metric(node.metrics.hotspot));
             println!("  fan-in         {:>8}", node.metrics.fan_in);
             println!("  fan-out        {:>8}", node.metrics.fan_out);
@@ -908,6 +920,7 @@ async fn focus(args: AuditFocusArgs) -> Result<()> {
             println!("  transitive-out {:>8}", node.metrics.transitive_fan_out);
             println!("  cyclomatic     {:>8}", node.cyclomatic);
             println!("  loc            {:>8}", node.loc);
+            println!("  sloc           {:>8}", node.sloc);
             println!("  params         {:>8}", node.params);
             println!("  ifc            {:>8}", metric(node.metrics.ifc));
             println!("  betweenness    {:>8}", metric(node.metrics.betweenness));
@@ -1118,8 +1131,12 @@ async fn search(args: AuditSearchArgs) -> Result<()> {
 fn metric_definitions() -> Vec<(&'static str, &'static str)> {
     vec![
         (
+            "priority",
+            "absolute refactoring priority: complexity * impact * instability",
+        ),
+        (
             "hotspot",
-            "composite triage score: transitive fan-in, fan-in, fan-out, cyclomatic, LOC",
+            "relative centrality triage score; not an absolute complexity measure",
         ),
         (
             "complexity",
@@ -1131,7 +1148,11 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "fan-in / fan-out",
-            "distinct project callers / callees; call sites count multiplicity separately",
+            "distinct call + data neighbours; call sites count multiplicity separately",
+        ),
+        (
+            "sloc",
+            "non-empty, non-comment lines in the declaration range",
         ),
         (
             "ifc",
