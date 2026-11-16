@@ -13,11 +13,261 @@ import { GraphModeBar } from './features/graph/GraphModeBar';
 import { DetailsPanel } from './features/graph/DetailsPanel';
 import { ImpactDetails } from './features/graph/ImpactDetails';
 import { PathDetails } from './features/graph/PathDetails';
-import { useGraphView, type GraphMode } from './features/graph/useGraphView';
-import { useSnapshot } from './features/snapshot/useSnapshot';
+import { useGraphView, type GraphMode, type GraphView } from './features/graph/useGraphView';
+import { useSnapshot, type SnapshotSlice } from './features/snapshot/useSnapshot';
 import { shortRoot } from './shared/format';
 
 type Screen = 'directories' | 'files' | 'graph';
+
+interface AppHeaderProps {
+  state: SnapshotSlice;
+  screen: Screen;
+  backLabel: string;
+  scopeLabel: string | null;
+  onSearch: () => void;
+  onOpenEntryPoints: () => void;
+  onBack: () => void;
+  onReadFile: (file: File) => void;
+  onExport: () => void;
+}
+
+function AppHeader({
+  state,
+  screen,
+  backLabel,
+  scopeLabel,
+  onSearch,
+  onOpenEntryPoints,
+  onBack,
+  onReadFile,
+  onExport,
+}: AppHeaderProps) {
+  const meta = state.snapshot?.meta ?? state.report?.meta;
+  const stats = state.snapshot?.stats ?? state.report?.stats;
+  const refreshing = state.analysisStatus?.state === 'running';
+  const canRefresh = Boolean(state.apiContext && state.analysisStatus?.canAnalyze);
+
+  return (
+    <header>
+      <div className="brand">
+        <span className="logo">◉</span>
+        <span>code-graph</span>
+        <span className="tag">LSP call graph</span>
+      </div>
+      <div className="meta" title={meta ? `${meta.server} · generated ${meta.generatedAt}` : undefined}>
+        {meta && stats ? (
+          <>
+            <span className="root">{shortRoot(meta.root, 56)}</span>
+            <span className="dot">·</span>
+            <span className="lang">{meta.language}</span>
+            <span className="dot">·</span>
+            <span className="badge">{stats.nodes} nodes</span>
+            <span className="badge">{stats.functions} callables</span>
+            <span className="badge">{stats.constants} constants</span>
+            <span className="badge">{stats.edges} call edges</span>
+            <span className="badge">{stats.dataEdges} data edges</span>
+            <span className="badge">{meta.files} files</span>
+            <span className="badge">{meta.durationMs} ms</span>
+            {state.apiContext ? <span className="badge accent">API #{state.apiContext.graphId}</span> : null}
+            {scopeLabel ? <span className="badge">{scopeLabel}</span> : null}
+            {meta.truncated ? <span className="badge danger">truncated</span> : null}
+          </>
+        ) : (
+          <span className="muted">
+            {state.loading && state.analysisStatus?.state === 'running'
+              ? `${state.analysisStatus.phase}: ${state.analysisStatus.message}`
+              : state.loading
+                ? 'Loading graph…'
+                : state.error ?? 'No graph loaded'}
+          </span>
+        )}
+      </div>
+      <div className="actions">
+        <button
+          className="button search-trigger"
+          onClick={onSearch}
+          disabled={state.allNodes.length === 0}
+          title="Search all nodes (/)"
+        >
+          <svg className="search-trigger-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-4.2-4.2" />
+          </svg>
+          Search
+          <kbd>/</kbd>
+        </button>
+        {canRefresh ? (
+          <button
+            className="button"
+            onClick={() => void state.refreshAnalysis()}
+            disabled={refreshing}
+            title="Re-read the project from disk and store a new snapshot"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        ) : null}
+        {state.apiContext ? (
+          <button className="button" onClick={onOpenEntryPoints}>Top entries</button>
+        ) : null}
+        {screen !== 'directories' && state.overview ? (
+          <button className="button" onClick={onBack}>{backLabel}</button>
+        ) : null}
+        <label className="button">
+          Open JSON
+          <input
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onReadFile(file);
+            }}
+          />
+        </label>
+        <button
+          className="button"
+          onClick={onExport}
+          disabled={screen !== 'graph'}
+        >
+          PNG
+        </button>
+      </div>
+    </header>
+  );
+}
+
+interface GraphMainProps {
+  state: SnapshotSlice;
+  graph: GraphView;
+  screen: Screen;
+  directory: OverviewNode | null;
+  mode: GraphMode;
+  onOpenDirectory: (next: OverviewNode) => void;
+  onOpenFile: (file: OverviewNode) => void;
+  onChangeMode: (mode: GraphMode) => void;
+  onContextMenu: (node: GraphNode, x: number, y: number) => void;
+}
+
+function GraphMain({
+  state,
+  graph,
+  screen,
+  directory,
+  mode,
+  onOpenDirectory,
+  onOpenFile,
+  onChangeMode,
+  onContextMenu,
+}: GraphMainProps) {
+  const stats = state.snapshot?.stats ?? state.report?.stats;
+  return (
+    <main className="canvas">
+      {screen === 'directories' && state.overview ? (
+        <DirectoryScreen
+          overview={state.overview}
+          totalNodes={stats?.nodes ?? state.allNodes.length}
+          onOpen={(next) => onOpenDirectory(next)}
+        />
+      ) : screen === 'files' && state.fileOverview && directory ? (
+        <FileScreen overview={state.fileOverview} directory={directory.path} onOpen={onOpenFile} />
+      ) : screen === 'graph' && state.report ? (
+        <div className="canvas-shell">
+          <GraphModeBar
+            mode={mode}
+            onMode={onChangeMode}
+            nodes={state.allNodes}
+            selectedNode={graph.selectedNode}
+            path={graph.path}
+            pathIndex={graph.pathIndex}
+            onPathIndex={graph.setPathIndex}
+            onFindPath={graph.findPath}
+            apiReady={Boolean(state.apiContext)}
+          />
+          <GraphCanvas
+            view={graph}
+            onContextMenu={onContextMenu}
+          />
+        </div>
+      ) : state.analysisStatus?.state === 'running' ? (
+        <div className="empty">
+          <h2>Analyzing…</h2>
+          <p>{state.analysisStatus.message}</p>
+          <div className="analysis-progress"><i /></div>
+          <p className="muted">phase: {state.analysisStatus.phase}</p>
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>{state.error ? 'Graph unavailable' : 'Loading graph…'}</h2>
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          <p>Build a graph from a codebase, then drop the JSON here:</p>
+          <pre>cargo run -- analyze /path/to/repo -o web/public/graph.json</pre>
+          <p>Or run <code>code-graph up</code> and keep this tab open.</p>
+        </div>
+      )}
+    </main>
+  );
+}
+
+interface GraphInspectorProps {
+  state: SnapshotSlice;
+  graph: GraphView;
+  screen: Screen;
+  mode: GraphMode;
+  onSelectNode: (id: string) => void;
+  onSelectImpactNode: (id: string) => void;
+}
+
+function GraphInspector({
+  state,
+  graph,
+  screen,
+  mode,
+  onSelectNode,
+  onSelectImpactNode,
+}: GraphInspectorProps) {
+  return (
+    <aside className="sidebar right">
+      {screen === 'graph' && state.report ? (
+        mode === 'impact' ? (
+          <ImpactDetails
+            report={state.report}
+            node={graph.selectedNode}
+            onSelect={onSelectImpactNode}
+            onClearSelection={graph.clearSelection}
+          />
+        ) : mode === 'path' ? (
+          <PathDetails
+            report={state.report}
+            path={graph.path}
+            pathIndex={graph.pathIndex}
+            node={graph.selectedNode}
+            onPathIndex={graph.setPathIndex}
+            onClearPath={graph.clearPath}
+          />
+        ) : (
+          <DetailsPanel
+            report={state.report}
+            node={graph.selectedNode}
+            onSelect={onSelectNode}
+            onFocus={graph.focusNode}
+            onClearFocus={graph.clearFocus}
+            onClearSelection={graph.clearSelection}
+            focused={graph.focusIds !== null}
+          />
+        )
+      ) : (
+        <section className="panel">
+          <h3>{screen === 'files' ? 'Files' : 'Directories'}</h3>
+          <p className="muted">
+            {screen === 'files'
+              ? 'Pick a file to open its function graph.'
+              : 'Pick a directory to browse its files.'}
+          </p>
+        </section>
+      )}
+    </aside>
+  );
+}
 
 export function App() {
   const state = useSnapshot();
@@ -188,10 +438,7 @@ export function App() {
   }, [screen, directory, state.fileOverview, state.setReport, graph.resetGraphView]);
 
   const backLabel = screen === 'graph' && directory && state.fileOverview ? 'Files' : 'Directories';
-  const meta = state.snapshot?.meta ?? state.report?.meta;
   const stats = state.snapshot?.stats ?? state.report?.stats;
-  const refreshing = state.analysisStatus?.state === 'running';
-  const canRefresh = Boolean(state.apiContext && state.analysisStatus?.canAnalyze);
   const menuActions: ContextAction[] = contextMenu ? [
     { label: 'Focus connected slice', onSelect: () => graph.focusNode(contextMenu.node.id) },
     { label: 'Focus without history', onSelect: () => graph.focusWithoutHistory(contextMenu.node.id) },
@@ -210,95 +457,22 @@ export function App() {
 
   return (
     <div className="app density-airy">
-      <header>
-        <div className="brand">
-          <span className="logo">◉</span>
-          <span>code-graph</span>
-          <span className="tag">LSP call graph</span>
-        </div>
-        <div className="meta" title={meta ? `${meta.server} · generated ${meta.generatedAt}` : undefined}>
-          {meta && stats ? (
-            <>
-              <span className="root">{shortRoot(meta.root, 56)}</span>
-              <span className="dot">·</span>
-              <span className="lang">{meta.language}</span>
-              <span className="dot">·</span>
-              <span className="badge">{stats.nodes} nodes</span>
-              <span className="badge">{stats.functions} callables</span>
-              <span className="badge">{stats.constants} constants</span>
-              <span className="badge">{stats.edges} call edges</span>
-              <span className="badge">{stats.dataEdges} data edges</span>
-              <span className="badge">{meta.files} files</span>
-              <span className="badge">{meta.durationMs} ms</span>
-              {state.apiContext ? <span className="badge accent">API #{state.apiContext.graphId}</span> : null}
-              {scopeLabel ? <span className="badge">{scopeLabel}</span> : null}
-              {meta.truncated ? <span className="badge danger">truncated</span> : null}
-            </>
-          ) : (
-            <span className="muted">
-              {state.loading && state.analysisStatus?.state === 'running'
-                ? `${state.analysisStatus.phase}: ${state.analysisStatus.message}`
-                : state.loading
-                  ? 'Loading graph…'
-                  : state.error ?? 'No graph loaded'}
-            </span>
-          )}
-        </div>
-        <div className="actions">
-          <button
-            className="button search-trigger"
-            onClick={() => setSearchOpen(true)}
-            disabled={state.allNodes.length === 0}
-            title="Search all nodes (/)"
-          >
-            <svg className="search-trigger-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-4.2-4.2" />
-            </svg>
-            Search
-            <kbd>/</kbd>
-          </button>
-          {canRefresh ? (
-            <button
-              className="button"
-              onClick={() => void state.refreshAnalysis()}
-              disabled={refreshing}
-              title="Re-read the project from disk and store a new snapshot"
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
-          ) : null}
-          {state.apiContext ? (
-            <button className="button" onClick={() => void openEntryPoints()}>Top entries</button>
-          ) : null}
-          {screen !== 'directories' && state.overview ? (
-            <button className="button" onClick={back}>{backLabel}</button>
-          ) : null}
-          <label className="button">
-            Open JSON
-            <input
-              type="file"
-              accept="application/json,.json"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (!file) return;
-                state.readFile(file);
-                setScreen('graph');
-                setDirectory(null);
-                setScopeLabel(null);
-              }}
-            />
-          </label>
-          <button
-            className="button"
-            onClick={() => void graph.exportPng()}
-            disabled={screen !== 'graph'}
-          >
-            PNG
-          </button>
-        </div>
-      </header>
+      <AppHeader
+        state={state}
+        screen={screen}
+        backLabel={backLabel}
+        scopeLabel={scopeLabel}
+        onSearch={() => setSearchOpen(true)}
+        onOpenEntryPoints={() => void openEntryPoints()}
+        onBack={back}
+        onReadFile={(file) => {
+          state.readFile(file);
+          setScreen('graph');
+          setDirectory(null);
+          setScopeLabel(null);
+        }}
+        onExport={() => void graph.exportPng()}
+      />
 
       <aside className="sidebar left">
         {state.allNodes.length > 0 ? (
@@ -311,91 +485,26 @@ export function App() {
         {screen === 'graph' ? <GraphSidebar view={graph} /> : null}
       </aside>
 
-      <main className="canvas">
-        {screen === 'directories' && state.overview ? (
-          <DirectoryScreen
-            overview={state.overview}
-            totalNodes={stats?.nodes ?? state.allNodes.length}
-            onOpen={(next) => void openDirectory(next)}
-          />
-        ) : screen === 'files' && state.fileOverview && directory ? (
-          <FileScreen overview={state.fileOverview} directory={directory.path} onOpen={openFile} />
-        ) : screen === 'graph' && state.report ? (
-          <div className="canvas-shell">
-            <GraphModeBar
-              mode={mode}
-              onMode={changeMode}
-              nodes={state.allNodes}
-              selectedNode={graph.selectedNode}
-              path={graph.path}
-              pathIndex={graph.pathIndex}
-              onPathIndex={graph.setPathIndex}
-              onFindPath={graph.findPath}
-              apiReady={Boolean(state.apiContext)}
-            />
-            <GraphCanvas
-              view={graph}
-              onContextMenu={(node, x, y) => setContextMenu({ node, x, y })}
-            />
-          </div>
-        ) : state.analysisStatus?.state === 'running' ? (
-          <div className="empty">
-            <h2>Analyzing…</h2>
-            <p>{state.analysisStatus.message}</p>
-            <div className="analysis-progress"><i /></div>
-            <p className="muted">phase: {state.analysisStatus.phase}</p>
-          </div>
-        ) : (
-          <div className="empty">
-            <h2>{state.error ? 'Graph unavailable' : 'Loading graph…'}</h2>
-            {state.error ? <p className="error-text">{state.error}</p> : null}
-            <p>Build a graph from a codebase, then drop the JSON here:</p>
-            <pre>cargo run -- analyze /path/to/repo -o web/public/graph.json</pre>
-            <p>Or run <code>code-graph up</code> and keep this tab open.</p>
-          </div>
-        )}
-      </main>
+      <GraphMain
+        state={state}
+        graph={graph}
+        screen={screen}
+        directory={directory}
+        mode={mode}
+        onOpenDirectory={(next) => void openDirectory(next)}
+        onOpenFile={openFile}
+        onChangeMode={changeMode}
+        onContextMenu={(node, x, y) => setContextMenu({ node, x, y })}
+      />
 
-      <aside className="sidebar right">
-        {screen === 'graph' && state.report ? (
-          mode === 'impact' ? (
-            <ImpactDetails
-              report={state.report}
-              node={graph.selectedNode}
-              onSelect={selectImpactNode}
-              onClearSelection={graph.clearSelection}
-            />
-          ) : mode === 'path' ? (
-            <PathDetails
-              report={state.report}
-              path={graph.path}
-              pathIndex={graph.pathIndex}
-              node={graph.selectedNode}
-              onPathIndex={graph.setPathIndex}
-              onClearPath={graph.clearPath}
-            />
-          ) : (
-            <DetailsPanel
-              report={state.report}
-              node={graph.selectedNode}
-              onSelect={selectNode}
-              onFocus={graph.focusNode}
-              onClearFocus={graph.clearFocus}
-              onClearSelection={graph.clearSelection}
-              focused={graph.focusIds !== null}
-            />
-          )
-        ) : (
-          <section className="panel">
-            <h3>{screen === 'files' ? 'Files' : 'Directories'}</h3>
-            <p className="muted">
-              {screen === 'files'
-                ? 'Pick a file to open its function graph.'
-                : 'Pick a directory to browse its files.'}
-            </p>
-          </section>
-        )}
-      </aside>
+      <GraphInspector
+        state={state}
+        graph={graph}
+        screen={screen}
+        mode={mode}
+        onSelectNode={selectNode}
+        onSelectImpactNode={selectImpactNode}
+      />
 
       {contextMenu ? (
         <NodeContextMenu

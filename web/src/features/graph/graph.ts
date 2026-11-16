@@ -77,20 +77,27 @@ export function defaultFilters(): Filters {
   };
 }
 
-export function isVisible(node: GraphNode, filters: Filters, focusIds: Set<string> | null): boolean {
-  if (node.external && filters.hideExternal) return false;
-  if (!filters.kinds.has(node.kind)) return false;
+function matchesMetricFilters(node: GraphNode, filters: Filters): boolean {
   if (node.metrics.fanIn < filters.minFanIn) return false;
   if (node.metrics.fanOut < filters.minFanOut) return false;
   if (filters.hideDead && node.metrics.deadCodeCandidate) return false;
   if (filters.cyclesOnly && !node.metrics.inCycle) return false;
   if (filters.hideIsolated && node.metrics.fanIn + node.metrics.fanOut === 0) return false;
-  if (focusIds && !focusIds.has(node.id)) return false;
-  if (filters.search) {
-    const haystack = `${node.qname} ${node.file} ${node.kind}`.toLowerCase();
-    if (!haystack.includes(filters.search.toLowerCase())) return false;
-  }
   return true;
+}
+
+function matchesSearch(node: GraphNode, search: string): boolean {
+  if (!search) return true;
+  const haystack = `${node.qname} ${node.file} ${node.kind}`.toLowerCase();
+  return haystack.includes(search.toLowerCase());
+}
+
+export function isVisible(node: GraphNode, filters: Filters, focusIds: Set<string> | null): boolean {
+  if (node.external && filters.hideExternal) return false;
+  if (!filters.kinds.has(node.kind)) return false;
+  if (!matchesMetricFilters(node, filters)) return false;
+  if (focusIds && !focusIds.has(node.id)) return false;
+  return matchesSearch(node, filters.search);
 }
 
 function byId(left: { id: string }, right: { id: string }): number {

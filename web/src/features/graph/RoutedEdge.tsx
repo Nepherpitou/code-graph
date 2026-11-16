@@ -36,13 +36,16 @@ function hitsObstacle(x: number, y: number, obstacles: EdgeObstacle[]): boolean 
   );
 }
 
-function simplify(points: Point[]): Point[] {
+function compactPoints(points: Point[]): Point[] {
   const compact: Point[] = [];
   for (const point of points) {
     const previous = compact[compact.length - 1];
     if (!previous || previous.x !== point.x || previous.y !== point.y) compact.push(point);
   }
-  if (compact.length < 3) return compact;
+  return compact;
+}
+
+function removeCollinear(compact: Point[]): Point[] {
   const result: Point[] = [compact[0]];
   for (let index = 1; index < compact.length - 1; index += 1) {
     const previous = result[result.length - 1];
@@ -54,6 +57,11 @@ function simplify(points: Point[]): Point[] {
   }
   result.push(compact[compact.length - 1]);
   return result;
+}
+
+function simplify(points: Point[]): Point[] {
+  const compact = compactPoints(points);
+  return compact.length < 3 ? compact : removeCollinear(compact);
 }
 
 function clearApproach(
@@ -81,11 +89,7 @@ function segmentBlocked(start: Point, end: Point, obstacles: EdgeObstacle[]): bo
   return false;
 }
 
-function visibilityRoute(
-  source: Point,
-  target: Point,
-  obstacles: EdgeObstacle[],
-): Point[] | null {
+function visibilityPoints(source: Point, target: Point, obstacles: EdgeObstacle[]): Point[] {
   const points: Point[] = [source, target];
   for (const box of obstacles) {
     points.push(
@@ -95,34 +99,43 @@ function visibilityRoute(
       { x: box.x + box.width + MARGIN, y: box.y + box.height + MARGIN },
     );
   }
-  const count = points.length;
-  const distance = new Array<number>(count).fill(Infinity);
-  const previous = new Array<number>(count).fill(-1);
-  const visited = new Uint8Array(count);
-  distance[0] = 0;
-  for (let round = 0; round < count; round += 1) {
-    let current = -1;
-    let best = Infinity;
-    for (let index = 0; index < count; index += 1) {
-      if (!visited[index] && distance[index] < best) {
-        best = distance[index];
-        current = index;
-      }
-    }
-    if (current === -1 || current === 1) break;
-    visited[current] = 1;
-    for (let next = 0; next < count; next += 1) {
-      if (visited[next] || next === current) continue;
-      if (segmentBlocked(points[current], points[next], obstacles)) continue;
-      const dx = points[current].x - points[next].x;
-      const dy = points[current].y - points[next].y;
-      const candidate = distance[current] + Math.hypot(dx, dy);
-      if (candidate >= distance[next]) continue;
-      distance[next] = candidate;
-      previous[next] = current;
+  return points;
+}
+
+function nearestVisibleTarget(distance: number[], visited: Uint8Array): number {
+  let current = -1;
+  let best = Infinity;
+  for (let index = 0; index < distance.length; index += 1) {
+    if (!visited[index] && distance[index] < best) {
+      best = distance[index];
+      current = index;
     }
   }
-  if (!Number.isFinite(distance[1])) return null;
+  return current;
+}
+
+function relaxVisibilityEdges(
+  current: number,
+  points: Point[],
+  obstacles: EdgeObstacle[],
+  distance: number[],
+  previous: number[],
+  visited: Uint8Array,
+): void {
+  visited[current] = 1;
+  for (let next = 0; next < points.length; next += 1) {
+    if (visited[next] || next === current) continue;
+    if (segmentBlocked(points[current], points[next], obstacles)) continue;
+    const dx = points[current].x - points[next].x;
+    const dy = points[current].y - points[next].y;
+    const candidate = distance[current] + Math.hypot(dx, dy);
+    if (candidate >= distance[next]) continue;
+    distance[next] = candidate;
+    previous[next] = current;
+  }
+}
+
+function traceVisibilityPath(points: Point[], previous: number[]): Point[] {
   const result: Point[] = [];
   let cursor = 1;
   while (cursor !== -1) {
@@ -133,18 +146,46 @@ function visibilityRoute(
   return simplify(result.reverse());
 }
 
-function routeAround(
+function findVisibilityPath(points: Point[], obstacles: EdgeObstacle[]): Point[] | null {
+  const count = points.length;
+  const distance = new Array<number>(count).fill(Infinity);
+  const previous = new Array<number>(count).fill(-1);
+  const visited = new Uint8Array(count);
+  distance[0] = 0;
+  for (let round = 0; round < count; round += 1) {
+    const current = nearestVisibleTarget(distance, visited);
+    if (current < 0 || current === 1) break;
+    relaxVisibilityEdges(current, points, obstacles, distance, previous, visited);
+  }
+  if (!Number.isFinite(distance[1])) return null;
+  return traceVisibilityPath(points, previous);
+}
+
+function visibilityRoute(
   source: Point,
   target: Point,
   obstacles: EdgeObstacle[],
 ): Point[] | null {
+  return findVisibilityPath(visibilityPoints(source, target, obstacles), obstacles);
+}
+
+interface RouteGrid {
+  columns: number;
+  rows: number;
+  start: number;
+  end: number;
+  blocked: Uint8Array;
+  point: (column: number, row: number) => Point;
+  index: (column: number, row: number) => number;
+}
+
+function buildRouteGrid(source: Point, target: Point, obstacles: EdgeObstacle[]): RouteGrid {
   const minX = Math.min(source.x, target.x, ...obstacles.map((box) => box.x)) - PAD;
   const minY = Math.min(source.y, target.y, ...obstacles.map((box) => box.y)) - PAD;
   const maxX = Math.max(source.x, target.x, ...obstacles.map((box) => box.x + box.width)) + PAD;
   const maxY = Math.max(source.y, target.y, ...obstacles.map((box) => box.y + box.height)) + PAD;
   const columns = Math.max(2, Math.ceil((maxX - minX) / CELL));
   const rows = Math.max(2, Math.ceil((maxY - minY) / CELL));
-  const total = columns * rows;
   const index = (column: number, row: number): number => row * columns + column;
   const point = (column: number, row: number): Point => ({
     x: minX + (column + 0.5) * CELL,
@@ -154,7 +195,7 @@ function routeAround(
   const startRow = Math.min(rows - 1, Math.max(0, Math.floor((source.y - minY) / CELL)));
   const endColumn = Math.min(columns - 1, Math.max(0, Math.floor((target.x - minX) / CELL)));
   const endRow = Math.min(rows - 1, Math.max(0, Math.floor((target.y - minY) / CELL)));
-  const blocked = new Uint8Array(total);
+  const blocked = new Uint8Array(columns * rows);
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const center = point(column, row);
@@ -167,43 +208,52 @@ function routeAround(
   // handle itself belongs to the excluded source/target node, so open it.
   blocked[start] = 0;
   blocked[end] = 0;
+  return { columns, rows, start, end, blocked, point, index };
+}
 
+function findGridParents(grid: RouteGrid): Int32Array | null {
+  const total = grid.columns * grid.rows;
   const parent = new Int32Array(total).fill(-1);
   const visited = new Uint8Array(total);
   const queue = new Int32Array(total);
   let head = 0;
   let tail = 0;
-  queue[tail] = start;
+  queue[tail] = grid.start;
   tail += 1;
-  visited[start] = 1;
+  visited[grid.start] = 1;
   const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   while (head < tail) {
     const current = queue[head];
     head += 1;
-    if (current === end) break;
-    const column = current % columns;
-    const row = Math.floor(current / columns);
+    if (current === grid.end) break;
+    const column = current % grid.columns;
+    const row = Math.floor(current / grid.columns);
     for (const [dx, dy] of directions) {
       const nextColumn = column + dx;
       const nextRow = row + dy;
-      if (nextColumn < 0 || nextColumn >= columns || nextRow < 0 || nextRow >= rows) continue;
-      const next = index(nextColumn, nextRow);
-      if (visited[next] || blocked[next]) continue;
+      if (nextColumn < 0 || nextColumn >= grid.columns || nextRow < 0 || nextRow >= grid.rows) continue;
+      const next = grid.index(nextColumn, nextRow);
+      if (visited[next] || grid.blocked[next]) continue;
       visited[next] = 1;
       parent[next] = current;
       queue[tail] = next;
       tail += 1;
     }
   }
-  if (!visited[end]) return null;
+  return visited[grid.end] ? parent : null;
+}
 
+function traceGridCells(
+  grid: RouteGrid,
+  parent: Int32Array,
+  source: Point,
+  target: Point,
+): Point[] {
   const cells: Point[] = [];
-  let cursor = end;
+  let cursor = grid.end;
   while (cursor !== -1) {
-    const column = cursor % columns;
-    const row = Math.floor(cursor / columns);
-    cells.push(point(column, row));
-    if (cursor === start) break;
+    cells.push(grid.point(cursor % grid.columns, Math.floor(cursor / grid.columns)));
+    if (cursor === grid.start) break;
     cursor = parent[cursor];
   }
   cells.reverse();
@@ -214,7 +264,18 @@ function routeAround(
     cells[0] = source;
     cells[cells.length - 1] = target;
   }
-  return simplify([source, ...cells, target]);
+  return cells;
+}
+
+function routeAround(
+  source: Point,
+  target: Point,
+  obstacles: EdgeObstacle[],
+): Point[] | null {
+  const grid = buildRouteGrid(source, target, obstacles);
+  const parent = findGridParents(grid);
+  if (!parent) return null;
+  return simplify([source, ...traceGridCells(grid, parent, source, target), target]);
 }
 
 function pathFromPoints(points: Point[]): string {

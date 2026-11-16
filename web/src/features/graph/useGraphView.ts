@@ -12,6 +12,7 @@ import {
   getViewportForBounds,
   useReactFlow,
   type NodeMouseHandler,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import { toPng } from 'html-to-image';
 
@@ -46,7 +47,14 @@ import { cancelLayout, computeLayout, type LayoutKind } from './layout';
  * all nodes would land in an empty gap between separated components; choose
  * the densest bucket instead.
  */
-function denseCenter(nodes: FlowNode[]): { x: number; y: number } | null {
+interface PositionedNode {
+  id: string;
+  position: { x: number; y: number };
+  width?: number | string | null;
+  height?: number | string | null;
+}
+
+function denseCenter(nodes: PositionedNode[]): { x: number; y: number } | null {
   if (nodes.length === 0) return null;
   const cell = 900;
   const buckets = new Map<string, { x: number; y: number; count: number }>();
@@ -162,18 +170,23 @@ function focusLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string): C
   return { positions, rowHeight };
 }
 
-function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[]): CompactLayout {
-  if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
+interface Neighbor {
+  id: string;
+  delta: number;
+}
+
+function layoutSpacing(nodes: GraphNode[]): { columnWidth: number; rowHeight: number } {
   const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
   const maxWidth = Math.max(180, ...nodes.map((node) => sizes.get(node.id)!.width));
   const maxHeight = Math.max(72, ...nodes.map((node) => sizes.get(node.id)!.height));
-  const columnWidth = maxWidth + 140;
-  const rowHeight = maxHeight + 56;
+  return { columnWidth: maxWidth + 140, rowHeight: maxHeight + 56 };
+}
 
-  // Columns are relative to the focused node, not global depth: sibling
-  // callees must share a column even when their global depths differ.
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const neighbors = new Map<string, { id: string; delta: number }[]>();
+function buildNeighbors(
+  nodeById: Map<string, GraphNode>,
+  edges: GraphEdge[],
+): Map<string, Neighbor[]> {
+  const neighbors = new Map<string, Neighbor[]>();
   for (const edge of edges) {
     if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) continue;
     const source = neighbors.get(edge.source) ?? [];
@@ -183,50 +196,73 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[
     target.push({ id: edge.source, delta: -1 });
     neighbors.set(edge.target, target);
   }
-  const roots = [...new Set(rootIds)].filter((id) => nodeById.has(id));
-  if (roots.length > 1) {
-    // Entry overview: roots are peers. Put every root in a top band, then the
-    // first-level calls collected from all roots, then the second-level calls
-    // if the node budget had room. Grid bands keep fifty roots visible without
-    // turning the overview into a single endless column.
-    const rootSet = new Set(roots);
-    const firstLevel = new Set<string>();
-    for (const edge of edges) {
-      if (rootSet.has(edge.source) && !rootSet.has(edge.target)) {
-        firstLevel.add(edge.target);
-      }
-    }
-    const secondLevel = new Set<string>();
-    for (const edge of edges) {
-      if (firstLevel.has(edge.source) && !rootSet.has(edge.target) && !firstLevel.has(edge.target)) {
-        secondLevel.add(edge.target);
-      }
-    }
-    const firstIds = new Set(firstLevel);
-    const secondIds = new Set(secondLevel);
-    const bands = [
-      roots,
-      nodes.filter((node) => firstIds.has(node.id)).map((node) => node.id),
-      nodes.filter((node) => secondIds.has(node.id)).map((node) => node.id),
-      nodes
-        .filter((node) => !rootSet.has(node.id) && !firstIds.has(node.id) && !secondIds.has(node.id))
-        .map((node) => node.id),
-    ];
-    const positions: Record<string, { x: number; y: number }> = {};
-    const columns = 10;
-    let rowOffset = 0;
-    for (const band of bands) {
-      band.forEach((id, index) => {
-        positions[id] = {
-          x: (index % columns) * columnWidth,
-          y: (rowOffset + Math.floor(index / columns)) * rowHeight,
-        };
-      });
-      if (band.length > 0) rowOffset += Math.ceil(band.length / columns) + 1;
-    }
-    return { positions, rowHeight };
-  }
+  return neighbors;
+}
 
+function collectRootLevels(
+  edges: GraphEdge[],
+  rootSet: Set<string>,
+): { first: Set<string>; second: Set<string> } {
+  const first = new Set<string>();
+  for (const edge of edges) {
+    if (rootSet.has(edge.source) && !rootSet.has(edge.target)) first.add(edge.target);
+  }
+  const second = new Set<string>();
+  for (const edge of edges) {
+    if (first.has(edge.source) && !rootSet.has(edge.target) && !first.has(edge.target)) {
+      second.add(edge.target);
+    }
+  }
+  return { first, second };
+}
+
+function idsWhere(nodes: GraphNode[], predicate: (node: GraphNode) => boolean): string[] {
+  return nodes.filter(predicate).map((node) => node.id);
+}
+
+function rootBandLayout(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  roots: string[],
+  columnWidth: number,
+  rowHeight: number,
+): Record<string, { x: number; y: number }> | null {
+  if (roots.length < 2) return null;
+  // Entry overview: roots are peers. Put every root in a top band, then the
+  // first-level calls collected from all roots, then the second-level calls
+  // if the node budget had room. Grid bands keep fifty roots visible without
+  // turning the overview into a single endless column.
+  const rootSet = new Set(roots);
+  const { first, second } = collectRootLevels(edges, rootSet);
+  const bands = [
+    roots,
+    idsWhere(nodes, (node) => first.has(node.id)),
+    idsWhere(nodes, (node) => second.has(node.id)),
+    idsWhere(nodes, (node) => !rootSet.has(node.id) && !first.has(node.id) && !second.has(node.id)),
+  ];
+  const positions: Record<string, { x: number; y: number }> = {};
+  const columns = 10;
+  let rowOffset = 0;
+  for (const band of bands) {
+    band.forEach((id, index) => {
+      positions[id] = {
+        x: (index % columns) * columnWidth,
+        y: (rowOffset + Math.floor(index / columns)) * rowHeight,
+      };
+    });
+    if (band.length > 0) rowOffset += Math.ceil(band.length / columns) + 1;
+  }
+  return positions;
+}
+
+function assignColumns(
+  nodes: GraphNode[],
+  roots: string[],
+  neighbors: Map<string, Neighbor[]>,
+  nodeById: Map<string, GraphNode>,
+): Map<string, number> {
+  // Columns are relative to the focused node, not global depth: sibling
+  // callees must share a column even when their global depths differ.
   const columnById = new Map<string, number>();
   const queue: string[] = [];
   for (const rootId of roots) {
@@ -252,7 +288,62 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[
     const depth = Number.isFinite(node.metrics.depth) ? Math.round(node.metrics.depth) : 0;
     columnById.set(node.id, rootDepth !== null ? depth - rootDepth : depth);
   }
+  return columnById;
+}
 
+function parentRow(
+  nodeId: string,
+  incoming: Map<string, string[]>,
+  rowById: Map<string, number>,
+): number {
+  const rows = (incoming.get(nodeId) ?? [])
+    .map((id) => rowById.get(id))
+    .filter((row): row is number => row !== undefined);
+  return rows.length > 0 ? Math.min(...rows) : Infinity;
+}
+
+function compareScores(leftScore: number, rightScore: number): number {
+  if (Number.isFinite(leftScore) !== Number.isFinite(rightScore)) {
+    return Number.isFinite(leftScore) ? -1 : 1;
+  }
+  if (Number.isFinite(leftScore) && leftScore !== rightScore) return leftScore - rightScore;
+  return 0;
+}
+
+function compareTieBreak(left: GraphNode, right: GraphNode): number {
+  return Number(right.isEntryLike) - Number(left.isEntryLike)
+    || left.file.localeCompare(right.file)
+    || left.line - right.line
+    || left.qname.localeCompare(right.qname)
+    || left.id.localeCompare(right.id);
+}
+
+function compareLayerNodes(
+  left: GraphNode,
+  right: GraphNode,
+  score: Map<string, number>,
+): number {
+  const scoreOrder = compareScores(score.get(left.id) ?? Infinity, score.get(right.id) ?? Infinity);
+  return scoreOrder !== 0 ? scoreOrder : compareTieBreak(left, right);
+}
+
+function sortLayer(
+  layerNodes: GraphNode[],
+  incoming: Map<string, string[]>,
+  rowById: Map<string, number>,
+): void {
+  const score = new Map<string, number>();
+  for (const node of layerNodes) score.set(node.id, parentRow(node.id, incoming, rowById));
+  layerNodes.sort((left, right) => compareLayerNodes(left, right, score));
+}
+
+function packLayerColumns(
+  nodes: GraphNode[],
+  columnById: Map<string, number>,
+  incoming: Map<string, string[]>,
+  columnWidth: number,
+  rowHeight: number,
+): Record<string, { x: number; y: number }> {
   const layers = new Map<number, GraphNode[]>();
   for (const node of nodes) {
     const column = columnById.get(node.id)!;
@@ -260,60 +351,286 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[
     bucket.push(node);
     layers.set(column, bucket);
   }
+  const positions: Record<string, { x: number; y: number }> = {};
+  const rowById = new Map<string, number>();
+  const columns = [...layers.keys()].sort((left, right) => left - right);
+  for (const column of columns) {
+    const layerNodes = layers.get(column) ?? [];
+    sortLayer(layerNodes, incoming, rowById);
+    layerNodes.forEach((node, row) => {
+      positions[node.id] = { x: column * columnWidth, y: row * rowHeight };
+      rowById.set(node.id, row);
+    });
+  }
+  return positions;
+}
+
+function incomingEdges(edges: GraphEdge[]): Map<string, string[]> {
   const incoming = new Map<string, string[]>();
   for (const edge of edges) {
     const sources = incoming.get(edge.target) ?? [];
     sources.push(edge.source);
     incoming.set(edge.target, sources);
   }
-  const positions: Record<string, { x: number; y: number }> = {};
-  const rowById = new Map<string, number>();
-  const columns = [...layers.keys()].sort((left, right) => left - right);
-  // An entry-point overview has one column per depth for *all* roots. With a
-  // wide fan-out that becomes a single 4,000px-tall strip, so split long layers
-  // into side-by-side chunks and keep the whole overview readable.
-  const maxRows = roots.length > 1 ? 8 : Number.POSITIVE_INFINITY;
-  let physicalColumn = 0;
-  for (const column of columns) {
-    const layerNodes = layers.get(column) ?? [];
-    const score = new Map<string, number>();
-    for (const node of layerNodes) {
-      const parentRows = (incoming.get(node.id) ?? [])
-        .map((id) => rowById.get(id))
-        .filter((row): row is number => row !== undefined);
-      score.set(node.id, parentRows.length > 0 ? Math.min(...parentRows) : Infinity);
-    }
-    layerNodes.sort((left, right) => {
-      const leftScore = score.get(left.id) ?? Infinity;
-      const rightScore = score.get(right.id) ?? Infinity;
-      if (Number.isFinite(leftScore) !== Number.isFinite(rightScore)) {
-        return Number.isFinite(leftScore) ? -1 : 1;
+  return incoming;
+}
+
+function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[]): CompactLayout {
+  if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
+  const { columnWidth, rowHeight } = layoutSpacing(nodes);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const roots = [...new Set(rootIds)].filter((id) => nodeById.has(id));
+  const bands = rootBandLayout(nodes, edges, roots, columnWidth, rowHeight);
+  if (bands) return { positions: bands, rowHeight };
+  const neighbors = buildNeighbors(nodeById, edges);
+  const columnById = assignColumns(nodes, roots, neighbors, nodeById);
+  return {
+    positions: packLayerColumns(nodes, columnById, incomingEdges(edges), columnWidth, rowHeight),
+    rowHeight,
+  };
+}
+
+function layeredPositionsForView(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  selectedId: string | null,
+  roots: string[],
+  focusIds: Set<string> | null,
+  center: { x: number; y: number },
+): Record<string, { x: number; y: number }> {
+  const local = selectedId && focusIds !== null
+    ? focusLayered(nodes, edges, selectedId)
+    : compactLayered(nodes, edges, roots);
+  const selectedNode = selectedId ? nodes.find((node) => node.id === selectedId) : null;
+  const anchor = selectedNode
+    ? {
+        x: center.x - nodeSize(selectedNode).width / 2,
+        y: center.y - nodeSize(selectedNode).height / 2,
       }
-      if (Number.isFinite(leftScore) && leftScore !== rightScore) return leftScore - rightScore;
-      return Number(right.isEntryLike) - Number(left.isEntryLike)
-        || left.file.localeCompare(right.file)
-        || left.line - right.line
-        || left.qname.localeCompare(right.qname)
-        || left.id.localeCompare(right.id);
-    });
-    const rowsPerChunk = Number.isFinite(maxRows) ? maxRows : layerNodes.length;
-    const chunkCount = Math.max(1, Math.ceil(layerNodes.length / rowsPerChunk));
-    for (let chunk = 0; chunk < chunkCount; chunk += 1) {
-      const chunkNodes = layerNodes.slice(chunk * rowsPerChunk, (chunk + 1) * rowsPerChunk);
-      chunkNodes.forEach((node, row) => {
-        positions[node.id] = {
-          x: (physicalColumn + chunk) * columnWidth,
-          y: row * rowHeight,
-        };
-        rowById.set(node.id, row);
-      });
-    }
-    physicalColumn += chunkCount;
+    : center;
+  const localAnchorId = selectedId && local.positions[selectedId]
+    ? selectedId
+    : roots.find((id) => local.positions[id]) ?? nodes[0]?.id;
+  const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
+  const dx = localAnchor ? anchor.x - localAnchor.x : 0;
+  const dy = localAnchor ? anchor.y - localAnchor.y : 0;
+  const next: Record<string, { x: number; y: number }> = {};
+  for (const node of nodes) {
+    const position = local.positions[node.id];
+    if (position) next[node.id] = { x: position.x + dx, y: position.y + dy };
   }
-  return { positions, rowHeight };
+  return next;
+}
+
+interface OccupiedBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function freeSpace(
+  occupied: OccupiedBox[],
+  gap: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  return !occupied.some((box) => x < box.x + box.width + gap
+    && x + width + gap > box.x
+    && y < box.y + box.height + gap
+    && y + height + gap > box.y);
+}
+
+function findFreeSpot(
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+  stepX: number,
+  stepY: number,
+  isFree: (x: number, y: number) => boolean,
+): { x: number; y: number } {
+  for (let radius = 1; radius <= 24; radius += 1) {
+    for (let row = -radius; row <= radius; row += 1) {
+      for (let column = -radius; column <= radius; column += 1) {
+        if (Math.max(Math.abs(column), Math.abs(row)) !== radius) continue;
+        const x = originX + column * stepX;
+        const y = originY + row * stepY;
+        if (isFree(x, y)) return { x, y };
+      }
+    }
+  }
+  return { x: originX, y: originY };
+}
+
+function mergeNewPositions(
+  current: Record<string, { x: number; y: number }>,
+  next: Record<string, { x: number; y: number }>,
+  nodes: Array<{ id: string; width: number; height: number }>,
+  selectedId: string | null,
+): Record<string, { x: number; y: number }> {
+  // Deep navigation only adds a focus slice. Keep already-placed nodes
+  // exactly where they are; place only the newly revealed nodes.
+  const anchorId = selectedId && next[selectedId]
+    ? selectedId
+    : nodes.find((node) => current[node.id] && next[node.id])?.id;
+  const anchor = anchorId ? current[anchorId] : null;
+  const anchorNext = anchorId ? next[anchorId] : null;
+  const dx = anchor && anchorNext ? anchor.x - anchorNext.x : 0;
+  const dy = anchor && anchorNext ? anchor.y - anchorNext.y : 0;
+  const sizes = new Map(nodes.map((node) => [node.id, { width: node.width, height: node.height }]));
+  const gap = 18;
+  const stepX = Math.max(160, ...nodes.map((node) => node.width)) + gap;
+  const stepY = Math.max(64, ...nodes.map((node) => node.height)) + gap;
+  const occupied: OccupiedBox[] = Object.entries(current).map(([id, position]) => ({
+    x: position.x,
+    y: position.y,
+    width: sizes.get(id)?.width ?? 170,
+    height: sizes.get(id)?.height ?? 68,
+  }));
+  const merged = { ...current };
+  const newIds = Object.keys(next).filter((id) => !(id in current)).sort();
+  for (const id of newIds) {
+    const size = sizes.get(id) ?? { width: 170, height: 68 };
+    const proposed = next[id];
+    const originX = proposed.x + dx;
+    const originY = proposed.y + dy;
+    const spot = freeSpace(occupied, gap, originX, originY, size.width, size.height)
+      ? { x: originX, y: originY }
+      : findFreeSpot(
+          originX,
+          originY,
+          size.width,
+          size.height,
+          stepX,
+          stepY,
+          (x, y) => freeSpace(occupied, gap, x, y, size.width, size.height),
+        );
+    merged[id] = spot;
+    occupied.push({ ...spot, width: size.width, height: size.height });
+  }
+  return merged;
+}
+
+function frameNodesInView(
+  flow: ReactFlowInstance,
+  nodes: PositionedNode[],
+): void {
+  if (nodes.length < 2) return;
+  const box = nodes.reduce((acc, node) => {
+    const x = node.position.x;
+    const y = node.position.y;
+    const width = Number(node.width ?? 0);
+    const height = Number(node.height ?? 0);
+    return {
+      minX: Math.min(acc.minX, x),
+      minY: Math.min(acc.minY, y),
+      maxX: Math.max(acc.maxX, x + width),
+      maxY: Math.max(acc.maxY, y + height),
+    };
+  }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const parent = document.querySelector('.react-flow')?.getBoundingClientRect();
+  if (!parent || !Number.isFinite(box.minX)) return;
+  const padding = 56;
+  const zoom = Math.min(
+    (parent.width - padding * 2) / Math.max(1, box.maxX - box.minX),
+    (parent.height - padding * 2) / Math.max(1, box.maxY - box.minY),
+    1.15,
+  );
+  flow.setCenter(
+    (box.minX + box.maxX) / 2,
+    (box.minY + box.maxY) / 2,
+    { zoom: Math.max(0.25, zoom), duration: 0 },
+  );
+}
+
+async function exportGraphPng(nodes: FlowNode[]): Promise<void> {
+  if (nodes.length === 0) return;
+  const bounds = getNodesBounds(nodes);
+  const width = Math.min(6000, Math.max(1000, Math.ceil(bounds.width + 160)));
+  const height = Math.min(6000, Math.max(700, Math.ceil(bounds.height + 160)));
+  const viewport = getViewportForBounds(bounds, width, height, 0.2, 2, 0.1);
+  const element = document.querySelector('.react-flow__viewport') as HTMLElement | null;
+  if (!element) return;
+  const background = getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim() || '#0d1117';
+  const dataUrl = await toPng(element, {
+    backgroundColor: background,
+    width,
+    height,
+    style: {
+      width: `${width}px`,
+      height: `${height}px`,
+      transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+    },
+  });
+  const anchor = document.createElement('a');
+  anchor.href = dataUrl;
+  anchor.download = `code-graph-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+  anchor.click();
 }
 
 export type GraphMode = 'focus' | 'path' | 'impact';
+
+interface NodeClickDeps {
+  mode: GraphMode;
+  report: GraphReport | null;
+  path: PathResult | null;
+  showImpact: (node: GraphNode, direction: 'in' | 'out') => Promise<void>;
+  setPathIndex: (index: number) => void;
+  setSelectedId: Dispatch<SetStateAction<string | null>>;
+  selectAndCenter: (id: string) => void;
+  focusWithoutHistory: (id: string) => void;
+  clickTimer: { current: number | null };
+}
+
+function createNodeClickHandlers({
+  mode,
+  report,
+  path,
+  showImpact,
+  setPathIndex,
+  setSelectedId,
+  selectAndCenter,
+  focusWithoutHistory,
+  clickTimer,
+}: NodeClickDeps): { onNodeClick: NodeMouseHandler; onNodeDoubleClick: NodeMouseHandler } {
+  const onNodeClick: NodeMouseHandler = (_event, node) => {
+    if (mode === 'impact') {
+      const target = report?.nodes.find((candidate) => candidate.id === node.id);
+      if (target) void showImpact(target, 'in');
+      return;
+    }
+    if (mode === 'path' && path) {
+      const index = path.path.indexOf(node.id);
+      if (index >= 0) {
+        setPathIndex(index);
+        return;
+      }
+      setSelectedId(node.id);
+      return;
+    }
+    // Give a double-click a chance to cancel the single-click focus. Focusing
+    // immediately repacks the grid, so the second click would land elsewhere.
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      selectAndCenter(node.id);
+    }, 220);
+  };
+  const onNodeDoubleClick: NodeMouseHandler = (_event, node) => {
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    focusWithoutHistory(node.id);
+  };
+  return { onNodeClick, onNodeDoubleClick };
+}
 
 interface Input {
   report: GraphReport | null;
@@ -375,6 +692,334 @@ export interface GraphView {
   onNodeDoubleClick: NodeMouseHandler;
 }
 
+function canonicalLayeredPositions(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Record<string, { x: number; y: number }> {
+  if (nodes.length === 0) return {};
+  const { columnWidth, rowHeight } = layoutSpacing(nodes);
+  const layers = new Map<number, GraphNode[]>();
+  for (const node of nodes) {
+    const depth = Number.isFinite(node.metrics.depth)
+      ? Math.max(0, Math.round(node.metrics.depth))
+      : 0;
+    const bucket = layers.get(depth) ?? [];
+    bucket.push(node);
+    layers.set(depth, bucket);
+  }
+  const incoming = incomingEdges(edges);
+  const result: Record<string, { x: number; y: number }> = {};
+  const rowById = new Map<string, number>();
+  const orderedDepths = [...layers.keys()].sort((left, right) => left - right);
+  for (const depth of orderedDepths) {
+    const layer = layers.get(depth) ?? [];
+    sortLayer(layer, incoming, rowById);
+    layer.forEach((node, row) => {
+      result[node.id] = { x: depth * columnWidth, y: row * rowHeight };
+      rowById.set(node.id, row);
+    });
+  }
+  return result;
+}
+
+interface LayoutInput {
+  visible: { nodes: GraphNode[]; edges: GraphEdge[] };
+  layoutSource: GraphNode[];
+  allEdges: GraphEdge[];
+  layoutScope: string;
+  selectedId: string | null;
+  entryRoots: EntryPoint[];
+  focusIds: Set<string> | null;
+  mode: GraphMode;
+  path: PathResult | null;
+  setError: (message: string | null) => void;
+}
+
+interface LayoutState {
+  positions: Record<string, { x: number; y: number }>;
+  layoutKind: LayoutKind;
+  setLayoutKind: Dispatch<SetStateAction<LayoutKind>>;
+  layoutNonce: number;
+  relayout: () => void;
+  layouting: boolean;
+  resetPositions: () => void;
+}
+
+function useGraphLayout({
+  visible,
+  layoutSource,
+  allEdges,
+  layoutScope,
+  selectedId,
+  entryRoots,
+  focusIds,
+  mode,
+  path,
+  setError,
+}: LayoutInput): LayoutState {
+  const reactFlow = useReactFlow();
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [layoutKind, setLayoutKind] = useState<LayoutKind>('layered');
+  const [layouting, setLayouting] = useState(false);
+  const [layoutNonce, setLayoutNonce] = useState(0);
+  const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
+
+  const canonicalPositions = useMemo(
+    () => canonicalLayeredPositions(layoutSource, allEdges),
+    [layoutSource, allEdges],
+  );
+  const positionedNodes = useMemo<PositionedNode[]>(
+    () => visible.nodes.map((node) => {
+      const size = nodeSize(node);
+      return {
+        id: node.id,
+        position: positions[node.id] ?? { x: 0, y: 0 },
+        width: size.width,
+        height: size.height,
+      };
+    }),
+    [visible.nodes, positions],
+  );
+  const layoutNodes = useMemo(
+    () => visible.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
+    [visible.nodes],
+  );
+  const viewKey = useMemo(
+    () =>
+      `${layoutScope}|${layoutKind}|${layoutNonce}|${selectedId ?? ''}|${layoutNodes.map((node) => node.id).join('|')}|${visible.edges
+        .map((edge) => edge.id)
+        .join('|')}`,
+    [layoutScope, layoutKind, layoutNonce, layoutNodes, selectedId, visible.edges],
+  );
+
+  useEffect(() => {
+    if (layoutNodes.length === 0) {
+      setPositions({});
+      return;
+    }
+    if (layoutKind === 'layered') {
+      const selected = selectedIdRef.current;
+      const roots = selected ? [selected] : entryRoots.map((root) => root.id);
+      const viewport = reactFlow.getViewport();
+      const host = document.querySelector('.react-flow')?.getBoundingClientRect();
+      const center = host
+        ? {
+            x: (host.width / 2 - viewport.x) / viewport.zoom,
+            y: (host.height / 2 - viewport.y) / viewport.zoom,
+          }
+        : { x: 0, y: 0 };
+      setPositions(
+        layeredPositionsForView(visible.nodes, visible.edges, selected, roots, focusIds, center),
+      );
+      setLayouting(false);
+      return;
+    }
+    let cancelled = false;
+    setLayouting(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const previous = lastLayoutConfig.current;
+        const preserve = previous.kind === layoutKind
+          && previous.nonce === layoutNonce
+          && previous.scope === layoutScope;
+        lastLayoutConfig.current = { kind: layoutKind, nonce: layoutNonce, scope: layoutScope };
+        const next = await computeLayout(layoutNodes, visible.edges, layoutKind, layoutScope);
+        if (cancelled || !next) return;
+        setPositions((current) => (
+          preserve ? mergeNewPositions(current, next, layoutNodes, selectedIdRef.current) : next
+        ));
+        setLayouting(false);
+      } catch (caught) {
+        if (cancelled) return;
+        setLayouting(false);
+        setError(`Layout failed: ${(caught as Error).message}`);
+      }
+    }, 80);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      cancelLayout();
+    };
+  }, [viewKey, layoutScope, canonicalPositions, entryRoots, focusIds]);
+
+  const frameNodes = useCallback(
+    (nodes: PositionedNode[]) => frameNodesInView(reactFlow, nodes),
+    [reactFlow],
+  );
+
+  useEffect(() => {
+    if (Object.keys(positions).length === 0 || centeredPositions.current === positions) return;
+    centeredPositions.current = positions;
+    // Path mode fits the whole route; centering the endpoint would push the
+    // entry and middle steps off-screen.
+    if ((mode === 'path' && path) || focusIds !== null) return;
+
+    // Entry points are an overview: fit the whole visible slice once instead
+    // of centering the first root, which leaves most of it off-screen.
+    if (selectedId === null && entryRoots.length > 0) {
+      const timer = window.setTimeout(() => frameNodes(positionedNodes), 120);
+      return () => window.clearTimeout(timer);
+    }
+
+    const selected = selectedId ? positionedNodes.find((node) => node.id === selectedId) : null;
+    const rootId = entryRoots[0]?.id;
+    const root = rootId ? positionedNodes.find((node) => node.id === rootId) : null;
+    const target = selected ?? root;
+    const center = target
+      ? {
+          x: target.position.x + Number(target.width ?? 0) / 2,
+          y: target.position.y + Number(target.height ?? 0) / 2,
+        }
+      : denseCenter(positionedNodes);
+    if (!center) return;
+    void reactFlow.setCenter(center.x, center.y, { zoom: reactFlow.getZoom(), duration: 0 });
+  }, [positions, positionedNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds, frameNodes]);
+
+  // Path mode is about the whole route, not the endpoint under the cursor.
+  useEffect(() => {
+    if (mode !== 'path' || !path) return;
+    const route = new Set(path.path);
+    const routeNodes = positionedNodes.filter((node) => route.has(node.id));
+    if (routeNodes.length < 2) return;
+    const timer = window.setTimeout(() => frameNodes(routeNodes), 120);
+    return () => window.clearTimeout(timer);
+  }, [mode, path, positionedNodes, frameNodes]);
+
+  // Navigating from a zoomed-out entry overview leaves a small focus slice at
+  // the old overview zoom (cards become 83x34px). Keep the normal "focus does
+  // not move the viewport" rule, but fit small focus slices when the current
+  // zoom would make their labels unreadable.
+  useEffect(() => {
+    if (mode !== 'focus' || focusIds === null || selectedId === null) return;
+    if (positionedNodes.length === 0 || positionedNodes.length > 40) return;
+    if (reactFlow.getZoom() >= MIN_READABLE_ZOOM) return;
+    const timer = window.setTimeout(() => frameNodes(positionedNodes), 120);
+    return () => window.clearTimeout(timer);
+  }, [mode, focusIds, selectedId, positionedNodes, reactFlow, frameNodes]);
+
+  const relayout = useCallback(() => setLayoutNonce((value) => value + 1), []);
+  const resetPositions = useCallback(() => setPositions({}), []);
+
+  return {
+    positions,
+    layoutKind,
+    setLayoutKind,
+    layoutNonce,
+    relayout,
+    layouting,
+    resetPositions,
+  };
+}
+
+interface PathInput {
+  path: PathResult | null;
+  pathIndex: number;
+  apiContext: { base: string; graphId: string } | null;
+  mergeSlice: (slice: GraphSlice, focus: Set<string> | null) => void;
+  setError: (message: string | null) => void;
+  setPath: Dispatch<SetStateAction<PathResult | null>>;
+  setPathIndexState: Dispatch<SetStateAction<number>>;
+  setRouteIds: Dispatch<SetStateAction<Set<string>>>;
+  setSelectedId: Dispatch<SetStateAction<string | null>>;
+  setSearchText: Dispatch<SetStateAction<string>>;
+  setFilters: Dispatch<SetStateAction<Filters>>;
+  setFocusIds: Dispatch<SetStateAction<Set<string> | null>>;
+  setEntryRoots: Dispatch<SetStateAction<EntryPoint[]>>;
+  setEntryInfo: Dispatch<SetStateAction<{
+    totalRoots: number;
+    truncated: boolean;
+  } | null>>;
+}
+
+interface PathActions {
+  applyPath: (result: PathResult) => void;
+  findPath: (fromId: string, toId: string) => Promise<boolean>;
+  setPathIndex: (index: number) => void;
+  showPathScope: () => void;
+  clearRouteHighlight: () => void;
+  clearPath: () => void;
+}
+
+function useGraphPath({
+  path,
+  pathIndex,
+  apiContext,
+  mergeSlice,
+  setError,
+  setPath,
+  setPathIndexState,
+  setRouteIds,
+  setSelectedId,
+  setSearchText,
+  setFilters,
+  setFocusIds,
+  setEntryRoots,
+  setEntryInfo,
+}: PathInput): PathActions {
+  const applyPath = useCallback((result: PathResult) => {
+    if (!result.found) return;
+    mergeSlice({ nodes: result.nodes, edges: result.edges }, new Set(result.path));
+    setRouteIds(new Set(result.path));
+    setPath(result);
+    setPathIndexState(Math.max(0, result.path.length - 1));
+    setSelectedId(result.path[result.path.length - 1] ?? null);
+    setSearchText('');
+    setFilters((current) => ({ ...current, search: '' }));
+  }, [mergeSlice, setFilters, setSelectedId, setSearchText]);
+
+  const findPath = useCallback(async (fromId: string, toId: string): Promise<boolean> => {
+    if (!apiContext) {
+      setError('Path needs the API server; open a graph.json report for focus and impact only.');
+      return false;
+    }
+    try {
+      const result = await fetchPath(apiContext.base, apiContext.graphId, fromId, toId, 16);
+      if (!result.found) {
+        setError('No call path between the selected endpoints.');
+        return false;
+      }
+      applyPath(result);
+      return true;
+    } catch (caught) {
+      setError(`Path failed: ${(caught as Error).message}`);
+      return false;
+    }
+  }, [apiContext, applyPath, setError]);
+
+  const setPathIndex = useCallback((index: number) => {
+    if (!path) return;
+    const next = Math.max(0, Math.min(path.path.length - 1, index));
+    setPathIndexState(next);
+    setSelectedId(path.path[next] ?? null);
+    setRouteIds(new Set(path.path));
+  }, [path, setSelectedId]);
+
+  const showPathScope = useCallback(() => {
+    if (!path) return;
+    setFocusIds(new Set(path.path));
+    setRouteIds(new Set(path.path));
+    setSelectedId(path.path[pathIndex] ?? path.path[path.path.length - 1] ?? null);
+    setEntryRoots([]);
+    setEntryInfo(null);
+  }, [path, pathIndex, setEntryInfo, setEntryRoots, setSelectedId]);
+
+  const clearRouteHighlight = useCallback(() => {
+    setRouteIds(new Set());
+  }, []);
+
+  const clearPath = useCallback(() => {
+    setPath(null);
+    setPathIndexState(0);
+    setRouteIds(new Set());
+    setFocusIds(null);
+  }, []);
+
+  return { applyPath, findPath, setPathIndex, showPathScope, clearRouteHighlight, clearPath };
+}
+
 export function useGraphView({
   report,
   snapshot,
@@ -388,8 +1033,6 @@ export function useGraphView({
   const reactFlow = useReactFlow();
   const [filters, setFilters] = useState<Filters>(() => defaultFilters());
   const [searchText, setSearchText] = useState('');
-  const [layoutKind, setLayoutKind] = useState<LayoutKind>('layered');
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIds, setFocusIds] = useState<Set<string> | null>(null);
   const [focusHistory, setFocusHistory] = useState<string[]>([]);
@@ -402,14 +1045,8 @@ export function useGraphView({
     totalRoots: number;
     truncated: boolean;
   } | null>(null);
-  const [layouting, setLayouting] = useState(false);
-  const [layoutNonce, setLayoutNonce] = useState(0);
-  const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
-  const selectedIdRef = useRef<string | null>(null);
-  selectedIdRef.current = selectedId;
   const clickTimer = useRef<number | null>(null);
   const focusRequest = useRef(0);
-  const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
     () => (entryRoots.length ? new Set(entryRoots.map((root) => root.id)) : null),
@@ -420,6 +1057,28 @@ export function useGraphView({
     () => (report ? visibleGraph(report, filters, focusIds) : { nodes: [], edges: [] }),
     [report, filters, focusIds],
   );
+
+  const layoutSource = allNodes.length > 0 ? allNodes : report?.nodes ?? [];
+  const {
+    positions,
+    layoutKind,
+    setLayoutKind,
+    layoutNonce,
+    relayout,
+    layouting,
+    resetPositions,
+  } = useGraphLayout({
+    visible,
+    layoutSource,
+    allEdges,
+    layoutScope: report?.meta.generatedAt ?? '',
+    selectedId,
+    entryRoots,
+    focusIds,
+    mode,
+    path,
+    setError,
+  });
 
   const selectedNode = useMemo(
     () => (selectedId ? report?.nodes.find((node) => node.id === selectedId) ?? null : null),
@@ -542,283 +1201,6 @@ export function useGraphView({
     return () => window.clearTimeout(timer);
   }, [clearHistory, searchText]);
 
-  const layoutSource = allNodes.length > 0 ? allNodes : report?.nodes ?? [];
-  const canonicalPositions = useMemo(() => {
-    if (layoutSource.length === 0) return {};
-    const sizes = new Map(layoutSource.map((node) => [node.id, nodeSize(node)]));
-    const maxWidth = Math.max(180, ...layoutSource.map((node) => sizes.get(node.id)!.width));
-    const maxHeight = Math.max(72, ...layoutSource.map((node) => sizes.get(node.id)!.height));
-    const columnWidth = maxWidth + 140;
-    const rowHeight = maxHeight + 56;
-    const layers = new Map<number, GraphNode[]>();
-    for (const node of layoutSource) {
-      const depth = Number.isFinite(node.metrics.depth)
-        ? Math.max(0, Math.round(node.metrics.depth))
-        : 0;
-      const bucket = layers.get(depth) ?? [];
-      bucket.push(node);
-      layers.set(depth, bucket);
-    }
-    const incoming = new Map<string, string[]>();
-    for (const edge of allEdges) {
-      const sources = incoming.get(edge.target) ?? [];
-      sources.push(edge.source);
-      incoming.set(edge.target, sources);
-    }
-    const result: Record<string, { x: number; y: number }> = {};
-    const rowById = new Map<string, number>();
-    const orderedDepths = [...layers.keys()].sort((left, right) => left - right);
-    for (const depth of orderedDepths) {
-      const nodes = layers.get(depth) ?? [];
-      const score = new Map<string, number>();
-      for (const node of nodes) {
-        const parentRows = (incoming.get(node.id) ?? [])
-          .map((id) => rowById.get(id))
-          .filter((row): row is number => row !== undefined);
-        score.set(node.id, parentRows.length > 0 ? Math.min(...parentRows) : Infinity);
-      }
-      nodes.sort((left, right) => {
-        const leftScore = score.get(left.id) ?? Infinity;
-        const rightScore = score.get(right.id) ?? Infinity;
-        if (Number.isFinite(leftScore) !== Number.isFinite(rightScore)) {
-          return Number.isFinite(leftScore) ? -1 : 1;
-        }
-        if (Number.isFinite(leftScore) && leftScore !== rightScore) return leftScore - rightScore;
-        return Number(right.isEntryLike) - Number(left.isEntryLike)
-          || left.file.localeCompare(right.file)
-          || left.line - right.line
-          || left.qname.localeCompare(right.qname)
-          || left.id.localeCompare(right.id);
-      });
-      nodes.forEach((node, row) => {
-        result[node.id] = { x: depth * columnWidth, y: row * rowHeight };
-        rowById.set(node.id, row);
-      });
-    }
-    return result;
-  }, [layoutSource, allEdges]);
-
-  const layoutNodes = useMemo(
-    () => visible.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
-    [visible.nodes],
-  );
-  const layoutScope = report?.meta.generatedAt ?? '';
-  const viewKey = useMemo(
-    () =>
-      `${layoutScope}|${layoutKind}|${layoutNonce}|${selectedId ?? ''}|${layoutNodes.map((node) => node.id).join('|')}|${visible.edges
-        .map((edge) => edge.id)
-        .join('|')}`,
-    [layoutScope, layoutKind, layoutNonce, layoutNodes, selectedId, visible.edges],
-  );
-
-  useEffect(() => {
-    if (layoutNodes.length === 0) {
-      setPositions({});
-      return;
-    }
-    if (layoutKind === 'layered') {
-      const selected = selectedIdRef.current;
-      const roots = selected
-        ? [selected]
-        : entryRoots.map((root) => root.id);
-      const local = selected && focusIds !== null
-        ? focusLayered(visible.nodes, visible.edges, selected)
-        : compactLayered(visible.nodes, visible.edges, roots);
-      const viewport = reactFlow.getViewport();
-      const host = document.querySelector('.react-flow')?.getBoundingClientRect();
-      const center = host
-        ? {
-            x: (host.width / 2 - viewport.x) / viewport.zoom,
-            y: (host.height / 2 - viewport.y) / viewport.zoom,
-          }
-        : { x: 0, y: 0 };
-      const selectedNode = selected ? visible.nodes.find((node) => node.id === selected) : null;
-      const anchor = selectedNode
-        ? {
-            x: center.x - nodeSize(selectedNode).width / 2,
-            y: center.y - nodeSize(selectedNode).height / 2,
-          }
-        : center;
-      const localAnchorId = selected && local.positions[selected]
-        ? selected
-        : roots.find((id) => local.positions[id]) ?? visible.nodes[0]?.id;
-      const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
-      const dx = localAnchor ? anchor.x - localAnchor.x : 0;
-      const dy = localAnchor ? anchor.y - localAnchor.y : 0;
-      const next: Record<string, { x: number; y: number }> = {};
-      for (const node of visible.nodes) {
-        const position = local.positions[node.id];
-        if (!position) continue;
-        next[node.id] = { x: position.x + dx, y: position.y + dy };
-      }
-      setPositions(next);
-      setLayouting(false);
-      return;
-    }
-    let cancelled = false;
-    setLayouting(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const previous = lastLayoutConfig.current;
-        const preserve = previous.kind === layoutKind
-          && previous.nonce === layoutNonce
-          && previous.scope === layoutScope;
-        lastLayoutConfig.current = { kind: layoutKind, nonce: layoutNonce, scope: layoutScope };
-        const next = await computeLayout(layoutNodes, visible.edges, layoutKind, layoutScope);
-        if (cancelled || !next) return;
-        setPositions((current) => {
-          if (!preserve) return next;
-          // Deep navigation only adds a focus slice. Keep already-placed nodes
-          // exactly where they are; place only the newly revealed nodes.
-          const anchorId = selectedIdRef.current && next[selectedIdRef.current]
-            ? selectedIdRef.current
-            : layoutNodes.find((node) => current[node.id] && next[node.id])?.id;
-          const anchor = anchorId ? current[anchorId] : null;
-          const anchorNext = anchorId ? next[anchorId] : null;
-          const dx = anchor && anchorNext ? anchor.x - anchorNext.x : 0;
-          const dy = anchor && anchorNext ? anchor.y - anchorNext.y : 0;
-          const sizes = new Map(layoutNodes.map((node) => [node.id, { width: node.width, height: node.height }]));
-          const gap = 18;
-          const stepX = Math.max(160, ...layoutNodes.map((node) => node.width)) + gap;
-          const stepY = Math.max(64, ...layoutNodes.map((node) => node.height)) + gap;
-          const occupied = Object.entries(current).map(([id, position]) => ({
-            x: position.x,
-            y: position.y,
-            width: sizes.get(id)?.width ?? 170,
-            height: sizes.get(id)?.height ?? 68,
-          }));
-          const free = (x: number, y: number, width: number, height: number): boolean =>
-            !occupied.some((box) => x < box.x + box.width + gap
-              && x + width + gap > box.x
-              && y < box.y + box.height + gap
-              && y + height + gap > box.y);
-          const merged = { ...current };
-          const newIds = Object.keys(next).filter((id) => !(id in current)).sort();
-          for (const id of newIds) {
-            const size = sizes.get(id) ?? { width: 170, height: 68 };
-            const proposed = next[id];
-            let x = proposed.x + dx;
-            let y = proposed.y + dy;
-            if (!free(x, y, size.width, size.height)) {
-              const originX = x;
-              const originY = y;
-              let placed = false;
-              for (let radius = 1; radius <= 24 && !placed; radius += 1) {
-                for (let row = -radius; row <= radius && !placed; row += 1) {
-                  for (let column = -radius; column <= radius && !placed; column += 1) {
-                    if (Math.max(Math.abs(column), Math.abs(row)) !== radius) continue;
-                    const candidateX = originX + column * stepX;
-                    const candidateY = originY + row * stepY;
-                    if (!free(candidateX, candidateY, size.width, size.height)) continue;
-                    x = candidateX;
-                    y = candidateY;
-                    placed = true;
-                  }
-                }
-              }
-            }
-            merged[id] = { x, y };
-            occupied.push({ x, y, width: size.width, height: size.height });
-          }
-          return merged;
-        });
-        setLayouting(false);
-      } catch (caught) {
-        if (cancelled) return;
-        setLayouting(false);
-        setError(`Layout failed: ${(caught as Error).message}`);
-      }
-    }, 80);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      cancelLayout();
-    };
-  }, [viewKey, layoutScope, canonicalPositions, entryRoots, focusIds]);
-
-  const frameNodes = useCallback((nodes: FlowNode[]) => {
-    if (nodes.length < 2) return;
-    const box = nodes.reduce((acc, node) => {
-      const x = node.position.x;
-      const y = node.position.y;
-      const width = Number(node.width ?? 0);
-      const height = Number(node.height ?? 0);
-      return {
-        minX: Math.min(acc.minX, x),
-        minY: Math.min(acc.minY, y),
-        maxX: Math.max(acc.maxX, x + width),
-        maxY: Math.max(acc.maxY, y + height),
-      };
-    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-    const parent = document.querySelector('.react-flow')?.getBoundingClientRect();
-    if (!parent || !Number.isFinite(box.minX)) return;
-    const padding = 56;
-    const zoom = Math.min(
-      (parent.width - padding * 2) / Math.max(1, box.maxX - box.minX),
-      (parent.height - padding * 2) / Math.max(1, box.maxY - box.minY),
-      1.15,
-    );
-    reactFlow.setCenter(
-      (box.minX + box.maxX) / 2,
-      (box.minY + box.maxY) / 2,
-      { zoom: Math.max(0.25, zoom), duration: 0 },
-    );
-  }, [reactFlow]);
-
-  useEffect(() => {
-    if (Object.keys(positions).length === 0 || centeredPositions.current === positions) return;
-    centeredPositions.current = positions;
-    // Path mode fits the whole route; centering the endpoint would push the
-    // entry and middle steps off-screen.
-    if ((mode === 'path' && path) || focusIds !== null) return;
-
-    // Entry points are an overview: fit the whole visible slice once instead
-    // of centering the first root, which leaves most of it off-screen.
-    if (selectedId === null && entryRoots.length > 0) {
-      const timer = window.setTimeout(() => {
-        frameNodes(flowNodes);
-      }, 120);
-      return () => window.clearTimeout(timer);
-    }
-
-    const selected = selectedId
-      ? flowNodes.find((node) => node.id === selectedId)
-      : null;
-    const rootId = entryRoots[0]?.id;
-    const root = rootId ? flowNodes.find((node) => node.id === rootId) : null;
-    const target = selected ?? root;
-    const center = target
-      ? {
-          x: target.position.x + Number(target.width ?? 0) / 2,
-          y: target.position.y + Number(target.height ?? 0) / 2,
-        }
-      : denseCenter(flowNodes);
-    if (!center) return;
-    void reactFlow.setCenter(center.x, center.y, { zoom: reactFlow.getZoom(), duration: 0 });
-  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds, frameNodes]);
-
-  // Path mode is about the whole route, not the endpoint under the cursor.
-  useEffect(() => {
-    if (mode !== 'path' || !path) return;
-    const route = new Set(path.path);
-    const routeNodes = flowNodes.filter((node) => route.has(node.id));
-    if (routeNodes.length < 2) return;
-    const timer = window.setTimeout(() => frameNodes(routeNodes), 120);
-    return () => window.clearTimeout(timer);
-  }, [mode, path, flowNodes, frameNodes]);
-
-  // Navigating from a zoomed-out entry overview leaves a small focus slice at
-  // the old overview zoom (cards become 83x34px). Keep the normal "focus does
-  // not move the viewport" rule, but fit small focus slices when the current
-  // zoom would make their labels unreadable.
-  useEffect(() => {
-    if (mode !== 'focus' || focusIds === null || selectedId === null) return;
-    if (flowNodes.length === 0 || flowNodes.length > 40) return;
-    if (reactFlow.getZoom() >= MIN_READABLE_ZOOM) return;
-    const timer = window.setTimeout(() => frameNodes(flowNodes), 120);
-    return () => window.clearTimeout(timer);
-  }, [mode, focusIds, selectedId, flowNodes, reactFlow, frameNodes]);
-
   const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
     if (!snapshot) return;
     const focusedReport: GraphReport = {
@@ -918,63 +1300,29 @@ export function useGraphView({
     reactFlow.setNodes((nodes) => nodes.map((node) => ({ ...node, selected: false })));
   }, [reactFlow]);
 
-  const applyPath = useCallback((result: PathResult) => {
-    if (!result.found) return;
-    mergeSlice({ nodes: result.nodes, edges: result.edges }, new Set(result.path));
-    setRouteIds(new Set(result.path));
-    setPath(result);
-    setPathIndexState(Math.max(0, result.path.length - 1));
-    setSelectedId(result.path[result.path.length - 1] ?? null);
-    setSearchText('');
-    setFilters((current) => ({ ...current, search: '' }));
-  }, [mergeSlice, setFilters, setSelectedId, setSearchText]);
-
-  const findPath = useCallback(async (fromId: string, toId: string): Promise<boolean> => {
-    if (!apiContext) {
-      setError('Path needs the API server; open a graph.json report for focus and impact only.');
-      return false;
-    }
-    try {
-      const result = await fetchPath(apiContext.base, apiContext.graphId, fromId, toId, 16);
-      if (!result.found) {
-        setError('No call path between the selected endpoints.');
-        return false;
-      }
-      applyPath(result);
-      return true;
-    } catch (caught) {
-      setError(`Path failed: ${(caught as Error).message}`);
-      return false;
-    }
-  }, [apiContext, applyPath, setError]);
-
-  const setPathIndex = useCallback((index: number) => {
-    if (!path) return;
-    const next = Math.max(0, Math.min(path.path.length - 1, index));
-    setPathIndexState(next);
-    setSelectedId(path.path[next] ?? null);
-    setRouteIds(new Set(path.path));
-  }, [path, setSelectedId]);
-
-  const showPathScope = useCallback(() => {
-    if (!path) return;
-    setFocusIds(new Set(path.path));
-    setRouteIds(new Set(path.path));
-    setSelectedId(path.path[pathIndex] ?? path.path[path.path.length - 1] ?? null);
-    setEntryRoots([]);
-    setEntryInfo(null);
-  }, [path, pathIndex, setEntryInfo, setEntryRoots, setSelectedId]);
-
-  const clearRouteHighlight = useCallback(() => {
-    setRouteIds(new Set());
-  }, []);
-
-  const clearPath = useCallback(() => {
-    setPath(null);
-    setPathIndexState(0);
-    setRouteIds(new Set());
-    setFocusIds(null);
-  }, []);
+  const {
+    applyPath,
+    findPath,
+    setPathIndex,
+    showPathScope,
+    clearRouteHighlight,
+    clearPath,
+  } = useGraphPath({
+    path,
+    pathIndex,
+    apiContext,
+    mergeSlice,
+    setError,
+    setPath,
+    setPathIndexState,
+    setRouteIds,
+    setSelectedId,
+    setSearchText,
+    setFilters,
+    setFocusIds,
+    setEntryRoots,
+    setEntryInfo,
+  });
 
   const openNeighborhood = useCallback(async (node: GraphNode) => {
     selectAndCenter(node.id);
@@ -1034,64 +1382,20 @@ export function useGraphView({
     }
   }, [apiContext, mergeSlice, setError, setSelectedId]);
 
-  const exportPng = useCallback(async () => {
-    if (flowNodes.length === 0) return;
-    const bounds = getNodesBounds(flowNodes);
-    const width = Math.min(6000, Math.max(1000, Math.ceil(bounds.width + 160)));
-    const height = Math.min(6000, Math.max(700, Math.ceil(bounds.height + 160)));
-    const viewport = getViewportForBounds(bounds, width, height, 0.2, 2, 0.1);
-    const element = document.querySelector('.react-flow__viewport') as HTMLElement | null;
-    if (!element) return;
-    const background = getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim() || '#0d1117';
-    const dataUrl = await toPng(element, {
-      backgroundColor: background,
-      width,
-      height,
-      style: {
-        width: `${width}px`,
-        height: `${height}px`,
-        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
-      },
-    });
-    const anchor = document.createElement('a');
-    anchor.href = dataUrl;
-    anchor.download = `code-graph-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
-    anchor.click();
-  }, [flowNodes]);
+  const exportPng = useCallback(() => exportGraphPng(flowNodes), [flowNodes]);
 
-  const onNodeClick: NodeMouseHandler = (_event, node) => {
-    if (mode === 'impact') {
-      const target = report?.nodes.find((candidate) => candidate.id === node.id);
-      if (target) void showImpact(target, 'in');
-      return;
-    }
-    if (mode === 'path' && path) {
-      const index = path.path.indexOf(node.id);
-      if (index >= 0) {
-        setPathIndex(index);
-        return;
-      }
-      setSelectedId(node.id);
-      return;
-    }
-    // Give a double-click a chance to cancel the single-click focus. Focusing
-    // immediately repacks the grid, so the second click would land elsewhere.
-    if (clickTimer.current !== null) {
-      window.clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-    clickTimer.current = window.setTimeout(() => {
-      clickTimer.current = null;
-      selectAndCenter(node.id);
-    }, 220);
-  };
-  const onNodeDoubleClick: NodeMouseHandler = (_event, node) => {
-    if (clickTimer.current !== null) {
-      window.clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-    focusWithoutHistory(node.id);
-  };
+  const { onNodeClick, onNodeDoubleClick } = createNodeClickHandlers({
+    mode,
+    report,
+    path,
+    showImpact,
+    setPathIndex,
+    setSelectedId,
+    selectAndCenter,
+    focusWithoutHistory,
+    clickTimer,
+  });
+
   const resetGraphView = useCallback(() => {
     focusRequest.current += 1;
     setSelectedId(null);
@@ -1104,8 +1408,8 @@ export function useGraphView({
     setEntryInfo(null);
     setFilters(defaultFilters());
     setSearchText('');
-    setPositions({});
-  }, [clearHistory]);
+    resetPositions();
+  }, [clearHistory, resetPositions]);
 
   return {
     report,
@@ -1123,7 +1427,7 @@ export function useGraphView({
     layoutKind,
     setLayoutKind,
     layoutNonce,
-    relayout: () => setLayoutNonce((value) => value + 1),
+    relayout,
     layouting,
     focusIds,
     entryRoots,
