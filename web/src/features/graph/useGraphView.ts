@@ -73,21 +73,54 @@ interface CompactLayout {
   rowHeight: number;
 }
 
-function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
+function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string | null): CompactLayout {
   if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
   const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
   const maxWidth = Math.max(180, ...nodes.map((node) => sizes.get(node.id)!.width));
   const maxHeight = Math.max(72, ...nodes.map((node) => sizes.get(node.id)!.height));
   const columnWidth = maxWidth + 140;
   const rowHeight = maxHeight + 56;
+
+  // Columns are relative to the focused node, not global depth: sibling
+  // callees must share a column even when their global depths differ.
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const neighbors = new Map<string, { id: string; delta: number }[]>();
+  for (const edge of edges) {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) continue;
+    const source = neighbors.get(edge.source) ?? [];
+    source.push({ id: edge.target, delta: 1 });
+    neighbors.set(edge.source, source);
+    const target = neighbors.get(edge.target) ?? [];
+    target.push({ id: edge.source, delta: -1 });
+    neighbors.set(edge.target, target);
+  }
+  const columnById = new Map<string, number>();
+  if (rootId && nodeById.has(rootId)) {
+    columnById.set(rootId, 0);
+    const queue = [rootId];
+    for (let head = 0; head < queue.length; head += 1) {
+      const id = queue[head];
+      const column = columnById.get(id)!;
+      for (const next of neighbors.get(id) ?? []) {
+        if (columnById.has(next.id)) continue;
+        columnById.set(next.id, column + next.delta);
+        queue.push(next.id);
+      }
+    }
+  }
+  const rootDepth = rootId && nodeById.has(rootId) ? nodeById.get(rootId)!.metrics.depth : null;
+  for (const node of nodes) {
+    if (columnById.has(node.id)) continue;
+    const depth = Number.isFinite(node.metrics.depth) ? Math.round(node.metrics.depth) : 0;
+    columnById.set(node.id, rootDepth !== null && Number.isFinite(rootDepth) ? depth - Math.round(rootDepth) : depth);
+  }
+
   const layers = new Map<number, GraphNode[]>();
   for (const node of nodes) {
-    const depth = Number.isFinite(node.metrics.depth)
-      ? Math.max(0, Math.round(node.metrics.depth))
-      : 0;
-    const bucket = layers.get(depth) ?? [];
+    const column = columnById.get(node.id)!;
+    const bucket = layers.get(column) ?? [];
     bucket.push(node);
-    layers.set(depth, bucket);
+    layers.set(column, bucket);
   }
   const incoming = new Map<string, string[]>();
   for (const edge of edges) {
@@ -97,10 +130,10 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
   }
   const positions: Record<string, { x: number; y: number }> = {};
   const rowById = new Map<string, number>();
-  const depths = [...layers.keys()].sort((left, right) => left - right);
-  const columnByDepth = new Map(depths.map((depth, column) => [depth, column]));
-  for (const depth of depths) {
-    const layerNodes = layers.get(depth) ?? [];
+  const columns = [...layers.keys()].sort((left, right) => left - right);
+  const columnByKey = new Map(columns.map((column, index) => [column, index]));
+  for (const column of columns) {
+    const layerNodes = layers.get(column) ?? [];
     const score = new Map<string, number>();
     for (const node of layerNodes) {
       const parentRows = (incoming.get(node.id) ?? [])
@@ -122,7 +155,7 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
         || left.id.localeCompare(right.id);
     });
     layerNodes.forEach((node, row) => {
-      positions[node.id] = { x: columnByDepth.get(depth)! * columnWidth, y: row * rowHeight };
+      positions[node.id] = { x: columnByKey.get(column)! * columnWidth, y: row * rowHeight };
       rowById.set(node.id, row);
     });
   }
@@ -434,10 +467,10 @@ export function useGraphView({
   const layoutScope = report?.meta.generatedAt ?? '';
   const viewKey = useMemo(
     () =>
-      `${layoutScope}|${layoutKind}|${layoutNonce}|${layoutNodes.map((node) => node.id).join('|')}|${visible.edges
+      `${layoutScope}|${layoutKind}|${layoutNonce}|${selectedId ?? ''}|${layoutNodes.map((node) => node.id).join('|')}|${visible.edges
         .map((edge) => edge.id)
         .join('|')}`,
-    [layoutScope, layoutKind, layoutNonce, layoutNodes, visible.edges],
+    [layoutScope, layoutKind, layoutNonce, layoutNodes, selectedId, visible.edges],
   );
 
   useEffect(() => {
@@ -446,8 +479,8 @@ export function useGraphView({
       return;
     }
     if (layoutKind === 'layered') {
-      const local = compactLayered(visible.nodes, visible.edges);
       const selected = selectedIdRef.current;
+      const local = compactLayered(visible.nodes, visible.edges, selected);
       const viewport = reactFlow.getViewport();
       const host = document.querySelector('.react-flow')?.getBoundingClientRect();
       const center = host
