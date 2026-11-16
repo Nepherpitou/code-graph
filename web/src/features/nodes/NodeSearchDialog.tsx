@@ -70,7 +70,9 @@ function matchScore(node: GraphNode, query: string): number {
 export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [scrolled, setScrolled] = useState(false);
   const rowsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ordered = useMemo(() => sortedNodes(nodes), [nodes]);
@@ -101,6 +103,8 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
 
   useEffect(() => {
     setActiveIndex(0);
+    setScrolled(false);
+    listRef.current?.scrollTo({ top: 0 });
   }, [query]);
 
   useEffect(() => {
@@ -185,8 +189,14 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
           </div>
         </header>
 
-        <div className="node-search-results">
-          <div className="node-search-list" id="node-search-results" role="listbox">
+        <div className={`node-search-results${scrolled ? ' faded' : ''}`}>
+          <div
+            className="node-search-list"
+            id="node-search-results"
+            role="listbox"
+            ref={listRef}
+            onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}
+          >
           {results.length === 0 ? (
             <div className="node-search-empty">
               <strong>No matching nodes.</strong>

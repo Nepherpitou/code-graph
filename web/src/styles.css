@@ -1049,10 +1049,18 @@ kbd {
   position: absolute;
   inset: 0 0 auto;
   z-index: 1;
-  height: 12px;
-  background: linear-gradient(to bottom, var(--panel), transparent);
+  height: 40px;
+  background: linear-gradient(
+    to bottom,
+    var(--panel) 0%,
+    color-mix(in srgb, var(--panel) 65%, transparent) 30%,
+    transparent 100%
+  );
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 0.12s ease;
 }
+.node-search-results.faded::before { opacity: 1; }
 .node-search-list {
   display: flex;
   flex-direction: column;
