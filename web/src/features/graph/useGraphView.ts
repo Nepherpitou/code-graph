@@ -99,7 +99,7 @@ function directedDistances(
   return distances;
 }
 
-/** Focus mode reads as callers | selected node | callees, not as a call-depth chain. */
+/** Focus mode grows outward by call direction: callers left, callees right. */
 function focusLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string): CompactLayout {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   if (!nodeById.has(rootId)) return compactLayered(nodes, edges, [rootId]);
@@ -123,21 +123,36 @@ function focusLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string): C
   const positions: Record<string, { x: number; y: number }> = {
     [rootId]: { x: 0, y: 0 },
   };
-  const place = (ids: string[], x: number): void => {
-    ids.forEach((id, index) => {
-      positions[id] = {
-        x,
-        y: (index - (ids.length - 1) / 2) * rowHeight,
-      };
-    });
+  const layersFor = (ids: string[], distances: Map<string, number>): [number, string[]][] => {
+    const layers = new Map<number, string[]>();
+    for (const id of ids) {
+      const distance = Math.max(1, distances.get(id) ?? 1);
+      const layer = layers.get(distance) ?? [];
+      layer.push(id);
+      layers.set(distance, layer);
+    }
+    return [...layers.entries()].sort(([left], [right]) => left - right);
   };
-  place(incomingIds, -columnWidth);
-  place(outgoingIds, columnWidth);
+  let maxRows = 1;
+  const place = (layers: [number, string[]][], direction: -1 | 1): void => {
+    for (const [distance, ids] of layers) {
+      ids.sort((left, right) => nodeById.get(left)!.qname.localeCompare(nodeById.get(right)!.qname));
+      maxRows = Math.max(maxRows, ids.length);
+      ids.forEach((id, index) => {
+        positions[id] = {
+          x: direction * distance * columnWidth,
+          y: (index - (ids.length - 1) / 2) * rowHeight,
+        };
+      });
+    }
+  };
+  place(layersFor(incomingIds, incoming), -1);
+  place(layersFor(outgoingIds, outgoing), 1);
   const leftover = nodes
     .filter((node) => !positions[node.id])
     .map((node) => node.id)
     .sort((left, right) => nodeById.get(left)!.qname.localeCompare(nodeById.get(right)!.qname));
-  const contextY = (Math.max(incomingIds.length, outgoingIds.length) / 2 + 1.5) * rowHeight;
+  const contextY = (maxRows / 2 + 1.5) * rowHeight;
   leftover.forEach((id, index) => {
     positions[id] = {
       x: (index % 3) * columnWidth,
