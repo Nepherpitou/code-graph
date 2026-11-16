@@ -8,8 +8,10 @@ import { NodeTable } from './features/nodes/NodeTable';
 import { NodeContextMenu, type ContextAction } from './features/nodes/NodeContextMenu';
 import { GraphCanvas } from './features/graph/GraphCanvas';
 import { GraphSidebar } from './features/graph/GraphSidebar';
+import { GraphModeBar } from './features/graph/GraphModeBar';
 import { DetailsPanel } from './features/graph/DetailsPanel';
-import { useGraphView } from './features/graph/useGraphView';
+import { ImpactDetails } from './features/graph/ImpactDetails';
+import { useGraphView, type GraphMode } from './features/graph/useGraphView';
 import { useSnapshot } from './features/snapshot/useSnapshot';
 import { shortRoot } from './shared/format';
 
@@ -17,12 +19,14 @@ type Screen = 'directories' | 'files' | 'graph';
 
 export function App() {
   const state = useSnapshot();
+  const [mode, setMode] = useState<GraphMode>('focus');
   const graph = useGraphView({
     report: state.report,
     snapshot: state.snapshot,
     setReport: state.setReport,
     apiContext: state.apiContext,
     setError: state.setError,
+    mode,
   });
   const [screen, setScreen] = useState<Screen>('graph');
   const [directory, setDirectory] = useState<OverviewNode | null>(null);
@@ -92,11 +96,38 @@ export function App() {
     void openFileSlice(file.path);
   }, [openFileSlice]);
 
+  const changeMode = useCallback((next: GraphMode) => {
+    setMode(next);
+    if (next !== 'path') graph.clearPath();
+    if (next === 'impact' && graph.selectedNode) {
+      void graph.showImpact(graph.selectedNode, 'in');
+    }
+  }, [graph.clearPath, graph.selectedNode, graph.showImpact]);
+
+  const selectNode = useCallback((id: string) => {
+    if (mode === 'path') {
+      graph.setSelectedId(id);
+      return;
+    }
+    graph.selectAndCenter(id);
+  }, [graph.selectAndCenter, graph.setSelectedId, mode]);
+
+  const selectImpactNode = useCallback((id: string) => {
+    const node = state.report?.nodes.find((candidate) => candidate.id === id);
+    if (node) void graph.showImpact(node, 'in');
+  }, [graph.showImpact, state.report]);
+
   const openNode = useCallback(async (node: GraphNode) => {
-    await graph.openNeighborhood(node);
+    if (mode === 'impact') {
+      await graph.showImpact(node, 'in');
+    } else if (mode === 'path') {
+      graph.setSelectedId(node.id);
+    } else {
+      await graph.openNeighborhood(node);
+    }
     setScopeLabel(node.qname);
     setScreen('graph');
-  }, [graph.openNeighborhood]);
+  }, [graph.openNeighborhood, graph.setSelectedId, graph.showImpact, mode]);
 
   const back = useCallback(() => {
     graph.resetGraphView();
@@ -243,10 +274,23 @@ export function App() {
         ) : screen === 'files' && state.fileOverview && directory ? (
           <FileScreen overview={state.fileOverview} directory={directory.path} onOpen={openFile} />
         ) : screen === 'graph' && state.report ? (
-          <GraphCanvas
-            view={graph}
-            onContextMenu={(node, x, y) => setContextMenu({ node, x, y })}
-          />
+          <div className="canvas-shell">
+            <GraphModeBar
+              mode={mode}
+              onMode={changeMode}
+              nodes={state.allNodes}
+              selectedNode={graph.selectedNode}
+              path={graph.path}
+              pathIndex={graph.pathIndex}
+              onPathIndex={graph.setPathIndex}
+              onFindPath={graph.findPath}
+              apiReady={Boolean(state.apiContext)}
+            />
+            <GraphCanvas
+              view={graph}
+              onContextMenu={(node, x, y) => setContextMenu({ node, x, y })}
+            />
+          </div>
         ) : state.analysisStatus?.state === 'running' ? (
           <div className="empty">
             <h2>Analyzing…</h2>
@@ -267,15 +311,24 @@ export function App() {
 
       <aside className="sidebar right">
         {screen === 'graph' && state.report ? (
-          <DetailsPanel
-            report={state.report}
-            node={graph.selectedNode}
-            onSelect={graph.selectAndCenter}
-            onFocus={graph.focusNode}
-            onClearFocus={graph.clearFocus}
-            onClearSelection={graph.clearSelection}
-            focused={graph.focusIds !== null}
-          />
+          mode === 'impact' ? (
+            <ImpactDetails
+              report={state.report}
+              node={graph.selectedNode}
+              onSelect={selectImpactNode}
+              onClearSelection={graph.clearSelection}
+            />
+          ) : (
+            <DetailsPanel
+              report={state.report}
+              node={graph.selectedNode}
+              onSelect={selectNode}
+              onFocus={graph.focusNode}
+              onClearFocus={graph.clearFocus}
+              onClearSelection={graph.clearSelection}
+              focused={graph.focusIds !== null}
+            />
+          )
         ) : (
           <section className="panel">
             <h3>{screen === 'files' ? 'Files' : 'Directories'}</h3>

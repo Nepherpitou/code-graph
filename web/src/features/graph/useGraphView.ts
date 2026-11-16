@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import { toPng } from 'html-to-image';
 
-import { fetchEntryPoints, fetchFocus, fetchImpact } from '../../lib/api';
+import { fetchEntryPoints, fetchFocus, fetchImpact, fetchPath } from '../../lib/api';
 import type {
   EntryPoint,
   FocusSlice,
@@ -69,12 +69,15 @@ function denseCenter(nodes: AnyFlowNode[]): { x: number; y: number } | null {
   return best ? { x: best.x / best.count, y: best.y / best.count } : null;
 }
 
+export type GraphMode = 'focus' | 'path' | 'impact';
+
 interface Input {
   report: GraphReport | null;
   snapshot: GraphSummary | null;
   setReport: Dispatch<SetStateAction<GraphReport | null>>;
   apiContext: { base: string; graphId: string } | null;
   setError: (message: string | null) => void;
+  mode: GraphMode;
 }
 
 const FOCUS_DEPTH = 2;
@@ -107,6 +110,11 @@ export interface GraphView {
   clearFocus: () => void;
   clearSelection: () => void;
   selectAndCenter: (id: string) => void;
+  path: PathResult | null;
+  pathIndex: number;
+  setPathIndex: (index: number) => void;
+  findPath: (fromId: string, toId: string) => Promise<boolean>;
+  clearPath: () => void;
   applyPath: (result: PathResult) => void;
   openNeighborhood: (node: GraphNode) => Promise<void>;
   showImpact: (node: GraphNode, direction: 'in' | 'out') => Promise<void>;
@@ -122,6 +130,7 @@ export function useGraphView({
   setReport,
   apiContext,
   setError,
+  mode,
 }: Input): GraphView {
   const reactFlow = useReactFlow();
   const [filters, setFilters] = useState<Filters>(() => defaultFilters());
@@ -131,6 +140,8 @@ export function useGraphView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIds, setFocusIds] = useState<Set<string> | null>(null);
   const [routeIds, setRouteIds] = useState<Set<string>>(new Set());
+  const [path, setPath] = useState<PathResult | null>(null);
+  const [pathIndex, setPathIndexState] = useState(0);
   const [entryRoots, setEntryRoots] = useState<EntryPoint[]>([]);
   const [entryInfo, setEntryInfo] = useState<{
     totalRoots: number;
@@ -314,6 +325,8 @@ export function useGraphView({
     });
     setEntryRoots([]);
     setEntryInfo(null);
+    setPath(null);
+    setPathIndexState(0);
     setFocusIds(new Set(slice.nodes.map((node) => node.id)));
     setRouteIds(new Set(slice.route));
     setSelectedId(id);
@@ -385,10 +398,47 @@ export function useGraphView({
   const applyPath = useCallback((result: PathResult) => {
     if (!result.found) return;
     mergeSlice({ nodes: result.nodes, edges: result.edges }, new Set(result.path));
+    setRouteIds(new Set(result.path));
+    setPath(result);
+    setPathIndexState(Math.max(0, result.path.length - 1));
     setSelectedId(result.path[result.path.length - 1] ?? null);
     setSearchText('');
     setFilters((current) => ({ ...current, search: '' }));
   }, [mergeSlice, setFilters, setSelectedId, setSearchText]);
+
+  const findPath = useCallback(async (fromId: string, toId: string): Promise<boolean> => {
+    if (!apiContext) {
+      setError('Path needs the API server; open a graph.json report for focus and impact only.');
+      return false;
+    }
+    try {
+      const result = await fetchPath(apiContext.base, apiContext.graphId, fromId, toId, 16);
+      if (!result.found) {
+        setError('No call path between the selected endpoints.');
+        return false;
+      }
+      applyPath(result);
+      return true;
+    } catch (caught) {
+      setError(`Path failed: ${(caught as Error).message}`);
+      return false;
+    }
+  }, [apiContext, applyPath, setError]);
+
+  const setPathIndex = useCallback((index: number) => {
+    if (!path) return;
+    const next = Math.max(0, Math.min(path.path.length - 1, index));
+    setPathIndexState(next);
+    setSelectedId(path.path[next] ?? null);
+    setRouteIds(new Set(path.path));
+  }, [path, setSelectedId]);
+
+  const clearPath = useCallback(() => {
+    setPath(null);
+    setPathIndexState(0);
+    setRouteIds(new Set());
+    setFocusIds(null);
+  }, []);
 
   const openNeighborhood = useCallback(async (node: GraphNode) => {
     selectAndCenter(node.id);
@@ -422,6 +472,8 @@ export function useGraphView({
       setSelectedId(null);
       setFocusIds(null);
       setRouteIds(new Set());
+      setPath(null);
+      setPathIndexState(0);
       setFilters(defaultFilters());
       setSearchText('');
       setPositions({});
@@ -467,6 +519,20 @@ export function useGraphView({
   }, [flowNodes]);
 
   const onNodeClick: NodeMouseHandler = (_event, node) => {
+    if (mode === 'impact') {
+      const target = report?.nodes.find((candidate) => candidate.id === node.id);
+      if (target) void showImpact(target, 'in');
+      return;
+    }
+    if (mode === 'path' && path) {
+      const index = path.path.indexOf(node.id);
+      if (index >= 0) {
+        setPathIndex(index);
+        return;
+      }
+      setSelectedId(node.id);
+      return;
+    }
     selectAndCenter(node.id);
   };
   const onNodeDoubleClick: NodeMouseHandler = (_event, node) => {
@@ -476,6 +542,8 @@ export function useGraphView({
     setSelectedId(null);
     setFocusIds(null);
     setRouteIds(new Set());
+    setPath(null);
+    setPathIndexState(0);
     setEntryRoots([]);
     setEntryInfo(null);
     setFilters(defaultFilters());
@@ -510,6 +578,11 @@ export function useGraphView({
     clearFocus,
     clearSelection,
     selectAndCenter,
+    path,
+    pathIndex,
+    setPathIndex,
+    findPath,
+    clearPath,
     applyPath,
     openNeighborhood,
     showImpact,
