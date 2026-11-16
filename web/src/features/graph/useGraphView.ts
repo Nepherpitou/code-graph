@@ -217,9 +217,6 @@ export function useGraphView({
   const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
-  const positionsRef = useRef<Record<string, { x: number; y: number }>>({});
-  positionsRef.current = positions;
-  const visibleIdsRef = useRef<Set<string>>(new Set());
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
@@ -408,8 +405,6 @@ export function useGraphView({
       return;
     }
     if (layoutKind === 'layered') {
-      const visibleIds = new Set(visible.nodes.map((node) => node.id));
-      const previousIds = visibleIdsRef.current;
       const local = compactLayered(visible.nodes, visible.edges);
       const selected = selectedIdRef.current;
       const viewport = reactFlow.getViewport();
@@ -421,14 +416,12 @@ export function useGraphView({
           }
         : { x: 0, y: 0 };
       const selectedNode = selected ? visible.nodes.find((node) => node.id === selected) : null;
-      const anchor = selected && previousIds.has(selected) && positionsRef.current[selected]
-        ? positionsRef.current[selected]
-        : selectedNode
-          ? {
-              x: center.x - nodeSize(selectedNode).width / 2,
-              y: center.y - nodeSize(selectedNode).height / 2,
-            }
-          : center;
+      const anchor = selectedNode
+        ? {
+            x: center.x - nodeSize(selectedNode).width / 2,
+            y: center.y - nodeSize(selectedNode).height / 2,
+          }
+        : center;
       const localAnchorId = selected && local.positions[selected] ? selected : visible.nodes[0]?.id;
       const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
       const dx = localAnchor ? anchor.x - localAnchor.x : 0;
@@ -440,7 +433,6 @@ export function useGraphView({
         next[node.id] = { x: position.x + dx, y: position.y + dy };
       }
       setPositions(next);
-      visibleIdsRef.current = visibleIds;
       setLayouting(false);
       return;
     }
