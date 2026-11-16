@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { GraphNode } from '../../types';
 import { moduleLabel, splitNodeName } from '../../shared/format';
 
-const ROW_HEIGHT = 118;
-const OVERSCAN = 4;
 const RESULT_LIMIT = 100;
 
 interface Props {
@@ -41,70 +39,81 @@ function auditTopNodes(nodes: GraphNode[]): GraphNode[] {
     .slice(0, RESULT_LIMIT);
 }
 
+function escapePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlight(text: string, terms: string[]): ReactNode {
+  if (terms.length === 0) return text;
+  const pattern = new RegExp(`(${terms.map(escapePattern).join('|')})`, 'ig');
+  return text.split(pattern).map((part, index) =>
+    terms.some((term) => part.toLowerCase() === term)
+      ? <mark key={index}>{part}</mark>
+      : part);
+}
+
+/** Prefer exact/prefix symbol hits, then audit rank; alphabetical is the tie-break. */
+function matchScore(node: GraphNode, query: string): number {
+  const qname = node.qname.toLowerCase();
+  const name = node.name.toLowerCase();
+  const file = node.file.toLowerCase();
+  let score = node.metrics.hotspot;
+  if (qname === query) score += 1200;
+  else if (name === query) score += 900;
+  else if (name.startsWith(query)) score += 650;
+  else if (qname.endsWith(`.${query}`)) score += 550;
+  else if (qname.includes(query)) score += 300;
+  if (file.includes(query)) score += 40;
+  return score;
+}
+
 export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   const [query, setQuery] = useState('');
-  const [scrollTop, setScrollTop] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ordered = useMemo(() => sortedNodes(nodes), [nodes]);
   const auditTop = useMemo(() => auditTopNodes(nodes), [nodes]);
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const normalized = query.trim().toLowerCase();
+  const terms = useMemo(
+    () => normalized.split(/\s+/).filter(Boolean),
+    [normalized],
+  );
   const matches = useMemo(() => {
     if (terms.length === 0) return [];
-    return ordered.filter((node) => {
-      const haystack = searchText(node);
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [ordered, terms]);
+    return ordered
+      .filter((node) => terms.every((term) => searchText(node).includes(term)))
+      .map((node) => ({ node, score: matchScore(node, normalized) }))
+      .sort((left, right) =>
+        right.score - left.score
+        || left.node.qname.localeCompare(right.node.qname)
+        || left.node.id.localeCompare(right.node.id))
+      .map(({ node }) => node);
+  }, [normalized, ordered, terms]);
   const empty = terms.length === 0;
   const results = empty ? auditTop : matches.slice(0, RESULT_LIMIT);
+  const active = results[activeIndex] ?? null;
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
   useEffect(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const sync = (): void => setViewportHeight(element.clientHeight);
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
     setActiveIndex(0);
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [query]);
 
-  const active = results[activeIndex] ?? null;
-  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const end = Math.min(
-    results.length,
-    Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
-  );
-  const visible = results.slice(start, end);
-
-  const moveActive = (nextIndex: number): void => {
-    if (results.length === 0) return;
-    const bounded = Math.max(0, Math.min(results.length - 1, nextIndex));
-    setActiveIndex(bounded);
-    const element = scrollRef.current;
-    if (!element) return;
-    const top = bounded * ROW_HEIGHT;
-    const bottom = top + ROW_HEIGHT;
-    if (top < element.scrollTop) element.scrollTop = top;
-    else if (bottom > element.scrollTop + element.clientHeight) {
-      element.scrollTop = bottom - element.clientHeight;
-    }
-  };
+  useEffect(() => {
+    rowsRef.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
 
   const choose = (node: GraphNode | null): void => {
     if (node) onSelect(node);
+  };
+
+  const moveActive = (nextIndex: number): void => {
+    if (results.length === 0) return;
+    setActiveIndex(Math.max(0, Math.min(results.length - 1, nextIndex)));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -132,7 +141,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
   return (
     <div className="node-search-overlay" onMouseDown={onClose}>
       <section
-        className={`node-search-dialog${empty ? ' is-empty' : ''}`}
+        className="node-search-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Search nodes"
@@ -150,11 +159,13 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
               className="node-search-input"
               type="search"
               value={query}
-              placeholder="Search by class, member, file, kind, or node id…"
+              placeholder="Search nodes by name, file, kind, or id…"
               autoComplete="off"
               spellCheck={false}
               onChange={(event) => setQuery(event.target.value)}
               aria-label="Search nodes"
+              aria-controls="node-search-results"
+              aria-activedescendant={active ? `node-search-row-${activeIndex}` : undefined}
             />
             {query ? (
               <button
@@ -175,75 +186,76 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
             title="Close search (Esc)"
             aria-label="Close search"
           >
-            Close
+            ×
           </button>
         </header>
 
-        <div className="node-search-summary">
+        <div className="node-search-group">
+          <span>{empty ? 'Top by audit hotspot' : 'Matching nodes'}</span>
           <span className="node-search-count">
             {empty
-              ? `${results.length} top nodes by audit hotspot`
-              : `${results.length}${matches.length > results.length ? ` of ${matches.length}` : ''} matching nodes`}
-          </span>
-          <span className="node-search-hint">
-            <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close
+              ? `${results.length} nodes`
+              : `${results.length}${matches.length > results.length ? ` of ${matches.length}` : ''}`}
           </span>
         </div>
 
-        <div
-          className="node-search-results"
-          ref={scrollRef}
-          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-        >
+        <div className="node-search-results" id="node-search-results" role="listbox">
           {results.length === 0 ? (
-            <div className="node-search-empty">No matching nodes.</div>
-          ) : (
-            <div className="node-search-track" style={{ height: results.length * ROW_HEIGHT }}>
-              {visible.map((node, offset) => {
-                const index = start + offset;
-                const { container, member } = splitNodeName(node.qname);
-                const className = container || moduleLabel(node.file);
-                const activeRow = index === activeIndex;
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    className={`node-search-row kind-${node.kind}${activeRow ? ' active' : ''}`}
-                    style={{ top: index * ROW_HEIGHT }}
-                    onClick={() => choose(node)}
-                    onMouseEnter={() => setActiveIndex(index)}
-                  >
-                    <span className="node-search-body">
-                      <span className="node-search-head">
-                        <span className="node-search-kind">{node.kind}</span>
-                        <span className="node-search-class">{className}</span>
-                        <span className="node-search-member">{member}</span>
-                        <span className="node-search-chips">
-                          {node.isEntryLike ? <span className="card-chip success">entry</span> : null}
-                          {node.metrics.inCycle ? <span className="card-chip cycle">cycle</span> : null}
-                          {node.metrics.deadCodeCandidate ? <span className="card-chip danger">dead</span> : null}
-                          {node.synthetic ? <span className="card-chip hidden">type</span> : null}
-                        </span>
-                      </span>
-                      <span className="node-search-file">{node.file}:{node.line}</span>
-                      <span className="node-search-metrics">
-                        <span>fan-in <b>{node.metrics.fanIn}</b></span>
-                        <span>fan-out <b>{node.metrics.fanOut}</b></span>
-                        <span>reach <b>{node.metrics.transitiveFanOut}</b></span>
-                        <span>depth <b>{node.metrics.depth}</b></span>
-                        <span>height <b>{node.metrics.height}</b></span>
-                        <span>cc <b>{node.cyclomatic}</b></span>
-                        <span>loc <b>{node.loc}</b></span>
-                        <span>hotspot <b>{node.metrics.hotspot.toFixed(2)}</b></span>
-                      </span>
-                      <code className="node-search-id" title={node.id}>{node.id}</code>
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="node-search-empty">
+              <strong>No matching nodes.</strong>
+              <span>Try a shorter query, a file name, or a node id.</span>
+              <button className="button" type="button" onClick={() => setQuery('')}>
+                Clear search
+              </button>
             </div>
-          )}
+          ) : results.map((node, index) => {
+            const { container, member } = splitNodeName(node.qname);
+            const className = container || moduleLabel(node.file);
+            const activeRow = index === activeIndex;
+            return (
+              <button
+                key={node.id}
+                id={`node-search-row-${index}`}
+                ref={(element) => { rowsRef.current[index] = element; }}
+                type="button"
+                role="option"
+                aria-selected={activeRow}
+                tabIndex={-1}
+                className={`node-search-row kind-${node.kind}${activeRow ? ' active' : ''}`}
+                onClick={() => choose(node)}
+                onMouseEnter={() => setActiveIndex(index)}
+              >
+                <span className="node-search-kind">{node.kind}</span>
+                <span className="node-search-main">
+                  <span className="node-search-title">
+                    <span className="node-search-class">{highlight(className, terms)}</span>
+                    <span className="node-search-member">{highlight(member, terms)}</span>
+                  </span>
+                  <span className="node-search-sub">
+                    <span className="node-search-file" title={`${node.file}:${node.line}`}>{node.file}:{node.line}</span>
+                    <span className="node-search-metrics">
+                      in <b>{node.metrics.fanIn}</b> · out <b>{node.metrics.fanOut}</b>
+                      {' · '}hotspot <b>{node.metrics.hotspot.toFixed(2)}</b>
+                    </span>
+                  </span>
+                </span>
+                <span className="node-search-chips">
+                  {node.isEntryLike ? <span className="card-chip success">entry</span> : null}
+                  {node.metrics.inCycle ? <span className="card-chip cycle">cycle</span> : null}
+                  {node.metrics.deadCodeCandidate ? <span className="card-chip danger">dead</span> : null}
+                  {node.synthetic ? <span className="card-chip hidden">type</span> : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
+
+        <footer className="node-search-footer">
+          <span>{empty ? 'Ranked by hotspot, then name' : 'Ranked by match, then audit score'}</span>
+          <span className="node-search-hint">
+            <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close
+          </span>
+        </footer>
       </section>
     </div>
   );

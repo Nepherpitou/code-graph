@@ -235,12 +235,17 @@ export function App() {
         </div>
         <div className="actions">
           <button
-            className="button"
+            className="button search-trigger"
             onClick={() => setSearchOpen(true)}
             disabled={state.allNodes.length === 0}
             title="Search all nodes (/)"
           >
+            <svg className="search-trigger-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-4.2-4.2" />
+            </svg>
             Search
+            <kbd>/</kbd>
           </button>
           {canRefresh ? (
             <button
