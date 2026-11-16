@@ -346,19 +346,23 @@ impl QueryService {
         let depth = depth.clamp(1, 8);
         let limit = limit.clamp(1, 5000);
         let mut visited: HashSet<usize> = HashSet::new();
-        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
-        for root in roots {
-            if let Some(&node) = index.key_to_idx.get(root) {
-                if visited.insert(node) {
-                    queue.push_back((node, 0));
-                }
-            }
-        }
+        // Spend the budget root by root: each entry point and then its direct
+        // callees, before moving to the next entry point. Second-level callees
+        // are only considered after every root and first level had a chance.
+        let mut first_level: Vec<usize> = Vec::new();
         let mut truncated = false;
-        while let Some((node, distance)) = queue.pop_front() {
-            if distance >= depth {
+        for root in roots {
+            let Some(&node) = index.key_to_idx.get(root) else {
+                continue;
+            };
+            if visited.contains(&node) {
                 continue;
             }
+            if visited.len() >= limit {
+                truncated = true;
+                break;
+            }
+            visited.insert(node);
             for edge in &index.out_call[node] {
                 let next = index.edges[*edge].target;
                 if visited.contains(&next) {
@@ -369,8 +373,30 @@ impl QueryService {
                     continue;
                 }
                 visited.insert(next);
-                queue.push_back((next, distance + 1));
+                first_level.push(next);
             }
+        }
+        let mut current_level = first_level;
+        for _ in 2..=depth {
+            let mut next_level: Vec<usize> = Vec::new();
+            for node in current_level {
+                for edge in &index.out_call[node] {
+                    let next = index.edges[*edge].target;
+                    if visited.contains(&next) {
+                        continue;
+                    }
+                    if visited.len() >= limit {
+                        truncated = true;
+                        continue;
+                    }
+                    visited.insert(next);
+                    next_level.push(next);
+                }
+            }
+            if next_level.is_empty() {
+                break;
+            }
+            current_level = next_level;
         }
         let keys: Vec<String> = visited
             .iter()
