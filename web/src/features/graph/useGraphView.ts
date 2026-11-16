@@ -74,6 +74,7 @@ interface Input {
   report: GraphReport | null;
   snapshot: GraphSummary | null;
   allNodes: GraphNode[];
+  allEdges: GraphEdge[];
   setReport: Dispatch<SetStateAction<GraphReport | null>>;
   apiContext: { base: string; graphId: string } | null;
   setError: (message: string | null) => void;
@@ -130,6 +131,7 @@ export function useGraphView({
   report,
   snapshot,
   allNodes,
+  allEdges,
   setReport,
   apiContext,
   setError,
@@ -286,20 +288,44 @@ export function useGraphView({
       bucket.push(node);
       layers.set(depth, bucket);
     }
+    const incoming = new Map<string, string[]>();
+    for (const edge of allEdges) {
+      const sources = incoming.get(edge.target) ?? [];
+      sources.push(edge.source);
+      incoming.set(edge.target, sources);
+    }
     const result: Record<string, { x: number; y: number }> = {};
-    for (const [depth, nodes] of layers) {
-      nodes.sort((left, right) =>
-        Number(right.isEntryLike) - Number(left.isEntryLike)
-        || left.file.localeCompare(right.file)
-        || left.line - right.line
-        || left.qname.localeCompare(right.qname)
-        || left.id.localeCompare(right.id));
+    const rowById = new Map<string, number>();
+    const orderedDepths = [...layers.keys()].sort((left, right) => left - right);
+    for (const depth of orderedDepths) {
+      const nodes = layers.get(depth) ?? [];
+      const score = new Map<string, number>();
+      for (const node of nodes) {
+        const parentRows = (incoming.get(node.id) ?? [])
+          .map((id) => rowById.get(id))
+          .filter((row): row is number => row !== undefined);
+        score.set(node.id, parentRows.length > 0 ? Math.min(...parentRows) : Infinity);
+      }
+      nodes.sort((left, right) => {
+        const leftScore = score.get(left.id) ?? Infinity;
+        const rightScore = score.get(right.id) ?? Infinity;
+        if (Number.isFinite(leftScore) !== Number.isFinite(rightScore)) {
+          return Number.isFinite(leftScore) ? -1 : 1;
+        }
+        if (Number.isFinite(leftScore) && leftScore !== rightScore) return leftScore - rightScore;
+        return Number(right.isEntryLike) - Number(left.isEntryLike)
+          || left.file.localeCompare(right.file)
+          || left.line - right.line
+          || left.qname.localeCompare(right.qname)
+          || left.id.localeCompare(right.id);
+      });
       nodes.forEach((node, row) => {
         result[node.id] = { x: depth * columnWidth, y: row * rowHeight };
+        rowById.set(node.id, row);
       });
     }
     return result;
-  }, [layoutSource]);
+  }, [layoutSource, allEdges]);
 
   const layoutNodes = useMemo(
     () => visible.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),

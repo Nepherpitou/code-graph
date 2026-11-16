@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 
 import {
-  fetchAllNodes,
+  fetchBootstrap,
   fetchGraphs,
   fetchGraphSummary,
   fetchOverview,
@@ -10,6 +10,7 @@ import {
 } from '../../lib/api';
 import type {
   AnalysisStatus,
+  GraphEdge,
   GraphNode,
   GraphReport,
   GraphSummary,
@@ -23,6 +24,7 @@ export interface SnapshotSlice {
   overview: Overview | null;
   fileOverview: Overview | null;
   allNodes: GraphNode[];
+  allEdges: GraphEdge[];
   apiContext: { base: string; graphId: string } | null;
   analysisStatus: AnalysisStatus | null;
   loading: boolean;
@@ -40,6 +42,7 @@ export function useSnapshot(): SnapshotSlice {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [fileOverview, setFileOverview] = useState<Overview | null>(null);
   const [allNodes, setAllNodes] = useState<GraphNode[]>([]);
+  const [allEdges, setAllEdges] = useState<GraphEdge[]>([]);
   const [apiContext, setApiContext] = useState<{ base: string; graphId: string } | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +57,7 @@ export function useSnapshot(): SnapshotSlice {
     setOverview(null);
     setFileOverview(null);
     setAllNodes(data.nodes);
+    setAllEdges(data.edges);
     setApiContext(null);
     setError(null);
     setLoading(false);
@@ -77,14 +81,15 @@ export function useSnapshot(): SnapshotSlice {
       }
       const resolved = status.graphId ? String(status.graphId) : graphId;
       const summary = await fetchGraphSummary(base, resolved);
-      const [nextOverview, nodes] = await Promise.all([
+      const [nextOverview, graph] = await Promise.all([
         fetchOverview(base, resolved, 'dir'),
-        fetchAllNodes(base, resolved, Math.max(1, summary.stats.nodes)),
+        fetchBootstrap(base, resolved, Math.max(1, summary.stats.nodes)),
       ]);
       setSnapshot(summary);
       setOverview(nextOverview);
       setFileOverview(null);
-      setAllNodes(nodes);
+      setAllNodes(graph.nodes);
+      setAllEdges(graph.edges);
       setReport(null);
       setApiContext({ base, graphId: String(summary.id) });
       setLoading(false);
@@ -203,6 +208,7 @@ export function useSnapshot(): SnapshotSlice {
     overview,
     fileOverview,
     allNodes,
+    allEdges,
     apiContext,
     analysisStatus,
     loading,

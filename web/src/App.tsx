@@ -25,6 +25,7 @@ export function App() {
     report: state.report,
     snapshot: state.snapshot,
     allNodes: state.allNodes,
+    allEdges: state.allEdges,
     setReport: state.setReport,
     apiContext: state.apiContext,
     setError: state.setError,

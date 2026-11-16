@@ -54,6 +54,7 @@ export interface FlowEdgeData extends Record<string, unknown> {
   highlighted: boolean;
   route?: boolean;
   obstacles?: EdgeObstacle[];
+  lane?: number;
 }
 
 export interface GhostNodeData extends Record<string, unknown> {
@@ -296,6 +297,25 @@ export function toFlowEdges(
     }
     return true;
   });
+  const outgoing = new Map<string, GraphEdge[]>();
+  for (const edge of scoped) {
+    const list = outgoing.get(edge.source) ?? [];
+    list.push(edge);
+    outgoing.set(edge.source, list);
+  }
+  const laneById = new Map<string, number>();
+  for (const list of outgoing.values()) {
+    const ordered = [...list].sort((left, right) => {
+      const leftTarget = obstacles.find((box) => box.id === left.target);
+      const rightTarget = obstacles.find((box) => box.id === right.target);
+      return (leftTarget?.y ?? 0) - (rightTarget?.y ?? 0)
+        || left.target.localeCompare(right.target)
+        || left.id.localeCompare(right.id);
+    });
+    ordered.forEach((edge, index) => {
+      laneById.set(edge.id, index - (ordered.length - 1) / 2);
+    });
+  }
   return scoped.map((edge) => {
     const inferred = Boolean(edge.inferred);
     const data = edge.kind === 'data';
@@ -323,7 +343,7 @@ export function toFlowEdges(
       target: edge.target,
       sourceHandle,
       targetHandle,
-      type: 'smoothstep',
+      type: 'lane',
       animated: false,
       label: showLabel ? `${edge.sites}×` : undefined,
       labelStyle: { fill: 'var(--muted)', fontSize: 10, fontFamily: MONO },
@@ -331,7 +351,7 @@ export function toFlowEdges(
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
       interactionWidth: 18,
-      data: { edge, dimmed, highlighted, route, obstacles },
+      data: { edge, dimmed, highlighted, route, obstacles, lane: laneById.get(edge.id) ?? 0 },
       style: {
         stroke: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
         strokeWidth: route ? 4 : highlighted ? 2.4 : 1.2,
