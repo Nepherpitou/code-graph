@@ -208,6 +208,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
                 aria-selected={activeRow}
                 tabIndex={-1}
                 className={`node-search-row kind-${node.kind}${activeRow ? ' active' : ''}`}
+                title={node.id}
                 onClick={() => choose(node)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
@@ -224,6 +225,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
                       {' · '}hotspot <b>{node.metrics.hotspot.toFixed(2)}</b>
                     </span>
                   </span>
+                  <code className="node-search-id" title={node.id}>{node.id}</code>
                 </span>
                 <span className="node-search-chips">
                   {node.isEntryLike ? <span className="card-chip success">entry</span> : null}
