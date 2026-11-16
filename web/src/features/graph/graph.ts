@@ -4,7 +4,9 @@ import type { GraphEdge, GraphNode, GraphReport } from '../../types';
 export const CARD_WIDTH = 212;
 export const CARD_HEIGHT = 86;
 export const CONSTANT_WIDTH = 176;
-export const CONSTANT_HEIGHT = 58;
+// Variables/constants still have two title lines plus the metrics row. At the
+// old 58px the content overflowed and the top/bottom padding disappeared.
+export const CONSTANT_HEIGHT = 76;
 
 /** Below this zoom the card's 12px name is under 9px, so text is no longer readable. */
 export const MIN_READABLE_ZOOM = 0.8;

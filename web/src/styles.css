@@ -615,11 +615,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   font-size: 10.5px;
   color: var(--muted);
   line-height: 1.2;
+  white-space: nowrap;
 }
+.card-meta > span { flex: 0 0 auto; white-space: nowrap; }
 .card-meta b { color: var(--fg); font-weight: 600; }
 .card-file {
   margin-left: auto;
+  min-width: 0;
   max-width: 84px;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -815,10 +819,17 @@ button.directory-row:hover { background: var(--panel-2); }
 }
 .ghost-edge-label {
   position: absolute;
-  color: var(--muted);
+  z-index: 6;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
-  opacity: 0.72;
+  line-height: 1.4;
+  opacity: 0.95;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--border) 60%, transparent);
   pointer-events: none;
   white-space: nowrap;
 }

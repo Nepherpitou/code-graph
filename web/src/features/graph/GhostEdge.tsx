@@ -1,5 +1,5 @@
 import { useId, memo } from 'react';
-import { EdgeLabelRenderer, type Edge, type EdgeProps } from '@xyflow/react';
+import { EdgeLabelRenderer, useViewport, type Edge, type EdgeProps } from '@xyflow/react';
 
 import { GHOST_STUB, type GhostEdgeData } from './graph';
 
@@ -14,6 +14,8 @@ export const GhostEdge = memo(function GhostEdge({
   data,
 }: EdgeProps<Edge<GhostEdgeData>>) {
   const gradientId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const { zoom } = useViewport();
+  const labelScale = zoom > 0 ? 1 / zoom : 1;
   const hidden = data?.hidden ?? 0;
   const width = data?.nodeWidth ?? 0;
   const height = data?.nodeHeight ?? 0;
@@ -50,13 +52,16 @@ export const GhostEdge = memo(function GhostEdge({
         strokeWidth={1.4}
         strokeDasharray="4 4"
         strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
         pointerEvents="none"
       />
       {hidden > 0 ? (
         <EdgeLabelRenderer>
           <div
             className="ghost-edge-label"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(${labelScale})`,
+            }}
             title={`${hidden} connection${hidden === 1 ? '' : 's'} outside this slice`}
           >
             +{hidden}
