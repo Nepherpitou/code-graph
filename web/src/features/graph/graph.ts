@@ -258,16 +258,25 @@ export function toFlowEdges(
         : inferred ? 'var(--warning)' : data ? 'var(--success)' : returnsValue ? 'var(--accent)' : 'var(--edge-call)';
     const dash = route || history ? undefined : inferred || data || unknown ? '6 4' : undefined;
     const highlighted = selectedId !== null && (edge.source === selectedId || edge.target === selectedId || history);
-    const dimmed = selectedId !== null && !highlighted && !(neighborIds.has(edge.source) && neighborIds.has(edge.target));
+    const dimmed = selectedId !== null
+      && !highlighted
+      && !route
+      && !history
+      && !(neighborIds.has(edge.source) && neighborIds.has(edge.target));
     // A call graph is a context view, not a hairball: only the selected node's
     // relationships and the execution route deserve visual weight.
     const showLabel = edge.kind === 'call' && edge.sites > 1 && (highlighted || route || history);
     const sourceBox = obstacles.find((box) => box.id === edge.source);
     const targetBox = obstacles.find((box) => box.id === edge.target);
     const sameColumn = Boolean(sourceBox && targetBox && Math.abs(sourceBox.x - targetBox.x) < 1);
+    const upward = sameColumn && Boolean(sourceBox && targetBox && targetBox.y < sourceBox.y);
     const forward = !targetBox || !sourceBox || targetBox.x >= sourceBox.x;
-    const sourceHandle = sameColumn ? 'source-bottom' : forward ? 'source-right' : 'source-left';
-    const targetHandle = sameColumn ? 'target-top' : forward ? 'target-left' : 'target-right';
+    const sourceHandle = sameColumn
+      ? upward ? 'source-top' : 'source-bottom'
+      : forward ? 'source-right' : 'source-left';
+    const targetHandle = sameColumn
+      ? upward ? 'target-bottom' : 'target-top'
+      : forward ? 'target-left' : 'target-right';
     return {
       id: edge.id,
       source: edge.source,

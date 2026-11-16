@@ -72,6 +72,81 @@ interface CompactLayout {
   rowHeight: number;
 }
 
+function directedDistances(
+  edges: GraphEdge[],
+  rootId: string,
+  direction: 'in' | 'out',
+): Map<string, number> {
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges) {
+    const from = direction === 'in' ? edge.target : edge.source;
+    const to = direction === 'in' ? edge.source : edge.target;
+    const list = adjacency.get(from) ?? [];
+    list.push(to);
+    adjacency.set(from, list);
+  }
+  const distances = new Map<string, number>([[rootId, 0]]);
+  const queue = [rootId];
+  for (let head = 0; head < queue.length; head += 1) {
+    const id = queue[head];
+    const distance = distances.get(id)!;
+    for (const next of adjacency.get(id) ?? []) {
+      if (distances.has(next)) continue;
+      distances.set(next, distance + 1);
+      queue.push(next);
+    }
+  }
+  return distances;
+}
+
+/** Focus mode reads as callers | selected node | callees, not as a call-depth chain. */
+function focusLayered(nodes: GraphNode[], edges: GraphEdge[], rootId: string): CompactLayout {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  if (!nodeById.has(rootId)) return compactLayered(nodes, edges, [rootId]);
+  const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
+  const maxWidth = Math.max(180, ...nodes.map((node) => sizes.get(node.id)!.width));
+  const maxHeight = Math.max(72, ...nodes.map((node) => sizes.get(node.id)!.height));
+  const columnWidth = maxWidth + 140;
+  const rowHeight = maxHeight + 56;
+  const incoming = directedDistances(edges, rootId, 'in');
+  const outgoing = directedDistances(edges, rootId, 'out');
+  const incomingIds = [...incoming.keys()]
+    .filter((id) => id !== rootId && nodeById.has(id) && !outgoing.has(id))
+    .sort((left, right) =>
+      incoming.get(left)! - incoming.get(right)!
+      || nodeById.get(left)!.qname.localeCompare(nodeById.get(right)!.qname));
+  const outgoingIds = [...outgoing.keys()]
+    .filter((id) => id !== rootId && nodeById.has(id) && !incoming.has(id))
+    .sort((left, right) =>
+      outgoing.get(left)! - outgoing.get(right)!
+      || nodeById.get(left)!.qname.localeCompare(nodeById.get(right)!.qname));
+  const positions: Record<string, { x: number; y: number }> = {
+    [rootId]: { x: 0, y: 0 },
+  };
+  const place = (ids: string[], x: number): void => {
+    ids.forEach((id, index) => {
+      positions[id] = {
+        x,
+        y: (index - (ids.length - 1) / 2) * rowHeight,
+      };
+    });
+  };
+  place(incomingIds, -columnWidth);
+  place(outgoingIds, columnWidth);
+  const leftover = nodes
+    .filter((node) => !positions[node.id])
+    .map((node) => node.id)
+    .sort((left, right) => nodeById.get(left)!.qname.localeCompare(nodeById.get(right)!.qname));
+  const contextY = (Math.max(incomingIds.length, outgoingIds.length) / 2 + 1.5) * rowHeight;
+  leftover.forEach((id, index) => {
+    positions[id] = {
+      x: (index % 3) * columnWidth,
+      y: contextY + Math.floor(index / 3) * rowHeight,
+    };
+  });
+  return { positions, rowHeight };
+}
+
 function compactLayered(nodes: GraphNode[], edges: GraphEdge[], rootIds: string[]): CompactLayout {
   if (nodes.length === 0) return { positions: {}, rowHeight: 0 };
   const sizes = new Map(nodes.map((node) => [node.id, nodeSize(node)]));
@@ -531,7 +606,9 @@ export function useGraphView({
       const roots = selected
         ? [selected]
         : entryRoots.map((root) => root.id);
-      const local = compactLayered(visible.nodes, visible.edges, roots);
+      const local = selected && focusIds !== null
+        ? focusLayered(visible.nodes, visible.edges, selected)
+        : compactLayered(visible.nodes, visible.edges, roots);
       const viewport = reactFlow.getViewport();
       const host = document.querySelector('.react-flow')?.getBoundingClientRect();
       const center = host
@@ -642,7 +719,7 @@ export function useGraphView({
       window.clearTimeout(timer);
       cancelLayout();
     };
-  }, [viewKey, layoutScope, canonicalPositions, entryRoots]);
+  }, [viewKey, layoutScope, canonicalPositions, entryRoots, focusIds]);
 
   const frameNodes = useCallback((nodes: FlowNode[]) => {
     if (nodes.length < 2) return;
