@@ -256,6 +256,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .legend-item .line.warning { border-top-color: var(--warning); color: var(--warning); }
 .legend-item .line.success { border-top-color: var(--success); color: var(--success); }
 .legend-item .line.route { border-top-color: var(--route); color: var(--route); }
+.legend-item .line.history { border-top-color: var(--danger); color: var(--danger); }
 .legend-item .line.ghost { border-top-color: var(--muted); color: var(--muted); opacity: 0.6; }
 .legend-item .line.dashed { border-top-style: dashed; }
 

@@ -120,6 +120,9 @@ export function FilterPanel({
           <span className="legend-item"><i className="line double accent" />result used ↔</span>
           <span className="legend-item"><i className="line dashed warning" />inferred (refs)</span>
           <span className="legend-item"><i className="line dashed success" />constant use ⇢</span>
+          <span className="legend-item" title="edges traversed while focusing nodes">
+            <i className="line history" />focus history
+          </span>
           <span className="legend-item" title="shortest entry → exit route through the focused node">
             <i className="line route" />execution route
           </span>

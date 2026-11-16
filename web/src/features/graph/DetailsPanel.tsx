@@ -88,6 +88,7 @@ export function DetailsPanel({ report, node, onSelect, onFocus, onClearFocus, on
         <p className="muted">Select a node to inspect metrics, callers, and callees.</p>
         <ul className="hints">
           <li><b>Click</b> a card to focus its direct neighbours and shortest entry→exit route.</li>
+          <li><b>Red path</b> is the focus-navigation history; <b>amber</b> is the shortest route.</li>
           <li><b>Double-click</b> to focus the same connected slice.</li>
           <li><b>Top entries</b> returns to the entry-point overview.</li>
           <li>Arrowheads point at callees; a second arrowhead means the result is used.</li>

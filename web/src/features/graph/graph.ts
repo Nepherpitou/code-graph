@@ -53,6 +53,7 @@ export interface FlowEdgeData extends Record<string, unknown> {
   dimmed: boolean;
   highlighted: boolean;
   route?: boolean;
+  history?: boolean;
   obstacles?: EdgeObstacle[];
   lane?: number;
 }
@@ -283,6 +284,7 @@ export function toFlowEdges(
   selectedId: string | null,
   neighborIds: Set<string>,
   routeIds: Set<string> = new Set(),
+  historyEdgeIds: Set<string> = new Set(),
   obstacles: EdgeObstacle[] = [],
   mode: 'focus' | 'path' | 'impact' = 'focus',
 ): FlowEdge[] {
@@ -293,7 +295,8 @@ export function toFlowEdges(
     if (mode === 'focus') {
       return edge.source === selectedId
         || edge.target === selectedId
-        || (routeIds.has(edge.source) && routeIds.has(edge.target));
+        || (routeIds.has(edge.source) && routeIds.has(edge.target))
+        || historyEdgeIds.has(edge.id);
     }
     return true;
   });
@@ -322,15 +325,17 @@ export function toFlowEdges(
     const returnsValue = edge.kind === 'call' && (edge.resultUsed === 'all' || edge.resultUsed === 'some');
     const unknown = edge.kind === 'call' && edge.resultUsed === 'unknown';
     const route = routeIds.has(edge.source) && routeIds.has(edge.target);
-    const color = route
-      ? 'var(--success)'
-      : inferred ? 'var(--warning)' : data ? 'var(--success)' : returnsValue ? 'var(--accent)' : 'var(--edge-call)';
-    const dash = route ? undefined : inferred || data || unknown ? '6 4' : undefined;
-    const highlighted = selectedId !== null && (edge.source === selectedId || edge.target === selectedId);
+    const history = mode === 'focus' && historyEdgeIds.has(edge.id);
+    const color = history
+      ? 'var(--danger)'
+      : route ? 'var(--success)'
+        : inferred ? 'var(--warning)' : data ? 'var(--success)' : returnsValue ? 'var(--accent)' : 'var(--edge-call)';
+    const dash = route || history ? undefined : inferred || data || unknown ? '6 4' : undefined;
+    const highlighted = selectedId !== null && (edge.source === selectedId || edge.target === selectedId || history);
     const dimmed = selectedId !== null && !highlighted && !(neighborIds.has(edge.source) && neighborIds.has(edge.target));
     // A call graph is a context view, not a hairball: only the selected node's
     // relationships and the execution route deserve visual weight.
-    const showLabel = edge.kind === 'call' && edge.sites > 1 && (highlighted || route);
+    const showLabel = edge.kind === 'call' && edge.sites > 1 && (highlighted || route || history);
     const sourceBox = obstacles.find((box) => box.id === edge.source);
     const targetBox = obstacles.find((box) => box.id === edge.target);
     const sameColumn = Boolean(sourceBox && targetBox && Math.abs(sourceBox.x - targetBox.x) < 1);
@@ -351,16 +356,16 @@ export function toFlowEdges(
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
       interactionWidth: 18,
-      data: { edge, dimmed, highlighted, route, obstacles, lane: laneById.get(edge.id) ?? 0 },
+      data: { edge, dimmed, highlighted, route, history, obstacles, lane: laneById.get(edge.id) ?? 0 },
       style: {
-        stroke: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-        strokeWidth: route ? 4 : highlighted ? 2.4 : 1.2,
+        stroke: history ? 'var(--danger)' : route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
+        strokeWidth: history ? 3.2 : route ? 4 : highlighted ? 2.4 : 1.2,
         strokeDasharray: dash,
-        opacity: dimmed ? 0.08 : route || highlighted ? 1 : 0.34,
+        opacity: dimmed ? 0.08 : history || route || highlighted ? 1 : 0.34,
       },
       markerEnd: {
         type: 'arrowclosed',
-        color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
+        color: history ? 'var(--danger)' : route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
         width: 20,
         height: 20,
         markerUnits: 'userSpaceOnUse',
@@ -368,7 +373,7 @@ export function toFlowEdges(
       markerStart: returnsValue
         ? {
             type: 'arrowclosed',
-            color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
+            color: history ? 'var(--danger)' : route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
             width: 20,
             height: 20,
             markerUnits: 'userSpaceOnUse',

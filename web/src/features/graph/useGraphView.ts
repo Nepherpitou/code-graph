@@ -205,6 +205,8 @@ export function useGraphView({
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIds, setFocusIds] = useState<Set<string> | null>(null);
+  const [focusHistory, setFocusHistory] = useState<string[]>([]);
+  const focusHistoryRef = useRef<string[]>([]);
   const [routeIds, setRouteIds] = useState<Set<string>>(new Set());
   const [path, setPath] = useState<PathResult | null>(null);
   const [pathIndex, setPathIndexState] = useState(0);
@@ -247,6 +249,22 @@ export function useGraphView({
     return result;
   }, [report, selectedId]);
 
+  const historyEdgeIds = useMemo(() => {
+    const result = new Set<string>();
+    const edges = report?.edges ?? allEdges;
+    for (let index = 1; index < focusHistory.length; index += 1) {
+      const previous = focusHistory[index - 1];
+      const current = focusHistory[index];
+      for (const edge of edges) {
+        if ((edge.source === previous && edge.target === current)
+          || (edge.source === current && edge.target === previous)) {
+          result.add(edge.id);
+        }
+      }
+    }
+    return result;
+  }, [allEdges, focusHistory, report]);
+
   const hidden = useMemo(
     () => hiddenRelations(visible.nodes, visible.edges),
     [visible],
@@ -285,11 +303,24 @@ export function useGraphView({
 
   const flowEdges = useMemo<FlowEdge[]>(
     () => [
-      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, obstacles, mode),
+      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, mode),
       ...ghostEdges,
     ],
-    [visible.edges, selectedId, neighborIds, routeIds, obstacles, ghostEdges, mode],
+    [visible.edges, selectedId, neighborIds, routeIds, historyEdgeIds, obstacles, ghostEdges, mode],
   );
+
+  const rememberFocus = useCallback((id: string) => {
+    const current = focusHistoryRef.current;
+    if (current[current.length - 1] === id) return;
+    const next = [...current, id];
+    focusHistoryRef.current = next;
+    setFocusHistory(next);
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    focusHistoryRef.current = [];
+    setFocusHistory([]);
+  }, []);
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {
     // A focused slice is a new scope; a plain selection only adds that node's
@@ -327,10 +358,11 @@ export function useGraphView({
         // would dim every match and leave an unrelated inspector open.
         setSelectedId(null);
         setFocusIds(null);
+        clearHistory();
       }
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [searchText]);
+  }, [clearHistory, searchText]);
 
   const layoutSource = allNodes.length > 0 ? allNodes : report?.nodes ?? [];
   const canonicalPositions = useMemo(() => {
@@ -596,6 +628,7 @@ export function useGraphView({
     // route. The API slice also carries a wider context window; do not show it.
     const focus = neighborhood(focusedReport, id, FOCUS_DEPTH);
     for (const routeNode of slice.route) focus.add(routeNode);
+    for (const historyId of focusHistoryRef.current) focus.add(historyId);
     // Merge rather than replace: previously placed nodes keep their positions
     // when the user walks deeper through the call graph.
     mergeSlice(slice, focus);
@@ -608,6 +641,7 @@ export function useGraphView({
   }, [mergeSlice, snapshot, setEntryInfo, setEntryRoots, setSelectedId]);
 
   const selectAndCenter = useCallback((id: string) => {
+    if (mode === 'focus') rememberFocus(id);
     setSelectedId(id);
     // A node selection is a new exploration scope: reveal only its connected
     // slice so the node budget is spent on neighbours, not on unrelated entry
@@ -621,7 +655,9 @@ export function useGraphView({
       setEntryRoots([]);
       setEntryInfo(null);
       setRouteIds(new Set());
-      setFocusIds(neighborhood(report, id, FOCUS_DEPTH));
+      const focus = neighborhood(report, id, FOCUS_DEPTH);
+      for (const historyId of focusHistoryRef.current) focus.add(historyId);
+      setFocusIds(focus);
       return;
     }
 
@@ -641,6 +677,8 @@ export function useGraphView({
     setFilters,
     setFocusIds,
     setSearchText,
+    mode,
+    rememberFocus,
   ]);
 
   const focusNode = useCallback((id: string) => {
@@ -650,7 +688,8 @@ export function useGraphView({
   const clearFocus = useCallback(() => {
     setFocusIds(null);
     setSelectedId(null);
-  }, []);
+    clearHistory();
+  }, [clearHistory]);
 
   const clearSelection = useCallback(() => {
     setSelectedId(null);
@@ -816,6 +855,7 @@ export function useGraphView({
   const resetGraphView = useCallback(() => {
     setSelectedId(null);
     setFocusIds(null);
+    clearHistory();
     setRouteIds(new Set());
     setPath(null);
     setPathIndexState(0);
@@ -824,7 +864,7 @@ export function useGraphView({
     setFilters(defaultFilters());
     setSearchText('');
     setPositions({});
-  }, []);
+  }, [clearHistory]);
 
   return {
     report,
