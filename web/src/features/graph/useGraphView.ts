@@ -256,6 +256,7 @@ export function useGraphView({
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
   const clickTimer = useRef<number | null>(null);
+  const focusRequest = useRef(0);
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const entryIds = useMemo(
@@ -396,6 +397,7 @@ export function useGraphView({
       if (searchText.trim()) {
         // A filtered graph is a new result set; keeping a selection outside it
         // would dim every match and leave an unrelated inspector open.
+        focusRequest.current += 1;
         setSelectedId(null);
         setFocusIds(null);
         clearHistory();
@@ -682,7 +684,6 @@ export function useGraphView({
 
   const selectAndCenter = useCallback((id: string) => {
     if (mode === 'focus') rememberFocus(id);
-    setSelectedId(id);
     // A node selection is a new exploration scope: reveal only its connected
     // slice so the node budget is spent on neighbours, not on unrelated entry
     // points that happen to be in the previous view.
@@ -692,6 +693,8 @@ export function useGraphView({
     if (!apiContext || !snapshot) {
       // Local JSON report: filter the in-memory graph around the selection.
       if (!report) return;
+      focusRequest.current += 1;
+      setSelectedId(id);
       setEntryRoots([]);
       setEntryInfo(null);
       setRouteIds(new Set());
@@ -701,11 +704,20 @@ export function useGraphView({
       return;
     }
 
+    // Keep the previous focus and its edges until the new slice arrives. Setting
+    // selectedId first would scope the old edges to a node that is not in the
+    // old focus, making every link disappear during the request.
+    const request = focusRequest.current + 1;
+    focusRequest.current = request;
     // Direct neighbours, the shortest entry→selection→exit route, and the
     // surrounding two-hop context, with the same node budget as the initial view.
     void fetchFocus(apiContext.base, apiContext.graphId, id, FOCUS_LIMIT)
-      .then((slice) => showFocusedSlice(slice, id))
-      .catch((caught: Error) => setError(caught.message));
+      .then((slice) => {
+        if (request === focusRequest.current) showFocusedSlice(slice, id);
+      })
+      .catch((caught: Error) => {
+        if (request === focusRequest.current) setError(caught.message);
+      });
   }, [
     apiContext,
     snapshot,
@@ -731,6 +743,7 @@ export function useGraphView({
   }, [clearHistory, selectAndCenter]);
 
   const clearFocus = useCallback(() => {
+    focusRequest.current += 1;
     setFocusIds(null);
     setSelectedId(null);
     clearHistory();
@@ -911,6 +924,7 @@ export function useGraphView({
     focusWithoutHistory(node.id);
   };
   const resetGraphView = useCallback(() => {
+    focusRequest.current += 1;
     setSelectedId(null);
     setFocusIds(null);
     clearHistory();
