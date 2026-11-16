@@ -35,7 +35,10 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
 
   return (
     <div className={classes} title={tooltip}>
-      <Handle type="target" position={Position.Top} className="rf-handle" isConnectable={false} />
+      <Handle id="target-top" type="target" position={Position.Top} className="rf-handle" isConnectable={false} />
+      <Handle id="target-left" type="target" position={Position.Left} className="rf-handle" isConnectable={false} />
+      <Handle id="target-right" type="target" position={Position.Right} className="rf-handle" isConnectable={false} />
+      <Handle id="source-left" type="source" position={Position.Left} className="rf-handle" isConnectable={false} />
       <div className="card-top">
         <span className="card-dot" />
         <div className="card-title">
@@ -57,7 +60,8 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
         <span title="cyclomatic complexity">cc <b>{node.cyclomatic}</b></span>
         <span className="card-file" title={node.file}>{fileBase(node.file)}</span>
       </div>
-      <Handle type="source" position={Position.Bottom} className="rf-handle" isConnectable={false} />
+      <Handle id="source-bottom" type="source" position={Position.Bottom} className="rf-handle" isConnectable={false} />
+      <Handle id="source-right" type="source" position={Position.Right} className="rf-handle" isConnectable={false} />
     </div>
   );
 });

@@ -73,6 +73,7 @@ export type GraphMode = 'focus' | 'path' | 'impact';
 interface Input {
   report: GraphReport | null;
   snapshot: GraphSummary | null;
+  allNodes: GraphNode[];
   setReport: Dispatch<SetStateAction<GraphReport | null>>;
   apiContext: { base: string; graphId: string } | null;
   setError: (message: string | null) => void;
@@ -128,6 +129,7 @@ export interface GraphView {
 export function useGraphView({
   report,
   snapshot,
+  allNodes,
   setReport,
   apiContext,
   setError,
@@ -220,10 +222,10 @@ export function useGraphView({
 
   const flowEdges = useMemo<FlowEdge[]>(
     () => [
-      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, obstacles),
+      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, obstacles, mode),
       ...ghostEdges,
     ],
-    [visible.edges, selectedId, neighborIds, routeIds, obstacles, ghostEdges],
+    [visible.edges, selectedId, neighborIds, routeIds, obstacles, ghostEdges, mode],
   );
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {
@@ -267,6 +269,38 @@ export function useGraphView({
     return () => window.clearTimeout(timer);
   }, [searchText]);
 
+  const layoutSource = allNodes.length > 0 ? allNodes : report?.nodes ?? [];
+  const canonicalPositions = useMemo(() => {
+    if (layoutSource.length === 0) return {};
+    const sizes = new Map(layoutSource.map((node) => [node.id, nodeSize(node)]));
+    const maxWidth = Math.max(180, ...layoutSource.map((node) => sizes.get(node.id)!.width));
+    const maxHeight = Math.max(72, ...layoutSource.map((node) => sizes.get(node.id)!.height));
+    const columnWidth = maxWidth + 140;
+    const rowHeight = maxHeight + 56;
+    const layers = new Map<number, GraphNode[]>();
+    for (const node of layoutSource) {
+      const depth = Number.isFinite(node.metrics.depth)
+        ? Math.max(0, Math.round(node.metrics.depth))
+        : 0;
+      const bucket = layers.get(depth) ?? [];
+      bucket.push(node);
+      layers.set(depth, bucket);
+    }
+    const result: Record<string, { x: number; y: number }> = {};
+    for (const [depth, nodes] of layers) {
+      nodes.sort((left, right) =>
+        Number(right.isEntryLike) - Number(left.isEntryLike)
+        || left.file.localeCompare(right.file)
+        || left.line - right.line
+        || left.qname.localeCompare(right.qname)
+        || left.id.localeCompare(right.id));
+      nodes.forEach((node, row) => {
+        result[node.id] = { x: depth * columnWidth, y: row * rowHeight };
+      });
+    }
+    return result;
+  }, [layoutSource]);
+
   const layoutNodes = useMemo(
     () => visible.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
     [visible.nodes],
@@ -283,6 +317,11 @@ export function useGraphView({
   useEffect(() => {
     if (layoutNodes.length === 0) {
       setPositions({});
+      return;
+    }
+    if (layoutKind === 'layered') {
+      setPositions(canonicalPositions);
+      setLayouting(false);
       return;
     }
     let cancelled = false;
@@ -364,7 +403,7 @@ export function useGraphView({
       window.clearTimeout(timer);
       cancelLayout();
     };
-  }, [viewKey, layoutScope]);
+  }, [viewKey, layoutScope, canonicalPositions]);
 
   const frameNodes = useCallback((nodes: AnyFlowNode[]) => {
     if (nodes.length < 2) return;

@@ -24,6 +24,7 @@ export function App() {
   const graph = useGraphView({
     report: state.report,
     snapshot: state.snapshot,
+    allNodes: state.allNodes,
     setReport: state.setReport,
     apiContext: state.apiContext,
     setError: state.setError,

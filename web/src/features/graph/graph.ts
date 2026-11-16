@@ -283,8 +283,20 @@ export function toFlowEdges(
   neighborIds: Set<string>,
   routeIds: Set<string> = new Set(),
   obstacles: EdgeObstacle[] = [],
+  mode: 'focus' | 'path' | 'impact' = 'focus',
 ): FlowEdge[] {
-  return edges.map((edge) => {
+  const scoped = edges.filter((edge) => {
+    if (selectedId === null) return true;
+    if (mode === 'path' && routeIds.size > 0) return routeIds.has(edge.source) && routeIds.has(edge.target);
+    if (mode === 'impact') return edge.target === selectedId;
+    if (mode === 'focus') {
+      return edge.source === selectedId
+        || edge.target === selectedId
+        || (routeIds.has(edge.source) && routeIds.has(edge.target));
+    }
+    return true;
+  });
+  return scoped.map((edge) => {
     const inferred = Boolean(edge.inferred);
     const data = edge.kind === 'data';
     const returnsValue = edge.kind === 'call' && (edge.resultUsed === 'all' || edge.resultUsed === 'some');
@@ -296,24 +308,35 @@ export function toFlowEdges(
     const dash = route ? undefined : inferred || data || unknown ? '6 4' : undefined;
     const highlighted = selectedId !== null && (edge.source === selectedId || edge.target === selectedId);
     const dimmed = selectedId !== null && !highlighted && !(neighborIds.has(edge.source) && neighborIds.has(edge.target));
+    // A call graph is a context view, not a hairball: only the selected node's
+    // relationships and the execution route deserve visual weight.
+    const showLabel = edge.kind === 'call' && edge.sites > 1 && (highlighted || route);
+    const sourceBox = obstacles.find((box) => box.id === edge.source);
+    const targetBox = obstacles.find((box) => box.id === edge.target);
+    const sameColumn = Boolean(sourceBox && targetBox && Math.abs(sourceBox.x - targetBox.x) < 1);
+    const forward = !targetBox || !sourceBox || targetBox.x >= sourceBox.x;
+    const sourceHandle = sameColumn ? 'source-bottom' : forward ? 'source-right' : 'source-left';
+    const targetHandle = sameColumn ? 'target-top' : forward ? 'target-left' : 'target-right';
     return {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: 'routed',
+      sourceHandle,
+      targetHandle,
+      type: 'smoothstep',
       animated: false,
-      label: edge.kind === 'call' && edge.sites > 1 ? `${edge.sites}×` : undefined,
+      label: showLabel ? `${edge.sites}×` : undefined,
       labelStyle: { fill: 'var(--muted)', fontSize: 10, fontFamily: MONO },
       labelBgStyle: { fill: 'var(--panel)', fillOpacity: 0.9 },
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
-      interactionWidth: 16,
+      interactionWidth: 18,
       data: { edge, dimmed, highlighted, route, obstacles },
       style: {
         stroke: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-        strokeWidth: route ? 4 : highlighted ? 2.6 : 1.5,
+        strokeWidth: route ? 4 : highlighted ? 2.4 : 1.2,
         strokeDasharray: dash,
-        opacity: dimmed ? 0.1 : route ? 1 : 0.9,
+        opacity: dimmed ? 0.08 : route || highlighted ? 1 : 0.34,
       },
       markerEnd: {
         type: 'arrowclosed',
