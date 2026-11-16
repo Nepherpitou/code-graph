@@ -97,7 +97,9 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
   }
   const positions: Record<string, { x: number; y: number }> = {};
   const rowById = new Map<string, number>();
-  for (const depth of [...layers.keys()].sort((left, right) => left - right)) {
+  const depths = [...layers.keys()].sort((left, right) => left - right);
+  const columnByDepth = new Map(depths.map((depth, column) => [depth, column]));
+  for (const depth of depths) {
     const layerNodes = layers.get(depth) ?? [];
     const score = new Map<string, number>();
     for (const node of layerNodes) {
@@ -120,7 +122,7 @@ function compactLayered(nodes: GraphNode[], edges: GraphEdge[]): CompactLayout {
         || left.id.localeCompare(right.id);
     });
     layerNodes.forEach((node, row) => {
-      positions[node.id] = { x: depth * columnWidth, y: row * rowHeight };
+      positions[node.id] = { x: columnByDepth.get(depth)! * columnWidth, y: row * rowHeight };
       rowById.set(node.id, row);
     });
   }
