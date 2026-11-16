@@ -410,7 +410,6 @@ export function useGraphView({
     if (layoutKind === 'layered') {
       const visibleIds = new Set(visible.nodes.map((node) => node.id));
       const previousIds = visibleIdsRef.current;
-      const newIds = [...visibleIds].filter((id) => !previousIds.has(id));
       const local = compactLayered(visible.nodes, visible.edges);
       const selected = selectedIdRef.current;
       const viewport = reactFlow.getViewport();
@@ -434,54 +433,13 @@ export function useGraphView({
       const localAnchor = localAnchorId ? local.positions[localAnchorId] : null;
       const dx = localAnchor ? anchor.x - localAnchor.x : 0;
       const dy = localAnchor ? anchor.y - localAnchor.y : 0;
-      const sizes = new Map(visible.nodes.map((node) => [node.id, nodeSize(node)]));
-      const gap = 24;
-      const occupied = visible.nodes
-        .filter((node) => !newIds.includes(node.id))
-        .flatMap((node) => {
-          const position = positionsRef.current[node.id];
-          if (!position) return [];
-          const size = sizes.get(node.id)!;
-          return [{ x: position.x, y: position.y, width: size.width, height: size.height }];
-        });
-      const free = (x: number, y: number, width: number, height: number): boolean =>
-        !occupied.some((box) => x < box.x + box.width + gap
-          && x + width + gap > box.x
-          && y < box.y + box.height + gap
-          && y + height + gap > box.y);
-      const added: Record<string, { x: number; y: number }> = {};
-      const newSet = new Set(newIds);
-      const orderedNew = [...newIds].sort((left, right) => {
-        if (left === selected) return -1;
-        if (right === selected) return 1;
-        return (local.positions[left]?.y ?? 0) - (local.positions[right]?.y ?? 0)
-          || left.localeCompare(right);
-      });
-      for (const id of orderedNew) {
-        const size = sizes.get(id)!;
-        const proposed = local.positions[id];
-        if (!proposed) continue;
-        let x = proposed.x + dx;
-        let y = proposed.y + dy;
-        let placed = false;
-        for (let step = 0; step <= 18 && !placed; step += 1) {
-          const candidates = step === 0
-            ? [{ x, y }]
-            : [{ x, y: y - step * local.rowHeight }, { x, y: y + step * local.rowHeight }];
-          for (const candidate of candidates) {
-            if (!free(candidate.x, candidate.y, size.width, size.height)) continue;
-            x = candidate.x;
-            y = candidate.y;
-            placed = true;
-            break;
-          }
-        }
-        added[id] = { x, y };
-        occupied.push({ x, y, width: size.width, height: size.height });
+      const next: Record<string, { x: number; y: number }> = {};
+      for (const node of visible.nodes) {
+        const position = local.positions[node.id];
+        if (!position) continue;
+        next[node.id] = { x: position.x + dx, y: position.y + dy };
       }
-      if (newSet.size > 0) {
-        setPositions((current) => ({ ...current, ...added }));
-      }
+      setPositions(next);
       visibleIdsRef.current = visibleIds;
       setLayouting(false);
       return;
