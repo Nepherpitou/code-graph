@@ -185,7 +185,8 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
           </div>
         </header>
 
-        <div className="node-search-results" id="node-search-results" role="listbox">
+        <div className="node-search-results">
+          <div className="node-search-list" id="node-search-results" role="listbox">
           {results.length === 0 ? (
             <div className="node-search-empty">
               <strong>No matching nodes.</strong>
@@ -236,6 +237,7 @@ export function NodeSearchDialog({ nodes, onSelect, onClose }: Props) {
               </button>
             );
           })}
+          </div>
         </div>
 
         <footer className="node-search-footer">
