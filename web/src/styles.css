@@ -805,6 +805,12 @@ button.directory-row:hover { background: var(--panel-2); }
 .node-table-kind { color: var(--muted); font-size: 9.5px; }
 .node-table-degrees { flex: 0 0 auto; color: var(--muted); font-size: 9.5px; }
 
+.edge-site-label {
+  pointer-events: none;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
 .ghost-edge-label {
   position: absolute;
   color: var(--muted);

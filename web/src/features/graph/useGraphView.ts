@@ -208,12 +208,22 @@ export function useGraphView({
     [visible.nodes, hidden, positions],
   );
 
+  const obstacles = useMemo(
+    () => visible.nodes.flatMap((node) => {
+      const position = positions[node.id];
+      if (!position) return [];
+      const size = nodeSize(node);
+      return [{ id: node.id, x: position.x, y: position.y, width: size.width, height: size.height }];
+    }),
+    [visible.nodes, positions],
+  );
+
   const flowEdges = useMemo<FlowEdge[]>(
     () => [
-      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds),
+      ...toFlowEdges(visible.edges, selectedId, neighborIds, routeIds, obstacles),
       ...ghostEdges,
     ],
-    [visible.edges, selectedId, neighborIds, routeIds, ghostEdges],
+    [visible.edges, selectedId, neighborIds, routeIds, obstacles, ghostEdges],
   );
 
   const mergeSlice = useCallback((slice: GraphSlice, focus: Set<string> | null) => {

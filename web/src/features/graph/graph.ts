@@ -40,11 +40,20 @@ export interface FlowNodeData extends Record<string, unknown> {
   route: boolean;
 }
 
+export interface EdgeObstacle {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface FlowEdgeData extends Record<string, unknown> {
   edge: GraphEdge;
   dimmed: boolean;
   highlighted: boolean;
   route?: boolean;
+  obstacles?: EdgeObstacle[];
 }
 
 export interface GhostNodeData extends Record<string, unknown> {
@@ -273,6 +282,7 @@ export function toFlowEdges(
   selectedId: string | null,
   neighborIds: Set<string>,
   routeIds: Set<string> = new Set(),
+  obstacles: EdgeObstacle[] = [],
 ): FlowEdge[] {
   return edges.map((edge) => {
     const inferred = Boolean(edge.inferred);
@@ -290,7 +300,7 @@ export function toFlowEdges(
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: 'smoothstep',
+      type: 'routed',
       animated: false,
       label: edge.kind === 'call' && edge.sites > 1 ? `${edge.sites}×` : undefined,
       labelStyle: { fill: 'var(--muted)', fontSize: 10, fontFamily: MONO },
@@ -298,7 +308,7 @@ export function toFlowEdges(
       labelBgPadding: [4, 2],
       labelBgBorderRadius: 4,
       interactionWidth: 16,
-      data: { edge, dimmed, highlighted, route },
+      data: { edge, dimmed, highlighted, route, obstacles },
       style: {
         stroke: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
         strokeWidth: route ? 4 : highlighted ? 2.6 : 1.5,
@@ -308,15 +318,17 @@ export function toFlowEdges(
       markerEnd: {
         type: 'arrowclosed',
         color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-        width: route ? 21 : 16,
-        height: route ? 21 : 16,
+        width: 16,
+        height: 16,
+        markerUnits: 'userSpaceOnUse',
       },
       markerStart: returnsValue
         ? {
             type: 'arrowclosed',
             color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
-            width: 14,
-            height: 14,
+            width: 16,
+            height: 16,
+            markerUnits: 'userSpaceOnUse',
           }
         : undefined,
     } satisfies FlowEdge;
