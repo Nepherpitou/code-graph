@@ -121,7 +121,7 @@ export function FilterPanel({
           <span className="legend-item"><i className="line dashed warning" />inferred (refs)</span>
           <span className="legend-item"><i className="line dashed success" />constant use ⇢</span>
           <span className="legend-item" title="shortest entry → exit route through the focused node">
-            <i className="line success" />execution route
+            <i className="line route" />execution route
           </span>
           <span className="legend-item" title="connections outside the current slice">
             <i className="line dashed ghost" />hidden relations

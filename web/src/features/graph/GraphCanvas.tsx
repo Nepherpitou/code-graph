@@ -53,7 +53,7 @@ export function GraphCanvas({ view, onContextMenu }: Props) {
       elevateNodesOnSelect={false}
       autoPanOnNodeFocus={false}
       onlyRenderVisibleElements={view.flowNodes.length > CULL_THRESHOLD}
-      colorMode="system"
+      colorMode="light"
       onNodeClick={view.onNodeClick}
       onNodeDoubleClick={view.onNodeDoubleClick}
       onNodeContextMenu={onNodeContextMenu}

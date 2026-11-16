@@ -11,6 +11,7 @@ import { GraphSidebar } from './features/graph/GraphSidebar';
 import { GraphModeBar } from './features/graph/GraphModeBar';
 import { DetailsPanel } from './features/graph/DetailsPanel';
 import { ImpactDetails } from './features/graph/ImpactDetails';
+import { PathDetails } from './features/graph/PathDetails';
 import { useGraphView, type GraphMode } from './features/graph/useGraphView';
 import { useSnapshot } from './features/snapshot/useSnapshot';
 import { shortRoot } from './shared/format';
@@ -98,11 +99,22 @@ export function App() {
 
   const changeMode = useCallback((next: GraphMode) => {
     setMode(next);
-    if (next !== 'path') graph.clearPath();
-    if (next === 'impact' && graph.selectedNode) {
-      void graph.showImpact(graph.selectedNode, 'in');
+    if (next === 'path') {
+      if (graph.path) graph.showPathScope();
+      else graph.clearFocus();
+      return;
     }
-  }, [graph.clearPath, graph.selectedNode, graph.showImpact]);
+    // Path state survives a mode switch; its route highlight does not.
+    graph.clearRouteHighlight();
+    if (next === 'focus') {
+      graph.clearFocus();
+      if (graph.selectedNode) graph.focusNode(graph.selectedNode.id);
+    }
+    if (next === 'impact') {
+      graph.clearFocus();
+      if (graph.selectedNode) void graph.showImpact(graph.selectedNode, 'in');
+    }
+  }, [graph.clearFocus, graph.clearRouteHighlight, graph.focusNode, graph.path, graph.selectedNode, graph.showImpact, graph.showPathScope]);
 
   const selectNode = useCallback((id: string) => {
     if (mode === 'path') {
@@ -254,14 +266,7 @@ export function App() {
             onOpen={(node) => void openNode(node)}
           />
         ) : null}
-        {screen === 'graph' ? (
-          <GraphSidebar
-            view={graph}
-            apiContext={state.apiContext}
-            snapshot={state.snapshot}
-            onError={(message) => state.setError(message)}
-          />
-        ) : null}
+        {screen === 'graph' ? <GraphSidebar view={graph} /> : null}
       </aside>
 
       <main className="canvas">
@@ -317,6 +322,15 @@ export function App() {
               node={graph.selectedNode}
               onSelect={selectImpactNode}
               onClearSelection={graph.clearSelection}
+            />
+          ) : mode === 'path' ? (
+            <PathDetails
+              report={state.report}
+              path={graph.path}
+              pathIndex={graph.pathIndex}
+              node={graph.selectedNode}
+              onPathIndex={graph.setPathIndex}
+              onClearPath={graph.clearPath}
             />
           ) : (
             <DetailsPanel

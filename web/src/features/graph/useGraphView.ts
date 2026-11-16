@@ -80,7 +80,7 @@ interface Input {
   mode: GraphMode;
 }
 
-const FOCUS_DEPTH = 2;
+const FOCUS_DEPTH = 1;
 const FOCUS_LIMIT = 180;
 
 export interface GraphView {
@@ -114,6 +114,8 @@ export interface GraphView {
   pathIndex: number;
   setPathIndex: (index: number) => void;
   findPath: (fromId: string, toId: string) => Promise<boolean>;
+  showPathScope: () => void;
+  clearRouteHighlight: () => void;
   clearPath: () => void;
   applyPath: (result: PathResult) => void;
   openNeighborhood: (node: GraphNode) => Promise<void>;
@@ -190,13 +192,13 @@ export function useGraphView({
 
   const flowNodes = useMemo<AnyFlowNode[]>(
     () => [
-      ...toFlowNodes(visible.nodes, selectedId, neighborIds, entryIds).map((node) => ({
+      ...toFlowNodes(visible.nodes, selectedId, neighborIds, entryIds, routeIds).map((node) => ({
         ...node,
         position: positions[node.id] ?? node.position,
       })),
       ...ghostNodes,
     ],
-    [visible.nodes, selectedId, neighborIds, entryIds, positions, ghostNodes],
+    [visible.nodes, selectedId, neighborIds, entryIds, routeIds, positions, ghostNodes],
   );
 
   const ghostEdges = useMemo(
@@ -292,9 +294,41 @@ export function useGraphView({
     };
   }, [viewKey, layoutScope]);
 
+  const frameNodes = useCallback((nodes: AnyFlowNode[]) => {
+    if (nodes.length < 2) return;
+    const box = nodes.reduce((acc, node) => {
+      const x = node.position.x;
+      const y = node.position.y;
+      const width = Number(node.width ?? 0);
+      const height = Number(node.height ?? 0);
+      return {
+        minX: Math.min(acc.minX, x),
+        minY: Math.min(acc.minY, y),
+        maxX: Math.max(acc.maxX, x + width),
+        maxY: Math.max(acc.maxY, y + height),
+      };
+    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+    const parent = document.querySelector('.react-flow')?.getBoundingClientRect();
+    if (!parent || !Number.isFinite(box.minX)) return;
+    const padding = 56;
+    const zoom = Math.min(
+      (parent.width - padding * 2) / Math.max(1, box.maxX - box.minX),
+      (parent.height - padding * 2) / Math.max(1, box.maxY - box.minY),
+      1.15,
+    );
+    reactFlow.setCenter(
+      (box.minX + box.maxX) / 2,
+      (box.minY + box.maxY) / 2,
+      { zoom: Math.max(0.25, zoom), duration: 0 },
+    );
+  }, [reactFlow]);
+
   useEffect(() => {
     if (Object.keys(positions).length === 0 || centeredPositions.current === positions) return;
     centeredPositions.current = positions;
+    // Path mode fits the whole route; centering the endpoint would push the
+    // entry and middle steps off-screen.
+    if ((mode === 'path' && path) || focusIds !== null) return;
 
     const selected = selectedId
       ? flowNodes.find((node) => node.id === selectedId)
@@ -310,11 +344,31 @@ export function useGraphView({
       : denseCenter(flowNodes);
     if (!center) return;
     void reactFlow.setCenter(center.x, center.y, { zoom: MIN_READABLE_ZOOM, duration: 0 });
-  }, [positions, flowNodes, entryRoots, selectedId, reactFlow]);
+  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds]);
+
+  // Path mode is about the whole route, not the endpoint under the cursor.
+  useEffect(() => {
+    if (mode !== 'path' || !path) return;
+    const route = new Set(path.path);
+    const routeNodes = flowNodes.filter((node) => route.has(node.id));
+    if (routeNodes.length < 2) return;
+    const timer = window.setTimeout(() => frameNodes(routeNodes), 120);
+    return () => window.clearTimeout(timer);
+  }, [mode, path, flowNodes, frameNodes]);
+
+  // Focus and impact are slices, not selections: frame the whole scope so the
+  // entry→exit route is not clipped by centering on the target.
+  useEffect(() => {
+    if (mode === 'path' || focusIds === null) return;
+    const scoped = flowNodes.filter((node) => focusIds.has(node.id));
+    if (scoped.length < 2) return;
+    const timer = window.setTimeout(() => frameNodes(scoped), 120);
+    return () => window.clearTimeout(timer);
+  }, [mode, focusIds, flowNodes, frameNodes]);
 
   const showFocusedSlice = useCallback((slice: FocusSlice, id: string) => {
     if (!snapshot) return;
-    setReport({
+    const focusedReport: GraphReport = {
       meta: snapshot.meta,
       nodes: slice.nodes,
       edges: slice.edges,
@@ -322,12 +376,17 @@ export function useGraphView({
       stats: snapshot.stats,
       top: snapshot.top,
       warnings: snapshot.warnings,
-    });
+    };
+    // A focus selection is node + direct relations + the shortest entry→exit
+    // route. The API slice also carries a wider context window; do not show it.
+    const focus = neighborhood(focusedReport, id, FOCUS_DEPTH);
+    for (const routeNode of slice.route) focus.add(routeNode);
+    setReport(focusedReport);
     setEntryRoots([]);
     setEntryInfo(null);
     setPath(null);
     setPathIndexState(0);
-    setFocusIds(new Set(slice.nodes.map((node) => node.id)));
+    setFocusIds(focus);
     setRouteIds(new Set(slice.route));
     setSelectedId(id);
   }, [snapshot, setEntryInfo, setEntryRoots, setFocusIds, setReport, setSelectedId]);
@@ -432,6 +491,19 @@ export function useGraphView({
     setSelectedId(path.path[next] ?? null);
     setRouteIds(new Set(path.path));
   }, [path, setSelectedId]);
+
+  const showPathScope = useCallback(() => {
+    if (!path) return;
+    setFocusIds(new Set(path.path));
+    setRouteIds(new Set(path.path));
+    setSelectedId(path.path[pathIndex] ?? path.path[path.path.length - 1] ?? null);
+    setEntryRoots([]);
+    setEntryInfo(null);
+  }, [path, pathIndex, setEntryInfo, setEntryRoots, setSelectedId]);
+
+  const clearRouteHighlight = useCallback(() => {
+    setRouteIds(new Set());
+  }, []);
 
   const clearPath = useCallback(() => {
     setPath(null);
@@ -582,6 +654,8 @@ export function useGraphView({
     pathIndex,
     setPathIndex,
     findPath,
+    showPathScope,
+    clearRouteHighlight,
     clearPath,
     applyPath,
     openNeighborhood,

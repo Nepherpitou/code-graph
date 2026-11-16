@@ -37,6 +37,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   dimmed: boolean;
   highlighted: boolean;
   entryPoint: boolean;
+  route: boolean;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {
@@ -136,6 +137,7 @@ export function toFlowNodes(
   selectedId: string | null,
   neighborIds: Set<string>,
   entryIds: Set<string> | null,
+  routeIds: Set<string> = new Set(),
 ): FlowNode[] {
   return nodes.map((node) => {
     const size = nodeSize(node);
@@ -149,9 +151,10 @@ export function toFlowNodes(
       data: {
         node,
         selected: node.id === selectedId,
-        dimmed: selectedId !== null && node.id !== selectedId && !neighborIds.has(node.id),
-        highlighted: selectedId !== null && (node.id === selectedId || neighborIds.has(node.id)),
+        dimmed: selectedId !== null && node.id !== selectedId && !neighborIds.has(node.id) && !routeIds.has(node.id),
+        highlighted: selectedId !== null && (node.id === selectedId || neighborIds.has(node.id) || routeIds.has(node.id)),
         entryPoint: entryIds?.has(node.id) ?? false,
+        route: routeIds.has(node.id),
       },
     };
   });
@@ -287,21 +290,21 @@ export function toFlowEdges(
       interactionWidth: 16,
       data: { edge, dimmed, highlighted, route },
       style: {
-        stroke: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
-        strokeWidth: route ? 2.8 : highlighted ? 2.6 : 1.5,
+        stroke: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
+        strokeWidth: route ? 4 : highlighted ? 2.6 : 1.5,
         strokeDasharray: dash,
         opacity: dimmed ? 0.1 : route ? 1 : 0.9,
       },
       markerEnd: {
         type: 'arrowclosed',
-        color: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
-        width: route ? 18 : 16,
-        height: route ? 18 : 16,
+        color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
+        width: route ? 21 : 16,
+        height: route ? 21 : 16,
       },
       markerStart: returnsValue
         ? {
             type: 'arrowclosed',
-            color: route ? 'var(--success)' : highlighted ? 'var(--accent)' : color,
+            color: route ? 'var(--route)' : highlighted ? 'var(--accent)' : color,
             width: 14,
             height: 14,
           }

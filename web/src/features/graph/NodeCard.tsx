@@ -7,7 +7,7 @@ function fileBase(file: string): string {
 }
 
 export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<FlowNode>) {
-  const { node, dimmed, highlighted, entryPoint } = data;
+  const { node, dimmed, highlighted, entryPoint, route } = data;
   const isSelected = selected || data.selected;
   const metrics = node.metrics;
   const dead = metrics.deadCodeCandidate && !entryPoint;
@@ -20,6 +20,7 @@ export const NodeCard = memo(function NodeCard({ data, selected }: NodeProps<Flo
     dead ? 'dead' : '',
     node.external ? 'external' : '',
     entryPoint ? 'entry-root' : '',
+    route ? 'route' : '',
   ].filter(Boolean).join(' ');
   const tooltip = [
     `${node.qname}  (${node.kind})`,
