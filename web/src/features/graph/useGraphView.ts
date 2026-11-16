@@ -818,6 +818,7 @@ export function useGraphView({
 
   const openEntryPoints = useCallback(async () => {
     if (!apiContext || !snapshot) return;
+    focusRequest.current += 1;
     try {
       const data = await fetchEntryPoints(apiContext.base, apiContext.graphId, 8, 2, 180);
       const warnings = data.truncated
@@ -843,16 +844,18 @@ export function useGraphView({
       });
       setSelectedId(null);
       setFocusIds(null);
+      clearHistory();
       setRouteIds(new Set());
       setPath(null);
       setPathIndexState(0);
       setFilters(defaultFilters());
       setSearchText('');
-      setPositions({});
+      // Do not clear positions here: a second identical entry-point response
+      // would leave an empty position map without changing the layout key.
     } catch (caught) {
       setError(`Entry points failed: ${(caught as Error).message}`);
     }
-  }, [apiContext, snapshot, setError, setReport]);
+  }, [apiContext, clearHistory, snapshot, setError, setReport]);
 
   const showImpact = useCallback(async (node: GraphNode, direction: 'in' | 'out') => {
     if (!apiContext) return;
