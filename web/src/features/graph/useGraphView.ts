@@ -152,7 +152,6 @@ export function useGraphView({
   const [layouting, setLayouting] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
   const lastLayoutConfig = useRef({ kind: '', nonce: -1, scope: '' });
-  const cameraZoom = useRef<number | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
   const centeredPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
@@ -391,7 +390,7 @@ export function useGraphView({
     centeredPositions.current = positions;
     // Path mode fits the whole route; centering the endpoint would push the
     // entry and middle steps off-screen.
-    if (mode === 'path' && path) return;
+    if ((mode === 'path' && path) || focusIds !== null) return;
 
     const selected = selectedId
       ? flowNodes.find((node) => node.id === selectedId)
@@ -406,11 +405,8 @@ export function useGraphView({
         }
       : denseCenter(flowNodes);
     if (!center) return;
-    void reactFlow.setCenter(center.x, center.y, {
-      zoom: cameraZoom.current ?? reactFlow.getZoom(),
-      duration: 0,
-    });
-  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path]);
+    void reactFlow.setCenter(center.x, center.y, { zoom: reactFlow.getZoom(), duration: 0 });
+  }, [positions, flowNodes, entryRoots, selectedId, reactFlow, mode, path, focusIds]);
 
   // Path mode is about the whole route, not the endpoint under the cursor.
   useEffect(() => {
@@ -456,19 +452,6 @@ export function useGraphView({
     setSearchText('');
     setFilters((current) => (current.search ? { ...current, search: '' } : current));
 
-    const node = flowNodes.find((entry) => entry.id === id);
-    if (node) {
-      const width = Number(node.width ?? 0);
-      const height = Number(node.height ?? 0);
-      const zoom = reactFlow.getZoom();
-      cameraZoom.current = zoom;
-      void reactFlow.setCenter(
-        node.position.x + width / 2,
-        node.position.y + height / 2,
-        { zoom, duration: 300 },
-      );
-    }
-
     if (!apiContext || !snapshot) {
       // Local JSON report: filter the in-memory graph around the selection.
       if (!report) return;
@@ -485,8 +468,6 @@ export function useGraphView({
       .then((slice) => showFocusedSlice(slice, id))
       .catch((caught: Error) => setError(caught.message));
   }, [
-    flowNodes,
-    reactFlow,
     apiContext,
     snapshot,
     report,
