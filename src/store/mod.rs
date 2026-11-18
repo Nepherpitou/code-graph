@@ -322,14 +322,19 @@ impl Store {
         Ok(rows)
     }
 
-    /// Node row id plus stable key, ordered consistently for adjacency indexes.
-    pub async fn node_index(&self, graph_id: i64) -> Result<Vec<(i64, String)>> {
-        let rows = sqlx::query("SELECT id, stable_key FROM nodes WHERE graph_id = ? ORDER BY id")
+    /// Node row id plus decoded payload, ordered so adjacency indexes and node
+    /// positions line up.
+    pub async fn nodes_with_ids(&self, graph_id: i64) -> Result<Vec<(i64, GraphNode)>> {
+        let rows = sqlx::query("SELECT id, payload_json FROM nodes WHERE graph_id = ? ORDER BY id")
             .bind(graph_id)
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter()
-            .map(|row| Ok((row.try_get("id")?, row.try_get("stable_key")?)))
+            .map(|row| {
+                let id: i64 = row.try_get("id")?;
+                let payload: String = row.try_get("payload_json")?;
+                Ok((id, serde_json::from_str(&payload)?))
+            })
             .collect()
     }
 

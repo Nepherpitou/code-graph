@@ -49,10 +49,16 @@ jobs:
           (cd "$TMP/base" && cargo fetch --locked)
           cargo fetch --locked
 
+      - name: Warm dependencies
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/target"
+          cargo check --locked
+
       - name: Analyze baseline and head
         run: |
           TMP="$RUNNER_TEMP"
           DB="$RUNNER_TEMP/cg.db"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/target"
           "$CG" analyze "$TMP/base" --lang rust --exclude fixtures --db "$DB" --quiet \
             -o "$TMP/base.graph.json"
           "$CG" analyze . --lang rust --exclude fixtures --db "$DB" --quiet \
