@@ -155,22 +155,17 @@ fn path_toward_root(tree: &BfsTree, node: usize, root: usize) -> Vec<usize> {
     path
 }
 
+/// Reachable nodes sorted by distance, then by score, then by index.
 fn ranked_candidates(
+    index: &GraphIndex,
     distance: &[usize],
-    keys: &[String],
-    node_by_key: &HashMap<&str, &GraphNode>,
-    max_distance: usize,
-    predicate: impl Fn(&GraphNode) -> bool,
     score: impl Fn(&GraphNode) -> u32,
 ) -> Vec<(usize, usize, u32)> {
     let mut candidates: Vec<(usize, usize, u32)> = distance
         .iter()
         .enumerate()
-        .filter(|(_, distance)| **distance != usize::MAX && **distance <= max_distance)
-        .filter_map(|(node, distance)| {
-            let candidate = node_by_key.get(keys[node].as_str())?;
-            predicate(candidate).then_some((*distance, node, score(candidate)))
-        })
+        .filter(|(_, distance)| **distance != usize::MAX)
+        .map(|(node, distance)| (*distance, node, score(&index.nodes[node])))
         .collect();
     candidates.sort_by(|left, right| {
         left.0
@@ -181,10 +176,123 @@ fn ranked_candidates(
     candidates
 }
 
-fn select_ranked(selected: &mut HashSet<usize>, candidates: &[(usize, usize, u32)], limit: usize) {
-    for (_, node, _) in candidates {
+/// Selects ranked nodes whose distance stays within the cutoff.
+fn select_within(
+    selected: &mut HashSet<usize>,
+    ranked: &[(usize, usize, u32)],
+    max_distance: usize,
+    limit: usize,
+) {
+    for (distance, node, _) in ranked {
+        if *distance > max_distance {
+            break;
+        }
         select_with_budget(selected, *node, limit);
     }
+}
+
+/// Spends budget on the route from the BFS root to `node`, root side first, and
+/// returns the route walking from `node` back towards the root.
+fn select_route(
+    selected: &mut HashSet<usize>,
+    tree: &BfsTree,
+    node: usize,
+    root: usize,
+    limit: usize,
+) -> Vec<usize> {
+    let path = path_toward_root(tree, node, root);
+    // Root-to-node order keeps the budget concentrated near the selected node
+    // when the path itself is larger than the limit.
+    for step in path.iter().rev() {
+        select_with_budget(selected, *step, limit);
+    }
+    path
+}
+
+/// Nearest ranked node that passes `candidate`, together with the budgeted route
+/// from the BFS root down to it.
+fn nearest_route(
+    selected: &mut HashSet<usize>,
+    index: &GraphIndex,
+    ranked: &[(usize, usize, u32)],
+    tree: &BfsTree,
+    root: usize,
+    limit: usize,
+    candidate: impl Fn(&GraphNode) -> bool,
+) -> Option<(usize, usize, Vec<usize>)> {
+    let (distance, node, _) = ranked
+        .iter()
+        .find(|(_, node, _)| candidate(&index.nodes[*node]))?;
+    Some((
+        *distance,
+        *node,
+        select_route(selected, tree, *node, root, limit),
+    ))
+}
+
+/// Adds the nodes exactly two undirected hops away.
+fn select_second_level(
+    selected: &mut HashSet<usize>,
+    index: &GraphIndex,
+    root: usize,
+    limit: usize,
+) {
+    for (node, distance) in bfs_undirected(index, root, 2).iter().enumerate() {
+        if *distance == 2 {
+            select_with_budget(selected, node, limit);
+        }
+    }
+}
+
+/// Everything the focus response needs from the selected node set.
+struct SelectedSlice {
+    keys: Vec<String>,
+    edge_ids: Vec<i64>,
+    route: Vec<String>,
+}
+
+/// Node keys, inner edge ids and the entry → selected → exit route.
+fn selected_slice(
+    index: &GraphIndex,
+    selected: &HashSet<usize>,
+    entry_path: &[usize],
+    exit_path: &[usize],
+) -> SelectedSlice {
+    let keys = selected
+        .iter()
+        .filter_map(|node| index.keys.get(*node).cloned())
+        .collect();
+    let mut edge_ids = HashSet::new();
+    for node in selected {
+        for edge_index in index.out_all[*node]
+            .iter()
+            .chain(index.in_all[*node].iter())
+        {
+            let edge = &index.edges[*edge_index];
+            if selected.contains(&edge.source) && selected.contains(&edge.target) {
+                edge_ids.insert(edge.id);
+            }
+        }
+    }
+    SelectedSlice {
+        keys,
+        edge_ids: edge_ids.into_iter().collect(),
+        route: route_keys(index, entry_path, exit_path),
+    }
+}
+
+/// Node keys on the entry → selected → exit route, without duplicates.
+fn route_keys(index: &GraphIndex, entry_path: &[usize], exit_path: &[usize]) -> Vec<String> {
+    let mut route = Vec::new();
+    let mut seen = HashSet::new();
+    for node in entry_path.iter().chain(exit_path.iter().rev().skip(1)) {
+        if let Some(key) = index.keys.get(*node) {
+            if seen.insert(key.clone()) {
+                route.push(key.clone());
+            }
+        }
+    }
+    route
 }
 
 fn direct_neighbors(index: &GraphIndex, root: usize) -> Vec<usize> {
@@ -206,6 +314,8 @@ fn direct_neighbors(index: &GraphIndex, root: usize) -> Vec<usize> {
 }
 
 struct GraphIndex {
+    /// Decoded payloads, positionally aligned with `keys` and the adjacency lists.
+    nodes: Vec<GraphNode>,
     keys: Vec<String>,
     key_to_idx: HashMap<String, usize>,
     edges: Vec<IndexedEdge>,
@@ -217,17 +327,19 @@ struct GraphIndex {
 
 impl GraphIndex {
     async fn load(store: &Store, graph_id: i64) -> Result<Self> {
-        let node_rows = store.node_index(graph_id).await?;
-        let keys: Vec<String> = node_rows.iter().map(|(_, key)| key.clone()).collect();
+        let node_rows = store.nodes_with_ids(graph_id).await?;
+        let mut nodes = Vec::with_capacity(node_rows.len());
+        let mut keys = Vec::with_capacity(node_rows.len());
+        let mut id_to_idx: HashMap<i64, usize> = HashMap::with_capacity(node_rows.len());
+        for (position, (row_id, node)) in node_rows.into_iter().enumerate() {
+            keys.push(node.id.clone());
+            id_to_idx.insert(row_id, position);
+            nodes.push(node);
+        }
         let key_to_idx: HashMap<String, usize> = keys
             .iter()
             .enumerate()
             .map(|(index, key)| (key.clone(), index))
-            .collect();
-        let id_to_idx: HashMap<i64, usize> = node_rows
-            .iter()
-            .enumerate()
-            .map(|(index, (id, _))| (*id, index))
             .collect();
         let rows = store.edge_rows(graph_id).await?;
         let n = keys.len();
@@ -262,6 +374,7 @@ impl GraphIndex {
         }
 
         Ok(Self {
+            nodes,
             keys,
             key_to_idx,
             edges,
@@ -442,9 +555,6 @@ impl QueryService {
             return Ok(FocusSlice::default());
         };
         let limit = limit.clamp(1, 5000);
-        let nodes = self.store.all_nodes(graph_id).await?;
-        let node_by_key: HashMap<&str, &GraphNode> =
-            nodes.iter().map(|node| (node.id.as_str(), node)).collect();
         let mut selected = HashSet::new();
         select_with_budget(&mut selected, root_idx, limit);
 
@@ -454,138 +564,71 @@ impl QueryService {
         }
 
         // Reverse call BFS: distance from the selected node to each caller.
+        // Ranked once: the nearest entry is the first matching candidate and the
+        // remaining ancestors keep that order, so step 5 reuses the list.
         let reverse = bfs_calls(&index, root_idx, true);
-        let distance = &reverse.distance;
-
-        let entries = ranked_candidates(
-            distance,
-            &index.keys,
-            &node_by_key,
-            usize::MAX,
+        let callers = ranked_candidates(&index, &reverse.distance, |node| {
+            node.metrics.transitive_fan_out
+        });
+        // 2. Nearest entry point plus the caller path down to the selection.
+        let entry = nearest_route(
+            &mut selected,
+            &index,
+            &callers,
+            &reverse,
+            root_idx,
+            limit,
             entry::is_entry_candidate,
-            |node| node.metrics.transitive_fan_out,
         );
-
-        // 2. Add the caller path from the nearest entry point to the selection.
-        let mut entry_distance = None;
-        let mut entry_node = None;
-        let mut entry_path = Vec::new();
-        if let Some((nearest_distance, entry_idx, _)) = entries.first().copied() {
-            entry_distance = Some(nearest_distance);
-            entry_node = Some(entry_idx);
-            let path = path_toward_root(&reverse, entry_idx, root_idx);
-            // Root-to-entry order keeps the budget concentrated near the
-            // selected node when the path itself is larger than the limit.
-            for node in path.iter().rev() {
-                select_with_budget(&mut selected, *node, limit);
-            }
-            entry_path = path;
-        }
 
         // Forward call BFS: shortest callee paths from the selected node.
         let forward = bfs_calls(&index, root_idx, false);
-        let out_distance = &forward.distance;
-
-        let exits = ranked_candidates(
-            out_distance,
-            &index.keys,
-            &node_by_key,
-            usize::MAX,
+        let callees = ranked_candidates(&index, &forward.distance, |node| node.metrics.height);
+        // 3. Nearest exit point plus the callee path from the selection.
+        let exit = nearest_route(
+            &mut selected,
+            &index,
+            &callees,
+            &forward,
+            root_idx,
+            limit,
             entry::is_exit_candidate,
-            |node| node.metrics.height,
         );
-
-        // 3. Add the callee path from the selection to the nearest exit.
-        let mut exit_distance = None;
-        let mut exit_node = None;
-        let mut exit_path = Vec::new();
-        if let Some((nearest_distance, exit_idx, _)) = exits.first().copied() {
-            exit_distance = Some(nearest_distance);
-            exit_node = Some(exit_idx);
-            let path = path_toward_root(&forward, exit_idx, root_idx);
-            // Root-to-exit order, same budget rule as the caller path.
-            for node in path.iter().rev() {
-                select_with_budget(&mut selected, *node, limit);
-            }
-            exit_path = path;
-        }
 
         // 4. Second-level neighbours in the undirected slice.
-        let undirected = bfs_undirected(&index, root_idx, 2);
-        let mut second: Vec<(usize, usize)> = undirected
-            .iter()
-            .enumerate()
-            .filter(|(_, distance)| **distance == 2)
-            .map(|(node, _)| node)
-            .map(|node| (node, 0))
-            .collect();
-        second.sort_unstable();
-        for (node, _) in second {
-            select_with_budget(&mut selected, node, limit);
-        }
+        select_second_level(&mut selected, &index, root_idx, limit);
 
-        // 5. Remaining callers up to the nearest entry point. When the
-        // component has no entry candidate, use the whole caller closure (the
+        // 5. Remaining callers up to the nearest entry point. When the component
+        // has no entry candidate, the whole caller closure is used instead (the
         // limit still applies).
-        let ancestor_limit = entry_distance.unwrap_or(usize::MAX);
-        let ancestors = ranked_candidates(
-            distance,
-            &index.keys,
-            &node_by_key,
-            ancestor_limit,
-            |_| true,
-            |node| node.metrics.transitive_fan_out,
-        );
-        select_ranked(&mut selected, &ancestors, limit);
+        let ancestor_limit = entry
+            .as_ref()
+            .map_or(usize::MAX, |(distance, _, _)| *distance);
+        select_within(&mut selected, &callers, ancestor_limit, limit);
 
         // 6. Remaining callees up to the nearest exit point.
-        let descendant_limit = exit_distance.unwrap_or(usize::MAX);
-        let descendants = ranked_candidates(
-            out_distance,
-            &index.keys,
-            &node_by_key,
-            descendant_limit,
-            |_| true,
-            |node| node.metrics.height,
-        );
-        select_ranked(&mut selected, &descendants, limit);
+        let descendant_limit = exit
+            .as_ref()
+            .map_or(usize::MAX, |(distance, _, _)| *distance);
+        select_within(&mut selected, &callees, descendant_limit, limit);
 
-        let keys: Vec<String> = selected
-            .iter()
-            .filter_map(|node| index.keys.get(*node).cloned())
-            .collect();
-        let mut edge_ids = HashSet::new();
-        for node in &selected {
-            for edge_index in index.out_all[*node]
-                .iter()
-                .chain(index.in_all[*node].iter())
-            {
-                let edge = &index.edges[*edge_index];
-                if selected.contains(&edge.source) && selected.contains(&edge.target) {
-                    edge_ids.insert(edge.id);
-                }
-            }
-        }
-        let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
-        let edges = self
-            .store
-            .edges_by_ids(graph_id, &edge_ids.into_iter().collect::<Vec<_>>())
-            .await?;
-        let mut route_keys = Vec::new();
-        let mut route_seen = HashSet::new();
-        for node in entry_path.iter().chain(exit_path.iter().rev().skip(1)) {
-            if let Some(key) = index.keys.get(*node) {
-                if route_seen.insert(key.clone()) {
-                    route_keys.push(key.clone());
-                }
-            }
-        }
+        let output = selected_slice(
+            &index,
+            &selected,
+            entry
+                .as_ref()
+                .map_or(&[][..], |(_, _, path)| path.as_slice()),
+            exit.as_ref()
+                .map_or(&[][..], |(_, _, path)| path.as_slice()),
+        );
+        let nodes = self.store.nodes_by_keys(graph_id, &output.keys).await?;
+        let edges = self.store.edges_by_ids(graph_id, &output.edge_ids).await?;
         Ok(FocusSlice {
             nodes,
             edges,
-            entry: entry_node.and_then(|node| index.keys.get(node).cloned()),
-            exit: exit_node.and_then(|node| index.keys.get(node).cloned()),
-            route: route_keys,
+            entry: entry.and_then(|(_, node, _)| index.keys.get(node).cloned()),
+            exit: exit.and_then(|(_, node, _)| index.keys.get(node).cloned()),
+            route: output.route,
         })
     }
 
