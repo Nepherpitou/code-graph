@@ -1,0 +1,140 @@
+name: code-graph rust report
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: code-graph-rust-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CG: ./vendor/code-graph
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify vendored binary
+        run: |
+          test -x "$CG" || {
+            echo "vendor/code-graph is missing or not executable. Rebuild it on a baseline CPU:" >&2
+            echo "  docker run --rm -v \"\$PWD\":/src -w /src -v /tmp/cg-target:/tmp/cg-target -e CARGO_TARGET_DIR=/tmp/cg-target docker.io/library/rust:1-alpine cargo build --profile dist --locked --target x86_64-unknown-linux-musl" >&2
+            exit 1
+          }
+          (cd vendor && sha256sum -c code-graph.sha256)
+          ldd "$CG" 2>&1 | grep -Eq 'statically linked|not a dynamic executable' \
+            || { echo 'vendor/code-graph is not statically linked' >&2; exit 1; }
+          "$CG" --version
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-analyzer
+
+      - name: Baseline worktree and changed files
+        run: |
+          TMP="$RUNNER_TEMP"
+          base_ref="${{ github.base_ref }}"
+          git fetch --no-tags origin "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"
+          base=$(git merge-base "origin/$base_ref" HEAD)
+          git worktree add "$TMP/base" "$base"
+          git diff --name-only "$base" HEAD > "$TMP/changed.txt"
+          (cd "$TMP/base" && cargo fetch --locked)
+          cargo fetch --locked
+
+      - name: Analyze baseline and head
+        run: |
+          TMP="$RUNNER_TEMP"
+          DB="$RUNNER_TEMP/cg.db"
+          "$CG" analyze "$TMP/base" --lang rust --exclude fixtures --db "$DB" --quiet \
+            -o "$TMP/base.graph.json"
+          "$CG" analyze . --lang rust --exclude fixtures --db "$DB" --quiet \
+            -o "$TMP/head.graph.json"
+
+      - name: Build comment
+        if: always()
+        run: |
+          TMP="$RUNNER_TEMP"
+          DB="$RUNNER_TEMP/cg.db"
+          {
+            echo '## code-graph: Rust call graph diff'
+            echo
+            echo "**head:** \`${{ github.event.pull_request.head.sha }}\`"
+            echo
+            if [ ! -x "$CG" ] || [ ! -s "$DB" ]; then
+              echo '_Analysis did not run — see the job log._'
+            else
+              "$CG" audit diff --db "$DB" --changed-files "$TMP/changed.txt" \
+                --format json --limit 20 > "$TMP/diff.json" 2> "$TMP/diff.err" || true
+              if [ ! -s "$TMP/diff.json" ]; then
+                echo '_Diff did not run — see the job log._'
+              else
+                jq -r '
+                  "**Snapshots:** `#\(.from.id)` → `#\(.to.id)` · **rows:** \(.totalRows)\(if .truncated then " (showing \(.shownRows))" else "" end)",
+                  "",
+                  if .totalRows == 0 then
+                    "_No significant call-graph changes in the touched files._"
+                  else
+                    ([ "| symbol | file | status | Δpriority | Δcomplexity | flags |",
+                       "|---|---|---|---:|---:|---|" ]
+                     + [ .rows[] |
+                         "| `\(.qname)` | `\(.file)` | \(.status) | "
+                         + (if .delta then "\(.delta.priority * 100 | round / 100)" else "—" end) + " | "
+                         + (if .delta then "\(.delta.cyclomatic)" else "—" end) + " | "
+                         + ((.flags // []) | join(", ")) + " |" ])
+                    | join("\n")
+                  end
+                ' "$TMP/diff.json"
+              fi
+              if [ -s "$TMP/diff.err" ]; then
+                grep -v 'roots differ' "$TMP/diff.err" > "$TMP/diff.warn" || true
+                if [ -s "$TMP/diff.warn" ]; then
+                  echo
+                  echo '<details><summary>diff warnings</summary>'
+                  echo
+                  echo '```text'
+                  cat "$TMP/diff.warn"
+                  echo '```'
+                  echo '</details>'
+                fi
+              fi
+            fi
+          } > "$TMP/comment.md"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-graph-rust-diff
+          path: ${{ runner.temp }}/diff.json
+          if-no-files-found: ignore
+
+      - name: Publish comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          TMP="$RUNNER_TEMP"
+          if [ ! -s "$TMP/comment.md" ]; then
+            echo 'comment was not built' >&2
+            exit 0
+          fi
+          marker='<!-- code-graph-rust-report -->'
+          { echo "$marker"; echo; cat "$TMP/comment.md"; } > "$TMP/comment.body.md"
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+                --jq ".[] | select(.body | startswith(\"$marker\")) | .id" \
+                | head -n1 || true)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" \
+              -F "body=@$TMP/comment.body.md" > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+              -F "body=@$TMP/comment.body.md" > /dev/null
+          fi
