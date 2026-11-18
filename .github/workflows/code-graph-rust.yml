@@ -32,6 +32,7 @@ jobs:
           (cd vendor && sha256sum -c code-graph.sha256)
           ldd "$CG" 2>&1 | grep -Eq 'statically linked|not a dynamic executable' \
             || { echo 'vendor/code-graph is not statically linked' >&2; exit 1; }
+          "$CG" --version
 
       - uses: dtolnay/rust-toolchain@stable
         with:
