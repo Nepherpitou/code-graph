@@ -1,5 +1,6 @@
 //! The audit diff views themselves.
 
+use super::conventions::Conventions;
 use super::*;
 
 pub(super) struct AffectedRow<'a> {
@@ -107,24 +108,25 @@ pub(super) fn output_rows(
 }
 
 pub(super) fn summary(input: &ViewInput<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
     let mut old_verify = input
         .verify_calls
         .then(|| Verification::new(&input.from.meta.root));
     let mut new_verify = input
         .verify_calls
         .then(|| Verification::new(&input.to.meta.root));
-    let old_real = graph_call_edges(input.old_nodes, input.old_edges, old_verify.as_mut());
-    let new_real = graph_call_edges(input.new_nodes, input.new_edges, new_verify.as_mut());
+    let old_real = graph_call_edges(input.old_nodes, input.old_edges, old_verify.as_mut(), conventions);
+    let new_real = graph_call_edges(input.new_nodes, input.new_edges, new_verify.as_mut(), conventions);
     let cross = |edges: &[EdgeView<'_>]| {
         edges
             .iter()
             .filter(|edge| area(&edge.src.file) != area(&edge.dst.file))
             .count()
     };
-    let (old_cx, old_loc, old_priority, old_dead) = totals(input.old_nodes);
-    let (new_cx, new_loc, new_priority, new_dead) = totals(input.new_nodes);
-    let old_cycles = sccs(input.old_nodes, input.old_edges, old_verify.as_mut()).len();
-    let new_cycles = sccs(input.new_nodes, input.new_edges, new_verify.as_mut()).len();
+    let (old_cx, old_loc, old_priority, old_dead) = totals(input.old_nodes, conventions);
+    let (new_cx, new_loc, new_priority, new_dead) = totals(input.new_nodes, conventions);
+    let old_cycles = sccs(input.old_nodes, input.old_edges, old_verify.as_mut(), conventions).len();
+    let new_cycles = sccs(input.new_nodes, input.new_edges, new_verify.as_mut(), conventions).len();
 
     let raw_calls = |edges: &[GraphEdge]| edges.iter().filter(|edge| edge.kind == EdgeKind::Call).count();
     let (changed_cx_before, changed_cx_after, added_cx) = touched_complexity(input);
@@ -193,6 +195,7 @@ pub(super) fn summary(input: &ViewInput<'_>) -> Result<ExitCode> {
 }
 
 pub(super) fn uses(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
     let (real, _) = new_call_edges(input, graphs);
     let mut counts: HashMap<&str, u32> = HashMap::new();
     for edge in &real {
@@ -207,12 +210,9 @@ pub(super) fn uses(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCod
         if !is_callable(dst.kind) || dst.synthetic {
             continue;
         }
-        if is_test_file(&dst.file) || is_framework_file(&dst.file) {
-            continue;
-        }
-        if dst.file.starts_with("common/decorators/")
-            || dst.file.starts_with("common/pipes/")
-            || dst.file.starts_with("common/dto/")
+        if conventions.is_test_file(&dst.file)
+            || conventions.is_framework_file(&dst.file)
+            || conventions.is_shared_file(&dst.file)
         {
             continue;
         }
@@ -341,7 +341,8 @@ pub(super) fn affected(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exi
     let mut verify = input
         .verify_calls
         .then(|| Verification::new(&input.to.meta.root));
-    let (forward, reverse) = adjacency(input.new_nodes, input.new_edges, verify.as_mut());
+    let conventions = Conventions::of(&input.to.meta.language);
+    let (forward, reverse) = adjacency(input.new_nodes, input.new_edges, verify.as_mut(), conventions);
 
     let mut counts: HashMap<&str, (u32, u32)> = HashMap::new();
     for (id, status) in &touched {
@@ -588,13 +589,14 @@ pub(super) fn filtered_edges(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Resu
 }
 
 pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
     let mut old_verify = input
         .verify_calls
         .then(|| Verification::new(&input.from.meta.root));
     let mut new_verify = input
         .verify_calls
         .then(|| Verification::new(&input.to.meta.root));
-    let old: HashSet<Vec<&str>> = sccs(input.old_nodes, input.old_edges, old_verify.as_mut())
+    let old: HashSet<Vec<&str>> = sccs(input.old_nodes, input.old_edges, old_verify.as_mut(), conventions)
         .into_iter()
         .map(|component| {
             let mut members: Vec<&str> = component
@@ -606,7 +608,7 @@ pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
             members
         })
         .collect();
-    let new_cycles = sccs(input.new_nodes, input.new_edges, new_verify.as_mut());
+    let new_cycles = sccs(input.new_nodes, input.new_edges, new_verify.as_mut(), conventions);
     let mut rows: Vec<(Vec<&str>, &'static str)> = Vec::new();
     let mut seen: HashSet<Vec<&str>> = HashSet::new();
     for component in &new_cycles {
@@ -648,6 +650,7 @@ pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
 }
 
 pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
     let was_dead: HashSet<(&str, &str)> = input
         .old_nodes
         .iter()
@@ -658,7 +661,7 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
         .new_nodes
         .iter()
         .filter(|node| node.metrics.dead_code_candidate)
-        .filter(|node| !is_test_node(node))
+        .filter(|node| !conventions.is_test_node(node))
         .filter(|node| !was_dead.contains(&(node.file.as_str(), node.qname.as_str())))
         .collect();
     rows.sort_by(|left, right| left.qname.cmp(&right.qname));
@@ -677,13 +680,13 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
                         node.qname.clone(),
                         node.kind.as_str().to_string(),
                         node.file.clone(),
-                        if is_framework_file(&node.file) { "yes".into() } else { String::new() },
+                        if conventions.is_framework_file(&node.file) { "yes".into() } else { String::new() },
                     ],
                     json!({
                         "symbol": node.qname,
                         "kind": node.kind.as_str(),
                         "file": node.file,
-                        "framework": is_framework_file(&node.file),
+                        "framework": conventions.is_framework_file(&node.file),
                     }),
                 )
             })
@@ -693,24 +696,14 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
 }
 
 pub(super) fn silent_files(input: &ViewInput<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
     let changed = require_changed_files(input, "silent-files")?;
     let touched: HashSet<&str> = input.rows.iter().map(|row| row.file.as_str()).collect();
     let mut rows: Vec<(&str, &'static str)> = changed
         .iter()
         .filter(|file| !touched.contains(file.as_str()))
         .map(|file| {
-            let reason = if file.ends_with(".spec.ts") {
-                "test"
-            } else if file.contains(".dto") || file.contains("schema") {
-                "dto-schema"
-            } else if file.contains("/ports/") {
-                "port"
-            } else if file.ends_with(".module.ts") {
-                "di-module"
-            } else {
-                "no-callable-delta"
-            };
-            (file.as_str(), reason)
+            (file.as_str(), conventions.silent_reason(file))
         })
         .collect();
     rows.sort_by(|left, right| left.0.cmp(right.0));

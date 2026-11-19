@@ -233,7 +233,11 @@ comment formatting, so callers compose whatever report they need.
 | `silent-files` | changed files that carry no symbol rows (ports, DTOs, schemas, tests) |
 
 `callers`, `affected`, `areas` and `silent-files` require `--changed-files`; the other views use
-the whole snapshot pair. Example composition:
+the whole snapshot pair.
+
+Per-language conventions — test markers, framework suffixes, abstract markers, shared plumbing and
+the reasons a file produces no symbol rows — live in `src/cli/audit_views/conventions.rs`; nothing
+else in the views matches stack-specific paths. Example composition:
 
 ```bash
 S="--db .code-graph/code-graph.db --changed-files /tmp/changed.txt --format json"

@@ -18,7 +18,10 @@ use super::args::{AuditDiffArgs, AuditDiffView, AuditFormat};
 use super::audit::{pad, print_json, snapshot_json};
 use super::audit_diff::{DiffStatus, NodeDiff};
 
+mod conventions;
 mod views;
+
+use conventions::Conventions;
 
 /// Which snapshot pair a view has to explain, and what the caller considers changed.
 pub(super) struct ViewInput<'a> {
@@ -150,30 +153,6 @@ impl<'a> Graphs<'a> {
     }
 }
 
-fn is_abstract(node: &GraphNode) -> bool {
-    node.declaration.trim_start().starts_with("abstract")
-}
-
-fn is_test_file(path: &str) -> bool {
-    path.ends_with(".spec.ts") || path.contains("/test/")
-}
-
-/// Test functions are entry points for the harness, not code without callers.
-fn is_test_node(node: &GraphNode) -> bool {
-    node.qname.starts_with("tests.") || is_test_file(&node.file)
-}
-
-fn is_framework_file(path: &str) -> bool {
-    const SUFFIXES: [&str; 5] = [
-        ".controller.ts",
-        ".module.ts",
-        ".provider.ts",
-        ".guard.ts",
-        ".interceptor.ts",
-    ];
-    SUFFIXES.iter().any(|suffix| path.ends_with(suffix))
-}
-
 fn is_callable(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Function | NodeKind::Method)
 }
@@ -196,11 +175,16 @@ fn area(path: &str) -> &str {
 }
 
 /// Same-named methods are linked by the LSP only for overrides and their siblings.
-fn is_override_link(src: &GraphNode, dst: &GraphNode, new_pairs: &HashSet<(&str, &str)>) -> bool {
+fn is_override_link(
+    src: &GraphNode,
+    dst: &GraphNode,
+    new_pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> bool {
     if src.name != dst.name {
         return false;
     }
-    if is_abstract(src) || is_abstract(dst) {
+    if conventions.is_abstract(src) || conventions.is_abstract(dst) {
         return true;
     }
     new_pairs.contains(&(dst.id.as_str(), src.id.as_str()))
@@ -211,10 +195,11 @@ fn wiring_exclusion(
     src: &GraphNode,
     dst: &GraphNode,
     pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
 ) -> Option<Bucket> {
-    if is_override_link(src, dst, pairs) {
+    if is_override_link(src, dst, pairs, conventions) {
         Some(Bucket::Override)
-    } else if is_test_file(&src.file) || is_test_file(&dst.file) {
+    } else if conventions.is_test_file(&src.file) || conventions.is_test_file(&dst.file) {
         Some(Bucket::Test)
     } else if matches!(src.kind, NodeKind::Constructor) || matches!(dst.kind, NodeKind::Constructor)
     {
@@ -271,6 +256,7 @@ fn new_call_edges<'a>(
     input: &'a ViewInput<'a>,
     graphs: &Graphs<'a>,
 ) -> (Vec<EdgeView<'a>>, HashMap<Bucket, Vec<EdgeView<'a>>>) {
+    let conventions = Conventions::of(&input.to.meta.language);
     let mut candidates: Vec<(EdgeView<'a>, &'a GraphEdge)> = Vec::new();
     let mut dropped: HashMap<Bucket, Vec<EdgeView<'a>>> = HashMap::new();
     for edge in input.new_edges {
@@ -294,7 +280,7 @@ fn new_call_edges<'a>(
             dst,
             sites: edge.sites,
         };
-        match wiring_exclusion(src, dst, &graphs.new_pairs) {
+        match wiring_exclusion(src, dst, &graphs.new_pairs, conventions) {
             Some(bucket) => dropped.entry(bucket).or_default().push(view),
             None => candidates.push((view, edge)),
         }
@@ -319,7 +305,7 @@ fn new_call_edges<'a>(
         let abstract_names: HashSet<&str> = group
             .iter()
             .map(|&index| candidates[index].0.dst)
-            .filter(|dst| is_abstract(dst))
+            .filter(|dst| conventions.is_abstract(dst))
             .map(|dst| dst.name.as_str())
             .collect();
         for &index in group {
@@ -328,7 +314,7 @@ fn new_call_edges<'a>(
             }
             seen[index] = true;
             let (view, edge) = &candidates[index];
-            if !is_abstract(view.dst) && abstract_names.contains(view.dst.name.as_str()) {
+            if !conventions.is_abstract(view.dst) && abstract_names.contains(view.dst.name.as_str()) {
                 duplicate.push(EdgeView {
                     src: view.src,
                     dst: view.dst,
@@ -380,6 +366,7 @@ fn graph_call_edges<'a>(
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
     mut verify: Option<&mut Verification>,
+    conventions: &Conventions,
 ) -> Vec<EdgeView<'a>> {
     let by_id: HashMap<&str, &GraphNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let pairs: HashSet<(&str, &str)> = edges
@@ -398,7 +385,7 @@ fn graph_call_edges<'a>(
         ) else {
             continue;
         };
-        if wiring_exclusion(src, dst, &pairs).is_some() {
+        if wiring_exclusion(src, dst, &pairs, conventions).is_some() {
             continue;
         }
         if let Some(context) = verify.as_mut() {
@@ -421,11 +408,12 @@ fn adjacency<'a>(
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
     verify: Option<&mut Verification>,
+    conventions: &Conventions,
 ) -> (Adjacency<'a>, Adjacency<'a>) {
     let mut forward: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
     let mut reverse: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
     let known: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-    for edge in graph_call_edges(nodes, edges, verify) {
+    for edge in graph_call_edges(nodes, edges, verify, conventions) {
         if !known.contains(edge.src.id.as_str()) || !known.contains(edge.dst.id.as_str()) {
             continue;
         }
@@ -555,7 +543,7 @@ fn touched_complexity(input: &ViewInput<'_>) -> (f64, f64, f64) {
     )
 }
 
-fn totals(nodes: &[GraphNode]) -> (f64, f64, f64, i64) {
+fn totals(nodes: &[GraphNode], conventions: &Conventions) -> (f64, f64, f64, i64) {
     let mut cyclomatic = 0.0;
     let mut loc = 0.0;
     let mut priority = 0.0;
@@ -564,7 +552,7 @@ fn totals(nodes: &[GraphNode]) -> (f64, f64, f64, i64) {
         cyclomatic += f64::from(node.cyclomatic);
         loc += f64::from(node.loc);
         priority += node.metrics.refactor_priority;
-        if node.metrics.dead_code_candidate && !is_test_node(node) {
+        if node.metrics.dead_code_candidate && !conventions.is_test_node(node) {
             dead += 1;
         }
     }
@@ -575,8 +563,9 @@ fn sccs<'a>(
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
     verify: Option<&mut Verification>,
+    conventions: &Conventions,
 ) -> Vec<Vec<&'a str>> {
-    let (forward, _) = adjacency(nodes, edges, verify);
+    let (forward, _) = adjacency(nodes, edges, verify, conventions);
     let mut index: HashMap<&str, usize> = HashMap::new();
     let mut low: HashMap<&str, usize> = HashMap::new();
     let mut stack: Vec<&str> = Vec::new();
@@ -754,6 +743,22 @@ mod tests {
     }
 
     #[test]
+    fn conventions_follow_the_snapshot_language() {
+        let ts = Conventions::of("typescript");
+        let rust = Conventions::of("rust");
+        assert!(ts.is_framework_file("src/users/users.controller.ts"));
+        assert!(!rust.is_framework_file("src/users/users.controller.ts"));
+        assert!(ts.is_test_file("src/users/users.spec.ts"));
+        assert!(!rust.is_test_file("src/users/users.spec.ts"));
+        assert!(rust.is_test_node(&node("t#f", "tests.case", NodeKind::Function, "src/lib.rs", "fn case(")));
+        assert!(!rust.is_test_node(&node("f#f", "case", NodeKind::Function, "src/lib.rs", "fn case(")));
+        assert!(ts.is_abstract(&node("a#f", "f", NodeKind::Method, "a.ts", "abstract f(")));
+        assert!(!rust.is_abstract(&node("a#f", "f", NodeKind::Method, "a.rs", "abstract f(")));
+        assert_eq!(ts.silent_reason("src/x/user.dto.ts"), "dto-schema");
+        assert_eq!(rust.silent_reason("src/x/user.dto.ts"), "no-callable-delta");
+    }
+
+    #[test]
     fn areas_skip_source_roots() {
         assert_eq!(area("src/cli/audit_views.rs"), "cli");
         assert_eq!(area("crates/graph/src/lib.rs"), "graph");
@@ -768,14 +773,14 @@ mod tests {
         let mut pairs = HashSet::new();
         pairs.insert(("a#run", "b#run"));
         pairs.insert(("b#run", "a#run"));
-        assert!(is_override_link(&first, &second, &pairs));
+        assert!(is_override_link(&first, &second, &pairs, Conventions::of("typescript")));
 
         let controller = node("c#delete", "delete", NodeKind::Method, "c.ts", "async delete(id: string) {");
         let service = node("s#delete", "delete", NodeKind::Method, "s.ts", "async delete(id: string) {");
-        assert!(!is_override_link(&controller, &service, &HashSet::new()));
+        assert!(!is_override_link(&controller, &service, &HashSet::new(), Conventions::of("typescript")));
 
         let base = node("base#run", "run", NodeKind::Method, "ports.ts", "abstract run(): void;");
-        assert!(is_override_link(&base, &first, &HashSet::new()));
+        assert!(is_override_link(&base, &first, &HashSet::new(), Conventions::of("typescript")));
     }
 
     #[test]
@@ -786,7 +791,7 @@ mod tests {
             node("c#h", "c.h", NodeKind::Function, "c.ts", "function h() {"),
         ];
         let edges = vec![edge("a#f", "b#g"), edge("b#g", "a#f")];
-        let cycles = sccs(&nodes, &edges, None);
+        let cycles = sccs(&nodes, &edges, None, Conventions::of("typescript"));
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 2);
     }
@@ -799,7 +804,7 @@ mod tests {
             node("c#h", "h", NodeKind::Function, "c.ts", "function h() {"),
         ];
         let edges = vec![edge("a#f", "b#g"), edge("b#g", "c#h")];
-        let (forward, _) = adjacency(&nodes, &edges, None);
+        let (forward, _) = adjacency(&nodes, &edges, None, Conventions::of("typescript"));
         let reached = reach_from("a#f", &forward);
         assert_eq!(reached.len(), 2);
         assert!(!reached.contains("a#f"));
