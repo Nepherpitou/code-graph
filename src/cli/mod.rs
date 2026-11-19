@@ -4,6 +4,7 @@
 mod args;
 mod audit;
 mod audit_diff;
+mod audit_views;
 mod inspect;
 
 use std::fs;

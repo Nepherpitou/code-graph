@@ -180,6 +180,33 @@ pub(super) enum AuditDiffOrder {
     Name,
 }
 
+/// One question about the difference between two snapshots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(super) enum AuditDiffView {
+    /// Graph shape: symbols, edges, coupling, complexity totals.
+    Summary,
+    /// Metric changes per symbol (default).
+    Symbols,
+    /// Existing symbols the changed code starts calling.
+    Uses,
+    /// New call edges aggregated by module pair.
+    Dependencies,
+    /// Calls from unchanged files into the changed ones.
+    Callers,
+    /// Unchanged callables whose execution path reaches the changed symbols.
+    Affected,
+    /// Symbol and complexity rollout per module.
+    Areas,
+    /// How many added call edges were dropped and why.
+    FilteredEdges,
+    /// Cycles added, removed, or unchanged.
+    Cycles,
+    /// Dead-code candidates that appeared in the target snapshot.
+    DeadCode,
+    /// Changed files that carry no symbol-level rows.
+    SilentFiles,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(super) enum AuditDiffStatus {
     Changed,
@@ -335,6 +362,9 @@ pub(super) struct AuditDiffArgs {
     /// Output format: human-readable text or JSON.
     #[arg(long, value_enum, default_value_t = AuditFormat::Text)]
     pub(super) format: AuditFormat,
+    /// Which view of the diff to print.
+    #[arg(long, value_enum, default_value_t = AuditDiffView::Symbols)]
+    pub(super) view: AuditDiffView,
     /// Sort changed rows by a metric delta, or by name.
     #[arg(long, value_enum, default_value_t = AuditDiffOrder::Priority)]
     pub(super) order_by: AuditDiffOrder,
@@ -362,6 +392,9 @@ pub(super) struct AuditDiffArgs {
     /// Include added and removed call/data edges.
     #[arg(long)]
     pub(super) edges: bool,
+    /// Skip the source-text check that drops edges resolved to a same-named symbol the line never calls.
+    #[arg(long)]
+    pub(super) no_verify_calls: bool,
     /// Sort ascending instead of descending.
     #[arg(long)]
     pub(super) ascending: bool,

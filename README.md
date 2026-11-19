@@ -212,6 +212,36 @@ analyze each checkout/worktree into the same database and run `audit diff`; for 
 merge-base as the baseline. `--edges` adds call/data edge deltas, and `--exit-code` exits 1 when
 the filtered diff contains any rows.
 
+#### Views
+
+`--view <name>` prints one atomic table per call. Every view shares the snapshot selectors,
+`--changed-files`, `--format`, `--limit` and `--ascending`; nothing here knows about Git or about
+comment formatting, so callers compose whatever report they need.
+
+| View | Answers |
+|---|---|
+| `symbols` (default) | which symbols changed and by how much |
+| `summary` | graph shape: callables, call edges, cross-module calls, mean cyclomatic, loc, cycles, dead code |
+| `uses` | which existing symbols the changed code starts calling |
+| `dependencies` | new call edges aggregated by module pair, with mutual pairs |
+| `callers` | calls from unchanged files into the changed ones |
+| `affected` | unchanged callables whose execution path reaches changed code (`changed`, `added`, `share`, `priority`, `direct`); sorted by `share`, then `priority` |
+| `areas` | per-module added/removed/changed counts, mean cyclomatic per callable, loc delta |
+| `filtered-edges` | how many added call edges survived, and why the rest were dropped (overrides of a base method, test files, DI wiring, interface/implementation duplicates, signature re-resolutions) |
+| `cycles` | cycles added, removed, or unchanged, with members |
+| `dead-code` | dead-code candidates that appeared in the target snapshot, with a DI/decorator flag |
+| `silent-files` | changed files that carry no symbol rows (ports, DTOs, schemas, tests) |
+
+`callers`, `affected`, `areas` and `silent-files` require `--changed-files`; the other views use
+the whole snapshot pair. Example composition:
+
+```bash
+S="--db .code-graph/code-graph.db --changed-files /tmp/changed.txt --format json"
+code-graph audit diff $S --view summary        > summary.json
+code-graph audit diff $S --view uses --limit 10 > uses.json
+code-graph audit diff $S --view affected --limit 10 > affected.json
+```
+
 ### HTTP API
 
 `serve` exposes snapshot-scoped endpoints under `/api/v1`:
