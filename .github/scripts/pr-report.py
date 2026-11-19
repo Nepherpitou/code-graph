@@ -244,26 +244,28 @@ def section_affected(view: dict, limit: int) -> list[str]:
 
 def why(row: dict) -> str:
     new = row.get("new") or {}
+    old = row.get("old") or {}
     delta = row.get("delta") or {}
-    parts = []
     status = row.get("status")
-    if status == "added":
-        parts.append("new")
-    if status == "removed":
-        parts.append("removed")
+    reasons = []
     if new.get("deadCodeCandidate"):
-        parts.append("route/DI call not in graph" if is_framework(row.get("file", "")) else "no direct caller")
-    cyclomatic = int(delta.get("cyclomatic", 0) or 0)
-    if status == "removed" and (row.get("old") or {}).get("cyclomatic", 0) >= 2:
-        parts.append(f"was {(row.get('old') or {}).get('cyclomatic', 0)} branches")
+        reasons.append("route/DI call not in graph" if is_framework(row.get("file", "")) else "no direct caller")
+    if status == "added":
+        cyclomatic = int(new.get("cyclomatic", 0) or 0)
+    else:
+        cyclomatic = int(delta.get("cyclomatic", 0) or 0)
+    if status == "removed" and int(old.get("cyclomatic", 0) or 0) >= 2:
+        reasons.append(f"was {old.get('cyclomatic', 0)} branches")
     elif cyclomatic >= 2:
-        parts.append(f"complexity {signed(cyclomatic)}")
+        reasons.append(f"complexity {signed(cyclomatic)}")
     if status == "added" and new.get("loc", 0) >= 40 and new.get("cyclomatic", 0) < 5:
-        parts.append(f"{new.get('loc', 0)} lines")
+        reasons.append(f"{new.get('loc', 0)} lines")
     priority = float(delta.get("priority", 0) or 0)
     if status in ("changed", "moved") and abs(priority) >= 5:
-        parts.append(f"priority {signed(priority, 1)}")
-    return ", ".join(parts[:3])
+        reasons.append(f"priority {signed(priority, 1)}")
+    if reasons:
+        return ", ".join(reasons[:3])
+    return {"added": "new", "removed": "removed"}.get(status, "")
 
 
 def review_row(row: dict) -> str:
