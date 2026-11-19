@@ -1187,6 +1187,7 @@ fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
         .new_nodes
         .iter()
         .filter(|node| node.metrics.dead_code_candidate)
+        .filter(|node| !node.qname.starts_with("tests.") && !is_test_file(&node.file))
         .filter(|node| !was_dead.contains(&(node.file.as_str(), node.qname.as_str())))
         .collect();
     rows.sort_by(|left, right| left.qname.cmp(&right.qname));

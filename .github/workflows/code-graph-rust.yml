@@ -78,16 +78,16 @@ jobs:
           : > "$V/warnings.log"
           if [ -x "$CG" ] && [ -s "$DB" ]; then
             common=(--db "$DB" --changed-files "$TMP/changed.txt" --format json)
-            run_view() { "$CG" audit diff "${common[@]}" --view "$1" "${@:2}" > "$V/$1.json" 2>> "$V/warnings.log" || true; }
+            run_view() { local out="$1" view="$2"; shift 2; "$CG" audit diff "${common[@]}" --view "$view" "$@" > "$V/$out" 2>> "$V/warnings.log" || true; }
             "$CG" audit diff "${common[@]}" --view summary > "$V/summary.json" 2>> "$V/warnings.log" || true
-            run_view uses --limit 10
-            run_view dependencies --limit 6
-            run_view callers --limit 8
-            run_view affected --limit 8
-            run_view areas --limit 6
-            run_view filtered-edges
-            run_view silent-files --limit 1
-            run_view dead-code --limit 1
+            run_view uses.json uses --limit 10
+            run_view dependencies.json dependencies --limit 6
+            run_view callers.json callers --limit 8
+            run_view affected.json affected --limit 8
+            run_view areas.json areas --limit 6
+            run_view filtered.json filtered-edges
+            run_view silent.json silent-files --limit 1
+            run_view dead.json dead-code --limit 1
             "$CG" audit diff "${common[@]}" --view symbols --order-by priority --limit 12 \
               > "$V/review.json" 2>> "$V/warnings.log" || true
             "$CG" audit diff "${common[@]}" --view symbols --order-by priority --limit 80 \
