@@ -17,7 +17,8 @@ use crate::analysis::analyze;
 use crate::graph::{EdgeKind, GraphEdge, GraphNode};
 use crate::store::{GraphSummary, Store};
 
-use super::args::{AuditDiffArgs, AuditDiffOrder, AuditDiffStatus, AuditFormat};
+use super::args::{AuditDiffArgs, AuditDiffOrder, AuditDiffStatus, AuditDiffView, AuditFormat};
+use super::audit_views::{self, ViewInput};
 use super::audit::{
     analysis_options, fit, metric, metric_json, pad, parse_kind, print_json, snapshot_json,
 };
@@ -63,6 +64,24 @@ pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
     rows.retain(|row| row_matches(row, &args, kind, changed_files.as_ref()));
     rows.retain(|row| row_passes_min_delta(row, &args));
     sort_rows(&mut rows, &args);
+
+    if args.view != AuditDiffView::Symbols {
+        let old_edges = context.store.all_edges(context.from.id).await?;
+        let new_edges = context.store.all_edges(context.to.id).await?;
+        let view_input = ViewInput {
+            from: &context.from,
+            to: &context.to,
+            old_nodes: &old_nodes,
+            new_nodes: &new_nodes,
+            old_edges: &old_edges,
+            new_edges: &new_edges,
+            rows: &rows,
+            changed_files: changed_files.as_ref(),
+            verify_calls: !args.no_verify_calls,
+            args: &args,
+        };
+        return audit_views::run(args.view, &view_input).await;
+    }
 
     let total_rows = rows.len();
     let limit = args.limit.clamp(1, 1000);
@@ -439,7 +458,7 @@ impl MetricDelta {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum DiffStatus {
+pub(super) enum DiffStatus {
     Changed,
     Added,
     Removed,
@@ -448,13 +467,13 @@ enum DiffStatus {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NodeDiff {
-    status: DiffStatus,
+pub(super) struct NodeDiff {
+    pub(super) status: DiffStatus,
     matched_by: &'static str,
     id_changed: bool,
-    qname: String,
-    kind: String,
-    file: String,
+    pub(super) qname: String,
+    pub(super) kind: String,
+    pub(super) file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     from_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

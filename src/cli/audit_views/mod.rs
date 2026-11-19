@@ -1,0 +1,812 @@
+//! Atomic views over a snapshot diff.
+//!
+//! Every view answers one question about the difference between two persisted
+//! snapshots and prints either a small table or JSON rows. Nothing here knows
+//! about Git, pull requests, or comment formatting: callers pass a list of
+//! changed files and compose whatever they need from the output.
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::process::ExitCode;
+
+use anyhow::{bail, Result};
+use serde_json::{json, Value};
+
+use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind};
+use crate::store::GraphSummary;
+
+use super::args::{AuditDiffArgs, AuditDiffView, AuditFormat};
+use super::audit::{pad, print_json, snapshot_json};
+use super::audit_diff::{DiffStatus, NodeDiff};
+
+mod conventions;
+mod views;
+
+use conventions::Conventions;
+
+/// Which snapshot pair a view has to explain, and what the caller considers changed.
+pub(super) struct ViewInput<'a> {
+    pub(super) from: &'a GraphSummary,
+    pub(super) to: &'a GraphSummary,
+    pub(super) old_nodes: &'a [GraphNode],
+    pub(super) new_nodes: &'a [GraphNode],
+    pub(super) old_edges: &'a [GraphEdge],
+    pub(super) new_edges: &'a [GraphEdge],
+    pub(super) rows: &'a [NodeDiff],
+    pub(super) changed_files: Option<&'a HashSet<String>>,
+    pub(super) verify_calls: bool,
+    pub(super) args: &'a AuditDiffArgs,
+}
+
+impl ViewInput<'_> {
+    fn limit(&self) -> usize {
+        self.args.limit.clamp(1, 1000)
+    }
+}
+
+/// Why a call edge was left out of the dependency views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Bucket {
+    Override,
+    Test,
+    Wiring,
+    Duplicate,
+    Resignature,
+    Unverified,
+}
+
+impl Bucket {
+    fn label(self) -> &'static str {
+        match self {
+            Bucket::Override => "override",
+            Bucket::Test => "test",
+            Bucket::Wiring => "wiring",
+            Bucket::Duplicate => "duplicate",
+            Bucket::Resignature => "resignature",
+            Bucket::Unverified => "unverified",
+        }
+    }
+}
+
+struct EdgeView<'a> {
+    src: &'a GraphNode,
+    dst: &'a GraphNode,
+    sites: u32,
+}
+
+/// Analyzed root plus the line cache of the call-site text check.
+struct Verification {
+    root: String,
+    cache: HashMap<String, Vec<String>>,
+}
+
+impl Verification {
+    fn new(root: &str) -> Self {
+        Self {
+            root: root.to_string(),
+            cache: HashMap::new(),
+        }
+    }
+
+    fn calls(&mut self, src_file: &str, callee: &str, line: u32) -> bool {
+        line_calls(&self.root, src_file, callee, line, &mut self.cache)
+    }
+}
+
+struct Graphs<'a> {
+    old_by_id: HashMap<&'a str, &'a GraphNode>,
+    new_by_id: HashMap<&'a str, &'a GraphNode>,
+    new_by_key: HashMap<(&'a str, &'a str), &'a GraphNode>,
+    old_pairs: HashSet<(&'a str, &'a str)>,
+    old_keys: HashSet<(&'a str, &'a str, &'a str, &'a str)>,
+    new_pairs: HashSet<(&'a str, &'a str)>,
+}
+
+impl<'a> Graphs<'a> {
+    fn new(input: &'a ViewInput<'a>) -> Self {
+        let old_by_id: HashMap<&str, &GraphNode> =
+            input.old_nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let new_by_id = input.new_nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let new_by_key = input
+            .new_nodes
+            .iter()
+            .map(|n| ((n.file.as_str(), n.qname.as_str()), n))
+            .collect();
+        let old_pairs = input
+            .old_edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Call)
+            .map(|e| (e.source.as_str(), e.target.as_str()))
+            .collect();
+        let new_pairs = input
+            .new_edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Call)
+            .map(|e| (e.source.as_str(), e.target.as_str()))
+            .collect();
+        let old_keys = input
+            .old_edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Call)
+            .filter_map(|e| {
+                let src = old_by_id.get(e.source.as_str())?;
+                let dst = old_by_id.get(e.target.as_str())?;
+                Some((
+                    src.file.as_str(),
+                    src.qname.as_str(),
+                    dst.file.as_str(),
+                    dst.qname.as_str(),
+                ))
+            })
+            .collect();
+        Self {
+            old_by_id,
+            new_by_id,
+            new_by_key,
+            old_pairs,
+            old_keys,
+            new_pairs,
+        }
+    }
+
+    fn node(&self, id: &str) -> Option<&'a GraphNode> {
+        self.new_by_id.get(id).copied()
+    }
+}
+
+fn is_callable(kind: NodeKind) -> bool {
+    matches!(kind, NodeKind::Function | NodeKind::Method)
+}
+
+/// Conventional containers that hold modules rather than being one.
+const CONTAINERS: [&str; 6] = ["src", "lib", "app", "pkg", "crates", "packages"];
+
+/// The module a file belongs to: its first path segment after the usual
+/// source roots, or `root` for files that sit directly in one.
+fn area(path: &str) -> &str {
+    let mut rest = path;
+    while let Some((head, tail)) = rest.split_once('/') {
+        if CONTAINERS.contains(&head) {
+            rest = tail;
+            continue;
+        }
+        return head;
+    }
+    "root"
+}
+
+/// Same-named methods are linked by the LSP only for overrides and their siblings.
+fn is_override_link(
+    src: &GraphNode,
+    dst: &GraphNode,
+    new_pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> bool {
+    if src.name != dst.name {
+        return false;
+    }
+    if conventions.is_abstract(src) || conventions.is_abstract(dst) {
+        return true;
+    }
+    new_pairs.contains(&(dst.id.as_str(), src.id.as_str()))
+}
+
+/// Why a call edge is not a real dependency, or `None` when it is one.
+fn wiring_exclusion(
+    src: &GraphNode,
+    dst: &GraphNode,
+    pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> Option<Bucket> {
+    if is_override_link(src, dst, pairs, conventions) {
+        Some(Bucket::Override)
+    } else if conventions.is_test_file(&src.file) || conventions.is_test_file(&dst.file) {
+        Some(Bucket::Test)
+    } else if matches!(src.kind, NodeKind::Constructor) || matches!(dst.kind, NodeKind::Constructor)
+    {
+        Some(Bucket::Wiring)
+    } else {
+        None
+    }
+}
+
+/// Whether the call site line actually names the callee.
+///
+/// The LSP resolves a bare identifier to any declaration with that name, so a
+/// destructured local like `const { created } = ...` can produce an edge to a
+/// function `created` that the line never calls. The source text is the only
+/// cheap guard; when the analyzed tree is gone, the edge is kept.
+fn line_calls(
+    root: &str,
+    file: &str,
+    name: &str,
+    line: u32,
+    cache: &mut HashMap<String, Vec<String>>,
+) -> bool {
+    let path = format!("{root}/{file}");
+    let lines = cache_entries(cache, &path);
+    if lines.is_empty() || line == 0 {
+        // The analyzed tree is gone (database-only usage) or the edge has no
+        // recorded call site: keep the edge.
+        return true;
+    }
+    let line = line as usize;
+    let start = line.saturating_sub(3).min(lines.len());
+    let end = line.min(lines.len());
+    let window = lines[start..end].join(" ");
+    window.contains(&format!("{name}("))
+        || window.contains(&format!("{name} ("))
+        || window.contains(&format!(".{name}"))
+}
+
+fn cache_entries<'a>(cache: &'a mut HashMap<String, Vec<String>>, path: &str) -> &'a [String] {
+    if !cache.contains_key(path) {
+        let contents = std::fs::read_to_string(path).unwrap_or_default();
+        cache.insert(path.to_string(), contents.lines().map(str::to_string).collect());
+    }
+    cache.get(path).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The earliest call site line of an edge, used for grouping and the text check.
+fn site_line(edge: &GraphEdge) -> u32 {
+    edge.call_sites.iter().map(|site| site.line).min().unwrap_or(0)
+}
+
+/// Call edges added by the target snapshot, split into usable ones and buckets.
+fn new_call_edges<'a>(
+    input: &'a ViewInput<'a>,
+    graphs: &Graphs<'a>,
+) -> (Vec<EdgeView<'a>>, HashMap<Bucket, Vec<EdgeView<'a>>>) {
+    let conventions = Conventions::of(&input.to.meta.language);
+    let mut candidates: Vec<(EdgeView<'a>, &'a GraphEdge)> = Vec::new();
+    let mut dropped: HashMap<Bucket, Vec<EdgeView<'a>>> = HashMap::new();
+    for edge in input.new_edges {
+        if edge.kind != EdgeKind::Call {
+            continue;
+        }
+        if graphs
+            .old_pairs
+            .contains(&(edge.source.as_str(), edge.target.as_str()))
+        {
+            continue;
+        }
+        let (Some(src), Some(dst)) = (
+            graphs.new_by_id.get(edge.source.as_str()).copied(),
+            graphs.new_by_id.get(edge.target.as_str()).copied(),
+        ) else {
+            continue;
+        };
+        let view = EdgeView {
+            src,
+            dst,
+            sites: edge.sites,
+        };
+        match wiring_exclusion(src, dst, &graphs.new_pairs, conventions) {
+            Some(bucket) => dropped.entry(bucket).or_default().push(view),
+            None => candidates.push((view, edge)),
+        }
+    }
+
+    let mut by_site: HashMap<(&str, u32), Vec<usize>> = HashMap::new();
+    for (index, (_view, edge)) in candidates.iter().enumerate() {
+        by_site
+            .entry((edge.source.as_str(), site_line(edge)))
+            .or_default()
+            .push(index);
+    }
+    let mut real = Vec::new();
+    let mut duplicate = Vec::new();
+    let mut resignature = Vec::new();
+    let mut unverified = Vec::new();
+    let mut verify = input
+        .verify_calls
+        .then(|| Verification::new(&input.to.meta.root));
+    let mut seen = vec![false; candidates.len()];
+    for group in by_site.values() {
+        let abstract_names: HashSet<&str> = group
+            .iter()
+            .map(|&index| candidates[index].0.dst)
+            .filter(|dst| conventions.is_abstract(dst))
+            .map(|dst| dst.name.as_str())
+            .collect();
+        for &index in group {
+            if seen[index] {
+                continue;
+            }
+            seen[index] = true;
+            let (view, edge) = &candidates[index];
+            if !conventions.is_abstract(view.dst) && abstract_names.contains(view.dst.name.as_str()) {
+                duplicate.push(EdgeView {
+                    src: view.src,
+                    dst: view.dst,
+                    sites: view.sites,
+                });
+                continue;
+            }
+            let key = (
+                view.src.file.as_str(),
+                view.src.qname.as_str(),
+                view.dst.file.as_str(),
+                view.dst.qname.as_str(),
+            );
+            if graphs.old_keys.contains(&key) {
+                resignature.push(EdgeView {
+                    src: view.src,
+                    dst: view.dst,
+                    sites: view.sites,
+                });
+                continue;
+            }
+            if let Some(context) = verify.as_mut() {
+                if !context.calls(&view.src.file, &view.dst.name, site_line(edge)) {
+                    unverified.push(EdgeView {
+                        src: view.src,
+                        dst: view.dst,
+                        sites: view.sites,
+                    });
+                    continue;
+                }
+            }
+            real.push(EdgeView {
+                src: view.src,
+                dst: view.dst,
+                sites: view.sites,
+            });
+        }
+    }
+    dropped.insert(Bucket::Duplicate, duplicate);
+    dropped.insert(Bucket::Resignature, resignature);
+    dropped.insert(Bucket::Unverified, unverified);
+    (real, dropped)
+}
+
+/// Call edges of one snapshot that carry real dependencies: overrides, tests,
+/// DI wiring and — when a verification context is given — call sites whose text
+/// does not name the callee are removed.
+fn graph_call_edges<'a>(
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    mut verify: Option<&mut Verification>,
+    conventions: &Conventions,
+) -> Vec<EdgeView<'a>> {
+    let by_id: HashMap<&str, &GraphNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let pairs: HashSet<(&str, &str)> = edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Call)
+        .map(|e| (e.source.as_str(), e.target.as_str()))
+        .collect();
+    let mut out = Vec::new();
+    for edge in edges {
+        if edge.kind != EdgeKind::Call {
+            continue;
+        }
+        let (Some(src), Some(dst)) = (
+            by_id.get(edge.source.as_str()).copied(),
+            by_id.get(edge.target.as_str()).copied(),
+        ) else {
+            continue;
+        };
+        if wiring_exclusion(src, dst, &pairs, conventions).is_some() {
+            continue;
+        }
+        if let Some(context) = verify.as_mut() {
+            if !context.calls(&src.file, &dst.name, site_line(edge)) {
+                continue;
+            }
+        }
+        out.push(EdgeView {
+            src,
+            dst,
+            sites: edge.sites,
+        });
+    }
+    out
+}
+
+type Adjacency<'a> = HashMap<&'a str, Vec<&'a str>>;
+
+fn adjacency<'a>(
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    verify: Option<&mut Verification>,
+    conventions: &Conventions,
+) -> (Adjacency<'a>, Adjacency<'a>) {
+    let mut forward: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
+    let mut reverse: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
+    let known: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    for edge in graph_call_edges(nodes, edges, verify, conventions) {
+        if !known.contains(edge.src.id.as_str()) || !known.contains(edge.dst.id.as_str()) {
+            continue;
+        }
+        forward
+            .entry(edge.src.id.as_str())
+            .or_default()
+            .push(edge.dst.id.as_str());
+        reverse
+            .entry(edge.dst.id.as_str())
+            .or_default()
+            .push(edge.src.id.as_str());
+    }
+    (forward, reverse)
+}
+
+fn reach_from<'a>(start: &'a str, forward: &HashMap<&'a str, Vec<&'a str>>) -> HashSet<&'a str> {
+    let mut seen = HashSet::new();
+    let mut queue = VecDeque::new();
+    seen.insert(start);
+    queue.push_back(start);
+    while let Some(current) = queue.pop_front() {
+        for next in forward.get(current).into_iter().flatten() {
+            if seen.insert(next) {
+                queue.push_back(next);
+            }
+        }
+    }
+    seen.remove(start);
+    seen
+}
+
+fn touched_ids<'a>(input: &'a ViewInput<'a>, graphs: &Graphs<'a>) -> HashMap<&'a str, DiffStatus> {
+    let changed = input.changed_files;
+    let mut out = HashMap::new();
+    for row in input.rows {
+        if !matches!(row.status, DiffStatus::Added | DiffStatus::Changed | DiffStatus::Moved) {
+            continue;
+        }
+        if row.kind != NodeKind::Function.as_str() && row.kind != NodeKind::Method.as_str() {
+            continue;
+        }
+        if let Some(files) = changed {
+            if !files.contains(&row.file) {
+                continue;
+            }
+        }
+        if let Some(node) = graphs.new_by_key.get(&(row.file.as_str(), row.qname.as_str())) {
+            out.insert(node.id.as_str(), row.status);
+        }
+    }
+    out
+}
+
+fn require_changed_files<'a>(input: &'a ViewInput<'a>, view: &str) -> Result<&'a HashSet<String>> {
+    match input.changed_files {
+        Some(files) => Ok(files),
+        None => bail!("--view {view} needs --changed-files"),
+    }
+}
+
+
+
+fn callables(nodes: &[GraphNode]) -> Vec<&GraphNode> {
+    nodes
+        .iter()
+        .filter(|node| is_callable(node.kind) && !node.synthetic)
+        .collect()
+}
+
+fn mean_cyclomatic(nodes: &[GraphNode]) -> f64 {
+    let list = callables(nodes);
+    if list.is_empty() {
+        return 0.0;
+    }
+    list.iter().map(|node| f64::from(node.cyclomatic)).sum::<f64>() / list.len() as f64
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+/// Mean cyclomatic of the touched callables, split so that both columns of a
+/// row describe the same symbols: `(changed_before, changed_after, added_after)`.
+fn touched_complexity(input: &ViewInput<'_>) -> (f64, f64, f64) {
+    let old_by_key: HashMap<(&str, &str), &GraphNode> = input
+        .old_nodes
+        .iter()
+        .map(|node| ((node.file.as_str(), node.qname.as_str()), node))
+        .collect();
+    let new_by_key: HashMap<(&str, &str), &GraphNode> = input
+        .new_nodes
+        .iter()
+        .map(|node| ((node.file.as_str(), node.qname.as_str()), node))
+        .collect();
+    let mut changed_before = Vec::new();
+    let mut changed_after = Vec::new();
+    let mut added_after = Vec::new();
+    for row in input.rows {
+        if row.kind != NodeKind::Function.as_str() && row.kind != NodeKind::Method.as_str() {
+            continue;
+        }
+        let key = (row.file.as_str(), row.qname.as_str());
+        match row.status {
+            DiffStatus::Added => {
+                if let Some(node) = new_by_key.get(&key) {
+                    added_after.push(f64::from(node.cyclomatic));
+                }
+            }
+            DiffStatus::Changed | DiffStatus::Moved => {
+                if let Some(node) = new_by_key.get(&key) {
+                    changed_after.push(f64::from(node.cyclomatic));
+                }
+                if let Some(node) = old_by_key.get(&key) {
+                    changed_before.push(f64::from(node.cyclomatic));
+                }
+            }
+            DiffStatus::Removed => {}
+        }
+    }
+    (
+        mean(&changed_before),
+        mean(&changed_after),
+        mean(&added_after),
+    )
+}
+
+fn totals(nodes: &[GraphNode], conventions: &Conventions) -> (f64, f64, f64, i64) {
+    let mut cyclomatic = 0.0;
+    let mut loc = 0.0;
+    let mut priority = 0.0;
+    let mut dead = 0i64;
+    for node in nodes {
+        cyclomatic += f64::from(node.cyclomatic);
+        loc += f64::from(node.loc);
+        priority += node.metrics.refactor_priority;
+        if node.metrics.dead_code_candidate && !conventions.is_test_node(node) {
+            dead += 1;
+        }
+    }
+    (cyclomatic, loc, priority, dead)
+}
+
+fn sccs<'a>(
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    verify: Option<&mut Verification>,
+    conventions: &Conventions,
+) -> Vec<Vec<&'a str>> {
+    let (forward, _) = adjacency(nodes, edges, verify, conventions);
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut low: HashMap<&str, usize> = HashMap::new();
+    let mut stack: Vec<&str> = Vec::new();
+    let mut on_stack: HashSet<&str> = HashSet::new();
+    let mut counter = 0usize;
+    let mut out = Vec::new();
+    let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    for root in ids {
+        if index.contains_key(root) {
+            continue;
+        }
+        strongconnect(root, &forward, &mut index, &mut low, &mut stack, &mut on_stack, &mut counter, &mut out);
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn strongconnect<'a>(
+    node: &'a str,
+    forward: &HashMap<&'a str, Vec<&'a str>>,
+    index: &mut HashMap<&'a str, usize>,
+    low: &mut HashMap<&'a str, usize>,
+    stack: &mut Vec<&'a str>,
+    on_stack: &mut HashSet<&'a str>,
+    counter: &mut usize,
+    out: &mut Vec<Vec<&'a str>>,
+) {
+    let mut work: Vec<(&'a str, usize)> = vec![(node, 0)];
+    while let Some((current, edge_index)) = work.pop() {
+        if edge_index == 0 {
+            index.insert(current, *counter);
+            low.insert(current, *counter);
+            *counter += 1;
+            stack.push(current);
+            on_stack.insert(current);
+        }
+        let edges = forward.get(current).map(Vec::as_slice).unwrap_or(&[]);
+        if edge_index < edges.len() {
+            let next = edges[edge_index];
+            work.push((current, edge_index + 1));
+            if !index.contains_key(next) {
+                work.push((next, 0));
+            } else if on_stack.contains(next) {
+                let candidate = index[next];
+                let entry = low.entry(current).or_insert(candidate);
+                if candidate < *entry {
+                    *entry = candidate;
+                }
+            }
+            continue;
+        }
+        if low[current] == index[current] {
+            let mut component = Vec::new();
+            while let Some(top) = stack.pop() {
+                on_stack.remove(top);
+                component.push(top);
+                if top == current {
+                    break;
+                }
+            }
+            if component.len() > 1 {
+                out.push(component);
+            }
+        }
+        if let Some((parent, _)) = work.last().copied() {
+            let candidate = low[current];
+            let entry = low.entry(parent).or_insert(candidate);
+            if candidate < *entry {
+                *entry = candidate;
+            }
+        }
+    }
+}
+
+fn format_float(value: f64) -> String {
+    if value.abs() >= 100.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn print_table(headers: &[&str], rows: &[Vec<String>], widths: &[usize]) {
+    let mut line = String::new();
+    for (index, header) in headers.iter().enumerate() {
+        line.push_str(&pad(header, widths[index]));
+    }
+    println!("  {line}");
+    for row in rows {
+        let mut line = String::new();
+        for (index, cell) in row.iter().enumerate() {
+            line.push_str(&pad(cell, widths[index]));
+        }
+        println!("  {line}");
+    }
+}
+
+pub(super) async fn run(view: AuditDiffView, input: &ViewInput<'_>) -> Result<ExitCode> {
+    let graphs = Graphs::new(input);
+    match view {
+        AuditDiffView::Summary => views::summary(input),
+        AuditDiffView::Uses => views::uses(input, &graphs),
+        AuditDiffView::Dependencies => views::dependencies(input, &graphs),
+        AuditDiffView::Callers => views::callers(input, &graphs),
+        AuditDiffView::Affected => views::affected(input, &graphs),
+        AuditDiffView::Areas => views::areas(input),
+        AuditDiffView::FilteredEdges => views::filtered_edges(input, &graphs),
+        AuditDiffView::Cycles => views::cycles(input),
+        AuditDiffView::DeadCode => views::dead_code(input),
+        AuditDiffView::SilentFiles => views::silent_files(input),
+        AuditDiffView::Symbols => bail!("symbols view is handled by the diff itself"),
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::ResultUsage;
+
+    fn node(id: &str, name: &str, kind: NodeKind, file: &str, declaration: &str) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            name: name.to_string(),
+            qname: name.to_string(),
+            kind,
+            file: file.to_string(),
+            line: 1,
+            end_line: 2,
+            loc: 1,
+            sloc: 1,
+            params: 0,
+            cyclomatic: 1,
+            exported: false,
+            external: false,
+            lazy: false,
+            synthetic: false,
+            is_entry_like: false,
+            declaration: declaration.to_string(),
+            metrics: crate::graph::NodeMetrics::default(),
+        }
+    }
+
+    fn edge(source: &str, target: &str) -> GraphEdge {
+        GraphEdge {
+            id: format!("call:{source}->{target}"),
+            source: source.to_string(),
+            target: target.to_string(),
+            kind: EdgeKind::Call,
+            sites: 1,
+            result_used: ResultUsage::All,
+            external: false,
+            inferred: None,
+            call_sites: vec![crate::graph::CallSite {
+                file: String::new(),
+                line: 10,
+                character: 4,
+                result_used: Some(true),
+            }],
+        }
+    }
+
+    #[test]
+    fn conventions_follow_the_snapshot_language() {
+        let ts = Conventions::of("typescript");
+        let rust = Conventions::of("rust");
+        assert!(ts.is_framework_file("src/users/users.controller.ts"));
+        assert!(!rust.is_framework_file("src/users/users.controller.ts"));
+        assert!(ts.is_test_file("src/users/users.spec.ts"));
+        assert!(!rust.is_test_file("src/users/users.spec.ts"));
+        assert!(rust.is_test_node(&node("t#f", "tests.case", NodeKind::Function, "src/lib.rs", "fn case(")));
+        assert!(!rust.is_test_node(&node("f#f", "case", NodeKind::Function, "src/lib.rs", "fn case(")));
+        assert!(ts.is_abstract(&node("a#f", "f", NodeKind::Method, "a.ts", "abstract f(")));
+        assert!(!rust.is_abstract(&node("a#f", "f", NodeKind::Method, "a.rs", "abstract f(")));
+        assert_eq!(ts.silent_reason("src/x/user.dto.ts"), "dto-schema");
+        assert_eq!(rust.silent_reason("src/x/user.dto.ts"), "no-callable-delta");
+    }
+
+    #[test]
+    fn areas_skip_source_roots() {
+        assert_eq!(area("src/cli/audit_views.rs"), "cli");
+        assert_eq!(area("crates/graph/src/lib.rs"), "graph");
+        assert_eq!(area("src/main.rs"), "root");
+        assert_eq!(area("ai-chat/application/x.ts"), "ai-chat");
+    }
+
+    #[test]
+    fn sibling_overrides_are_not_real_calls() {
+        let first = node("a#run", "run", NodeKind::Method, "a.ts", "run(): void {");
+        let second = node("b#run", "run", NodeKind::Method, "b.ts", "run(): void {");
+        let mut pairs = HashSet::new();
+        pairs.insert(("a#run", "b#run"));
+        pairs.insert(("b#run", "a#run"));
+        assert!(is_override_link(&first, &second, &pairs, Conventions::of("typescript")));
+
+        let controller = node("c#delete", "delete", NodeKind::Method, "c.ts", "async delete(id: string) {");
+        let service = node("s#delete", "delete", NodeKind::Method, "s.ts", "async delete(id: string) {");
+        assert!(!is_override_link(&controller, &service, &HashSet::new(), Conventions::of("typescript")));
+
+        let base = node("base#run", "run", NodeKind::Method, "ports.ts", "abstract run(): void;");
+        assert!(is_override_link(&base, &first, &HashSet::new(), Conventions::of("typescript")));
+    }
+
+    #[test]
+    fn sccs_find_mutual_recursion() {
+        let nodes = vec![
+            node("a#f", "a.f", NodeKind::Function, "a.ts", "function f() {"),
+            node("b#g", "b.g", NodeKind::Function, "b.ts", "function g() {"),
+            node("c#h", "c.h", NodeKind::Function, "c.ts", "function h() {"),
+        ];
+        let edges = vec![edge("a#f", "b#g"), edge("b#g", "a#f")];
+        let cycles = sccs(&nodes, &edges, None, Conventions::of("typescript"));
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0].len(), 2);
+    }
+
+    #[test]
+    fn reach_stops_at_the_start_node() {
+        let nodes = vec![
+            node("a#f", "f", NodeKind::Function, "a.ts", "function f() {"),
+            node("b#g", "g", NodeKind::Function, "b.ts", "function g() {"),
+            node("c#h", "h", NodeKind::Function, "c.ts", "function h() {"),
+        ];
+        let edges = vec![edge("a#f", "b#g"), edge("b#g", "c#h")];
+        let (forward, _) = adjacency(&nodes, &edges, None, Conventions::of("typescript"));
+        let reached = reach_from("a#f", &forward);
+        assert_eq!(reached.len(), 2);
+        assert!(!reached.contains("a#f"));
+    }
+}
