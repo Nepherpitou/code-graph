@@ -63,8 +63,24 @@ def arc(before: float, after: float, digits: int = 0) -> str:
     return f"{num(before, digits)} → {num(after, digits)}"
 
 
+def module(name: str) -> str:
+    return "(root)" if name == "root" else f"`{name}/`"
+
+
 def is_framework(path: str) -> bool:
     return path.endswith(FRAMEWORK_SUFFIXES)
+
+
+def is_test_symbol(row: dict) -> bool:
+    qname = row.get("qname", "")
+    path = row.get("file", "")
+    return (
+        qname.startswith("tests.")
+        or path.startswith(("tests/", "test/"))
+        or "/tests/" in path
+        or "/test/" in path
+        or path.rsplit("/", 1)[-1].startswith("test_")
+    )
 
 
 def metric(row: dict, key: str) -> tuple[float, float]:
@@ -152,7 +168,7 @@ def section_dependencies(view: dict, limit: int) -> list[str]:
         out.append("| from | to | new calls |")
         out.append("|---|---|---:|")
         for item in items:
-            out.append(f"| `{item['from']}/` | `{item['to']}/` | {item['newCalls']} |")
+            out.append(f"| {module(item['from'])} | {module(item['to'])} | {item['newCalls']} |")
         mutual = view.get("mutual") or []
         if mutual:
             pairs = ", ".join(f"`{pair[0]} ↔ {pair[1]}`" for pair in mutual)
@@ -199,8 +215,10 @@ def section_affected(view: dict, limit: int) -> list[str]:
     if not items:
         out.append("No unchanged callable depends on the touched symbols: the change stays inside the files it edits.")
         return out
-    if direct:
+    if direct and direct < total:
         out.append(f"{direct} of them call a touched symbol directly; the rest are one or more calls away.")
+    elif direct:
+        out.append("All of them call a touched symbol directly.")
     else:
         out.append("All of them are one or more calls away from the touched symbols.")
     out.append("")
@@ -264,7 +282,9 @@ def section_review(view: dict, limit: int) -> list[str]:
     items = [
         row
         for row in rows(view)
-        if row.get("kind") not in ("constant", "constructor") and not row.get("file", "").endswith(".spec.ts")
+        if row.get("kind") not in ("constant", "constructor")
+        and not row.get("file", "").endswith(".spec.ts")
+        and not is_test_symbol(row)
     ][:limit]
     total = view.get("totalRows", len(rows(view)))
     out = ["", f"### Review these ({len(items)} of {total})", ""]
@@ -281,7 +301,7 @@ def section_review(view: dict, limit: int) -> list[str]:
         "**complexity / loc / callers**: cyclomatic, lines and incoming calls.",
         "**priority**: refactor priority, `A → B` for changed symbols and a signed value for new or removed ones.",
         "**why**: why the row is listed — size, complexity jump, removal, missing caller.",
-        "Constants, synthetic module constructors and test-file rows are not listed.",
+        "Constants, synthetic module constructors and test symbols are not listed.",
     ]))
     return out
 
@@ -300,7 +320,7 @@ def section_areas(view: dict, limit: int) -> list[str]:
         after = float(item.get("cyclomaticAfter", 0))
         cx = f"{after:.2f}" if abs(before - after) < 0.005 else f"{before:.2f} → {after:.2f}"
         out.append(
-            f"| `{item['area']}/` | +{item['added']} / −{item['removed']} / ~{item['changed']} | "
+            f"| {module(item['area'])} | +{item['added']} / −{item['removed']} / ~{item['changed']} | "
             f"{cx} | {signed(float(item['locDelta']))} |"
         )
     out.extend([""] + spoiler([

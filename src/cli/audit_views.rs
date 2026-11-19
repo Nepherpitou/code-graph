@@ -152,8 +152,21 @@ fn is_callable(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Function | NodeKind::Method)
 }
 
+/// Conventional containers that hold modules rather than being one.
+const CONTAINERS: [&str; 6] = ["src", "lib", "app", "pkg", "crates", "packages"];
+
+/// The module a file belongs to: its first path segment after the usual
+/// source roots, or `root` for files that sit directly in one.
 fn area(path: &str) -> &str {
-    path.split('/').next().unwrap_or(path)
+    let mut rest = path;
+    while let Some((head, tail)) = rest.split_once('/') {
+        if CONTAINERS.contains(&head) {
+            rest = tail;
+            continue;
+        }
+        return head;
+    }
+    "root"
 }
 
 /// Same-named methods are linked by the LSP only for overrides and their siblings.
@@ -1331,6 +1344,14 @@ mod tests {
                 result_used: Some(true),
             }],
         }
+    }
+
+    #[test]
+    fn areas_skip_source_roots() {
+        assert_eq!(area("src/cli/audit_views.rs"), "cli");
+        assert_eq!(area("crates/graph/src/lib.rs"), "graph");
+        assert_eq!(area("src/main.rs"), "root");
+        assert_eq!(area("ai-chat/application/x.ts"), "ai-chat");
     }
 
     #[test]
