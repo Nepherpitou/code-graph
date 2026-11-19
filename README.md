@@ -221,7 +221,7 @@ comment formatting, so callers compose whatever report they need.
 | View | Answers |
 |---|---|
 | `symbols` (default) | which symbols changed and by how much |
-| `summary` | graph shape: callables, call edges, cross-module calls, mean cyclomatic, loc, cycles, dead code |
+| `summary` | graph shape: callables, call edges, cross-module calls, mean cyclomatic over all callables, over the touched ones and over the added ones, loc of analyzed files, cycles, dead-code candidates outside tests |
 | `uses` | which existing symbols the changed code starts calling |
 | `dependencies` | new call edges aggregated by module pair, with mutual pairs |
 | `callers` | calls from unchanged files into the changed ones |

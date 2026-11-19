@@ -126,14 +126,28 @@ def header(meta: dict, summary: dict) -> list[str]:
         if abs(per_delta) >= 0.005
         else f"cyclomatic/callable {per_after:.2f}"
     )
-    loc_delta = delta("loc")
+    touched = metrics.get("cyclomatic/callable (changed)", {})
+    touched_before = float(touched.get("from", 0))
+    touched_after = float(touched.get("to", 0))
+    if touched_after:
+        per_line += (
+            f" (touched code {touched_before:.2f} → {touched_after:.2f})"
+            if abs(touched_before - touched_after) >= 0.005
+            else f" (touched code {touched_after:.2f})"
+        )
+    added = float(metrics.get("cyclomatic/callable (added)", {}).get("to", 0))
+    if added:
+        per_line += f", added {added:.2f}"
+    loc_delta = delta("loc (analyzed files)")
 
     lines = [f"## code-graph: {title}", ""]
     lines.append(f"`{sha}` · {churn} lines in {files} files · {shape}")
     lines.append("")
     affected = load(os.environ.get("VIEW_DIR", ""), "affected.json")
     reach = affected.get("totalRows", 0)
-    lines.append(f"{reach} existing symbols reach the changed files · {per_line} · loc {signed(loc_delta)}")
+    lines.append(
+        f"{reach} existing symbols reach the changed files · {per_line} · loc (analyzed) {signed(loc_delta)}"
+    )
     return lines
 
 
