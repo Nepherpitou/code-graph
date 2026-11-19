@@ -369,7 +369,7 @@ def section_footnotes(filtered: dict, silent: dict, dead: dict, warnings: str) -
         out.append(line + ".")
     silent_total = silent.get("totalRows", len(rows(silent)))
     if silent_total:
-        out.append(f"{silent_total} changed files carry no symbol rows (ports, DTOs, schemas, SQL).")
+        out.append(f"{silent_total} changed files carry no symbol rows (docs, config, scripts, non-code).")
     dead_total = dead.get("totalRows", len(rows(dead)))
     if dead_total:
         framework = sum(1 for row in rows(dead) if row.get("framework"))
