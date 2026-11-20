@@ -168,44 +168,49 @@ pub(super) async fn probe_call_hierarchy(
     let deadline = Instant::now() + budget;
     let mut attempt = 0usize;
     loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
         let (_, uri, position) = &samples[attempt % samples.len()];
-        if client
-            .prepare_call_hierarchy_quick(uri, *position)
-            .await
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
-        {
+        // A server that is still loading can hold a request far longer than the
+        // budget; the budget is a ceiling for the whole probe, not a suggestion.
+        let answered =
+            tokio::time::timeout(left, client.prepare_call_hierarchy_quick(uri, *position)).await;
+        if matches!(answered, Ok(Ok(items)) if !items.is_empty()) {
             return true;
         }
         attempt += 1;
-        if Instant::now() >= deadline {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(left.min(Duration::from_millis(100))).await;
     }
 }
 
 /// Some servers answer an arbitrary workspace/symbol query with an empty list
 /// even when the project is loaded, so a few attempts are worth making before
 /// giving up.
-pub(super) async fn probe_workspace_symbol(
-    client: &LspClient,
-    samples: &[(String, String, LspPosition)],
-    attempts: usize,
-) -> bool {
-    let Some((name, _, _)) = samples.first() else {
+pub(super) async fn probe_workspace_symbol(ctx: &ReadyCtx<'_>, attempts: usize) -> bool {
+    let Some((name, _, _)) = ctx.samples.first() else {
         return true;
     };
+    let deadline = Instant::now() + ctx.budget;
     for _ in 0..attempts {
-        if client
-            .workspace_symbol_count(name)
-            .await
-            .map(|count| count > 0)
-            .unwrap_or(false)
-        {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        let answered = tokio::time::timeout(left, ctx.client.workspace_symbol_count(name)).await;
+        if matches!(answered, Ok(Ok(count)) if count > 0) {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        tokio::time::sleep(left.min(Duration::from_millis(100))).await;
     }
     false
 }
