@@ -1,10 +1,9 @@
-use super::{Adapter, LanguageId};
+use super::{Adapter, LanguageId, ServerKind};
 
 pub(super) static TYPESCRIPT: Adapter = Adapter {
     id: LanguageId::TypeScript,
     extensions: &[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-    server: "typescript-language-server",
-    args: &["--stdio"],
+    server: ServerKind::Tsserver,
     root_markers: &["tsconfig.json", "jsconfig.json", "package.json"],
     call_nodes: &["call_expression", "new_expression"],
     statement_nodes: &["expression_statement"],
@@ -44,8 +43,7 @@ pub(super) static TYPESCRIPT: Adapter = Adapter {
 pub(super) static RUST: Adapter = Adapter {
     id: LanguageId::Rust,
     extensions: &[".rs"],
-    server: "rust-analyzer",
-    args: &[],
+    server: ServerKind::RustAnalyzer,
     root_markers: &["Cargo.toml"],
     call_nodes: &["call_expression", "macro_invocation"],
     statement_nodes: &["expression_statement"],
@@ -69,8 +67,7 @@ pub(super) static RUST: Adapter = Adapter {
 pub(super) static CPP: Adapter = Adapter {
     id: LanguageId::Cpp,
     extensions: &[".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"],
-    server: "clangd",
-    args: &[],
+    server: ServerKind::Clangd,
     root_markers: &["compile_commands.json", "CMakeLists.txt"],
     call_nodes: &["call_expression", "new_expression"],
     statement_nodes: &["expression_statement"],
@@ -92,8 +89,7 @@ pub(super) static CPP: Adapter = Adapter {
 pub(super) static PYTHON: Adapter = Adapter {
     id: LanguageId::Python,
     extensions: &[".py"],
-    server: "pyright-langserver",
-    args: &["--stdio"],
+    server: ServerKind::Pyright,
     root_markers: &["pyproject.toml", "setup.py"],
     call_nodes: &["call"],
     statement_nodes: &["expression_statement"],

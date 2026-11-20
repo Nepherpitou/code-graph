@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
+use super::progress::Progress;
 use super::protocol::{
     retryable, CallHierarchyItem, Location, LspError, LspPosition, OutgoingCall,
 };
@@ -20,6 +21,7 @@ pub struct LspClient {
     next_id: AtomicI64,
     child: AsyncMutex<Option<Child>>,
     stderr: Arc<Mutex<String>>,
+    progress: Progress,
 }
 
 pub async fn start(
@@ -40,13 +42,15 @@ pub async fn start(
         .spawn()
         .map_err(|error| anyhow!("failed to start LSP server \"{command}\": {error}"))?;
 
-    let io = transport::spawn(child, &root_uri, verbose)?;
+    let progress = Progress::default();
+    let io = transport::spawn(child, &root_uri, progress.clone(), verbose)?;
     let client = LspClient {
         tx: io.tx,
         pending: io.pending,
         next_id: AtomicI64::new(1),
         child: AsyncMutex::new(Some(io.child)),
         stderr: io.stderr,
+        progress,
     };
 
     let initialize = json!({
@@ -92,6 +96,10 @@ pub async fn start(
 }
 
 impl LspClient {
+    pub(crate) fn progress(&self) -> &Progress {
+        &self.progress
+    }
+
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
         let message = json!({ "jsonrpc": "2.0", "method": method, "params": params });
         self.tx

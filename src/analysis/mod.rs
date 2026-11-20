@@ -14,7 +14,10 @@ use serde_json::{json, Value};
 use url::Url;
 
 use crate::graph::{parse_symbols, Builder, RawSymbol};
-use crate::languages::{adapter, detect_language, file_language_id, Adapter, LanguageId};
+use crate::languages::{
+    adapter, detect_language, file_language_id, Adapter, LanguageId, Readiness, ReadyCtx,
+    ServerKind,
+};
 use crate::lsp::{self, LspClient};
 use crate::metrics;
 use crate::progress::{silent_callback, ProgressCallback, Reporter};
@@ -22,62 +25,6 @@ use crate::report::{GraphMeta, GraphReport};
 use crate::source::{discover, DiscoverOptions, SourceFile};
 
 pub use options::AnalyzeOptions;
-
-async fn wait_until_ready(
-    client: &LspClient,
-    adapter: &Adapter,
-    capabilities: &Value,
-    builder: &Builder,
-    reporter: &Reporter,
-) -> Vec<String> {
-    let mut warnings = Vec::new();
-    let samples = builder.readiness_samples();
-    let Some((sample_name, _, _)) = samples.first() else {
-        return warnings;
-    };
-    reporter.emit(
-        "ready",
-        format!("checking {} server readiness", adapter.id.as_str()),
-    );
-    let mut ready = false;
-    if adapter.id == LanguageId::Rust {
-        // rust-analyzer answers empty call hierarchy while the crate graph loads;
-        // asking for real items is the only reliable readiness check. Rotate over
-        // files because the first discovered file can be a nested crate that the
-        // root workspace never loads.
-        for attempt in 0..600 {
-            let (_, uri, position) = &samples[attempt % samples.len()];
-            match client.prepare_call_hierarchy_quick(uri, *position).await {
-                Ok(items) if !items.is_empty() => {
-                    ready = true;
-                    break;
-                }
-                _ => {}
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        // Let the reference index settle before crawling references.
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        if !ready {
-            warnings.push(
-                "rust-analyzer did not answer call hierarchy within 60s; results may be incomplete"
-                    .to_string(),
-            );
-        }
-    } else if capabilities.get("workspaceSymbolProvider").is_some() {
-        for _ in 0..3 {
-            if let Ok(count) = client.workspace_symbol_count(sample_name).await {
-                if count > 0 {
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        // tsserver may answer an arbitrary workspace/symbol query with an empty
-        // list even when the project is loaded; call hierarchy is the real check.
-    }
-    warnings
-}
 
 async fn collect_symbols(
     client: &LspClient,
@@ -215,11 +162,17 @@ pub async fn analyze_with_progress(
         let command = parts.next().unwrap_or(custom).to_string();
         (command, parts.map(str::to_string).collect())
     } else if adapter.id == LanguageId::TypeScript {
-        resolve_typescript_server(&root)
-            .unwrap_or_else(|| resolve_server_command(adapter.server, adapter.args, &root))
+        resolve_typescript_server(&root).unwrap_or_else(|| {
+            resolve_server_command(adapter.server.command(), adapter.server.args(), &root)
+        })
     } else {
-        resolve_server_command(adapter.server, adapter.args, &root)
+        resolve_server_command(adapter.server.command(), adapter.server.args(), &root)
     };
+    // The behaviour follows the program that actually starts, not `--lang`:
+    // `--server-cmd "tsgo --lsp --stdio"` on TypeScript keeps tsgo's policy.
+    // A custom command may be wrapped (`npx … tsgo`, a proxy script), so the
+    // whole line is what names the server.
+    let server_kind = ServerKind::resolve(options.server_cmd.as_deref().unwrap_or(&command));
 
     reporter.emit(
         "lsp",
@@ -314,8 +267,27 @@ pub async fn analyze_with_progress(
         ),
     );
 
-    local_warnings
-        .extend(wait_until_ready(&client, adapter, &capabilities, &builder, &reporter).await);
+    let samples = builder.readiness_samples();
+    let workspace = adapter
+        .root_markers
+        .iter()
+        .any(|marker| root.join(marker).exists());
+    let readiness = server_kind
+        .wait_ready(ReadyCtx {
+            client: &client,
+            samples: &samples,
+            reporter: &reporter,
+            budget: Duration::from_secs(60),
+            workspace,
+        })
+        .await;
+    if let Readiness::TimedOut { pending } = readiness {
+        local_warnings.push(format!(
+            "{} did not finish within 60s ({}); results may be incomplete",
+            adapter.id.as_str(),
+            pending.join(", ")
+        ));
+    }
 
     run_builder(&mut builder, &client, adapter, &options, &reporter).await;
 
