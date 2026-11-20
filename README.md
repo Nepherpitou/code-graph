@@ -533,6 +533,28 @@ fixtures/              small projects with known graph properties
 
 The TypeScript fixture checks both directions of the result flow: `ignoresResult -> mid` is `none`, every other call is `all`.
 
+## Releases
+
+Tagging a commit on `master` publishes prebuilt binaries:
+
+```bash
+git tag v0.1.0      # must match the version in Cargo.toml
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` builds four targets: `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-musl` (static, cross-built with zig), `aarch64-apple-darwin`,
+and `x86_64-apple-darwin`. Assets are `code-graph-<version>-<target>`, each with its
+own `.sha256`, plus one `SHA256SUMS`:
+
+```bash
+gh release download v0.1.0
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+`vendor/code-graph` stays in the repository on purpose: it is the binary this
+repository's own CI runs, so pull requests exercise the same artifact users get.
+
 ## Limits
 
 - Static, LSP-based analysis: dynamic dispatch, reflection, generated code, and calls hidden inside macros can be missed. Reference fallback only covers zero-incoming callables.
