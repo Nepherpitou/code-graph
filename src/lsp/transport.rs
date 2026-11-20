@@ -7,6 +7,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot};
 
+use super::progress::Progress;
 use super::protocol::LspError;
 
 pub(super) type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, LspError>>>>>;
@@ -19,7 +20,12 @@ pub(super) struct Io {
 }
 
 /// Takes the child's pipes and starts the writer, stderr, and reader tasks.
-pub(super) fn spawn(mut child: Child, root_uri: &str, verbose: bool) -> Result<Io> {
+pub(super) fn spawn(
+    mut child: Child,
+    root_uri: &str,
+    progress: Progress,
+    verbose: bool,
+) -> Result<Io> {
     let stdin = child
         .stdin
         .take()
@@ -83,7 +89,9 @@ pub(super) fn spawn(mut child: Child, root_uri: &str, verbose: bool) -> Result<I
             let mut reader = BufReader::new(stdout);
             loop {
                 match read_message(&mut reader).await {
-                    Ok(Some(message)) => dispatch(message, &pending, &tx, &root_uri, verbose),
+                    Ok(Some(message)) => {
+                        dispatch(message, &pending, &tx, &root_uri, &progress, verbose)
+                    }
                     Ok(None) => break,
                     Err(error) => {
                         if verbose {
@@ -141,6 +149,7 @@ fn dispatch(
     pending: &PendingMap,
     tx: &mpsc::UnboundedSender<Value>,
     root_uri: &str,
+    progress: &Progress,
     verbose: bool,
 ) {
     let id = message.get("id").cloned();
@@ -174,8 +183,10 @@ fn dispatch(
             let _ = sender.send(result);
         }
         (None, Some(method)) => {
+            let params = message.get("params");
+            progress.observe(&method, params);
             if verbose {
-                if let Some(params) = message.get("params") {
+                if let Some(params) = params {
                     if method == "window/logMessage" {
                         if let Some(text) = params.get("message").and_then(Value::as_str) {
                             eprintln!("[server] {text}");

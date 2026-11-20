@@ -2,6 +2,7 @@
 //! classifications, grammar selection, and language detection.
 
 mod adapters;
+mod servers;
 
 use std::fs;
 use std::path::Path;
@@ -10,6 +11,8 @@ use serde::Serialize;
 use tree_sitter::Language;
 
 use adapters::{CPP, PYTHON, RUST, TYPESCRIPT};
+
+pub(crate) use servers::{ReadyCtx, Readiness, ServerKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -34,8 +37,7 @@ impl LanguageId {
 pub struct Adapter {
     pub id: LanguageId,
     pub extensions: &'static [&'static str],
-    pub server: &'static str,
-    pub args: &'static [&'static str],
+    pub server: ServerKind,
     pub root_markers: &'static [&'static str],
     pub call_nodes: &'static [&'static str],
     pub statement_nodes: &'static [&'static str],
