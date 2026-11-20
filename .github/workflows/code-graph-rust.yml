@@ -101,11 +101,18 @@ jobs:
             read -r files additions deletions < <(git diff --numstat "$base" HEAD \
               | awk '$1 ~ /^[0-9]+$/ { a += $1; d += $2; n += 1 } END { print n + 0, a + 0, d + 0 }')
           fi
+          rm -f "$TMP/empty-report"
+          code=0
           python3 .github/scripts/pr-report.py --dir "$V" \
             --title "$PR_TITLE" \
             --sha "$PR_SHA" \
             --additions "$additions" --deletions "$deletions" --files "$files" \
-            > "$TMP/comment.md"
+            > "$TMP/comment.md" || code=$?
+          if [ "$code" -eq 3 ]; then
+            : > "$TMP/empty-report"
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -121,15 +128,22 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           TMP="$RUNNER_TEMP"
-          if [ ! -s "$TMP/comment.md" ]; then
+          if [ ! -s "$TMP/comment.md" ] && [ ! -f "$TMP/empty-report" ]; then
             echo 'comment was not built' >&2
             exit 0
           fi
           marker='<!-- code-graph-rust-report -->'
-          { echo "$marker"; echo; cat "$TMP/comment.md"; } > "$TMP/comment.body.md"
           id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
                 --jq ".[] | select(.body | startswith(\"$marker\")) | .id" \
                 | head -n1 || true)
+          if [ -f "$TMP/empty-report" ]; then
+            echo 'nothing to report'
+            if [ -n "$id" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" > /dev/null
+            fi
+            exit 0
+          fi
+          { echo "$marker"; echo; cat "$TMP/comment.md"; } > "$TMP/comment.body.md"
           if [ -n "$id" ]; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" \
               -F "body=@$TMP/comment.body.md" > /dev/null

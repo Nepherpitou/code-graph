@@ -152,17 +152,16 @@ def header(meta: dict, summary: dict) -> list[str]:
 
 
 def section_uses(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
     out = ["", "### Existing code this PR now depends on", ""]
     out.append("Existing symbols the new code starts calling.")
     out.append("")
-    items = rows(view)[:limit]
-    if not items:
-        out.append("The PR calls only its own new code.")
-    else:
-        out.append("| existing symbol | new calls |")
-        out.append("|---|---:|")
-        for item in items:
-            out.append(f"| `{item['symbol']}` | +{item['newCalls']} |")
+    out.append("| existing symbol | new calls |")
+    out.append("|---|---:|")
+    for item in items:
+        out.append(f"| `{item['symbol']}` | +{item['newCalls']} |")
     out.extend([""] + spoiler([
         "**new calls**: how many call sites the PR added into that existing symbol.",
         "A high count means the feature leans on it; for a port or shared helper that is a deepening dependency.",
@@ -172,22 +171,21 @@ def section_uses(view: dict, limit: int) -> list[str]:
 
 
 def section_dependencies(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
     out = ["", "### What this PR depends on", ""]
     out.append("New call edges between modules, aggregated.")
     out.append("")
-    items = rows(view)[:limit]
-    if not items:
-        out.append("No new cross-module calls.")
-    else:
-        out.append("| from | to | new calls |")
-        out.append("|---|---|---:|")
-        for item in items:
-            out.append(f"| {module(item['from'])} | {module(item['to'])} | {item['newCalls']} |")
-        mutual = view.get("mutual") or []
-        if mutual:
-            pairs = ", ".join(f"`{pair[0]} ↔ {pair[1]}`" for pair in mutual)
-            out.append("")
-            out.append(f"Mutual: {pairs}. Pairs through queue handlers are the job-dispatch pattern, not a cycle.")
+    out.append("| from | to | new calls |")
+    out.append("|---|---|---:|")
+    for item in items:
+        out.append(f"| {module(item['from'])} | {module(item['to'])} | {item['newCalls']} |")
+    mutual = view.get("mutual") or []
+    if mutual:
+        pairs = ", ".join(f"`{pair[0]} ↔ {pair[1]}`" for pair in mutual)
+        out.append("")
+        out.append(f"Mutual: {pairs}. Pairs through queue handlers are the job-dispatch pattern, not a cycle.")
     out.extend([""] + spoiler([
         "**from / to**: module, the first path segment of the file.",
         "**new calls**: real new call edges after dropping overrides, DI wiring, tests, duplicates and re-resolutions.",
@@ -215,6 +213,9 @@ def section_callers(view: dict, limit: int) -> list[str]:
 
 
 def section_affected(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
     total = view.get("totalRows", 0)
     changed_total = view.get("affectedByChanged", 0)
     added_only = view.get("affectedByAddedOnly", 0)
@@ -225,10 +226,6 @@ def section_affected(view: dict, limit: int) -> list[str]:
     if added_only:
         out.append(f"{changed_total} depend on modified code, {added_only} reach only symbols the PR added.")
         out.append("")
-    items = rows(view)[:limit]
-    if not items:
-        out.append("No unchanged callable depends on the touched symbols: the change stays inside the files it edits.")
-        return out
     if direct and direct < total:
         out.append(f"{direct} of them call a touched symbol directly; the rest are one or more calls away.")
     elif direct:
@@ -302,16 +299,15 @@ def section_review(view: dict, limit: int) -> list[str]:
         and not row.get("file", "").endswith(".spec.ts")
         and not is_test_symbol(row)
     ][:limit]
+    if not items:
+        return []
     total = view.get("totalRows", len(rows(view)))
     out = ["", f"### Review these ({len(items)} of {total})", ""]
     out.append("Symbols worth reading first.")
     out.append("")
-    if not items:
-        out.append("Nothing above the review threshold: only small or mechanical changes.")
-    else:
-        out.append("| symbol | status | complexity | loc | callers | priority | why |")
-        out.append("|---|---|---|---:|---:|---:|---|")
-        out.extend(review_row(row) for row in items)
+    out.append("| symbol | status | complexity | loc | callers | priority | why |")
+    out.append("|---|---|---|---:|---:|---:|---|")
+    out.extend(review_row(row) for row in items)
     out.extend([""] + spoiler([
         "**status**: added, changed or removed; added and removed rows show signed values instead of a delta.",
         "**complexity / loc / callers**: cyclomatic, lines and incoming calls.",
@@ -371,11 +367,11 @@ def section_details(view: dict, limit: int) -> list[str]:
 
 
 def section_footnotes(filtered: dict, silent: dict, dead: dict, warnings: str) -> list[str]:
-    out = [""]
+    out: list[str] = []
     funnel = rows(filtered)
-    if funnel:
-        used = next((row["edges"] for row in funnel if row["reason"] == "used"), 0)
-        total = filtered.get("newCallEdges", used)
+    used = next((row["edges"] for row in funnel if row["reason"] == "used"), 0)
+    total = filtered.get("newCallEdges", used)
+    if total:
         dropped = [f"{row['edges']} {row['reason']}" for row in funnel if row["reason"] != "used" and row["edges"]]
         line = f"{total} new call edges, {used} used"
         if dropped:
@@ -394,6 +390,8 @@ def section_footnotes(filtered: dict, silent: dict, dead: dict, warnings: str) -
         )
     if warnings.strip():
         out.extend(["", "<details><summary>diff warnings</summary>", "", "```text", warnings.strip(), "```", "", "</details>"])
+    if out:
+        out.insert(0, "")
     return out
 
 
@@ -409,10 +407,28 @@ def main() -> int:
     args = parser.parse_args()
 
     os.environ["VIEW_DIR"] = args.dir
-    summary = load(args.dir, "summary.json")
+    views = {name: load(args.dir, f"{name}.json") for name in (
+        "summary", "uses", "dependencies", "callers", "affected",
+        "review", "areas", "symbols", "filtered", "silent", "dead",
+    )}
+    summary = views["summary"]
     if not rows(summary):
         print("_Analysis did not run — see the job log._")
         return 0
+
+    # Files with no symbols and diff warnings alone are not a review: the graph did
+    # not move. Exit code 3 tells the workflow to post nothing.
+    if not (
+        rows(views["uses"])
+        or rows(views["dependencies"])
+        or rows(views["callers"])
+        or rows(views["affected"])
+        or rows(views["symbols"])
+        or rows(views["dead"])
+        or len(rows(views["areas"])) > 1
+        or views["filtered"].get("newCallEdges", 0)
+    ):
+        return 3
 
     meta = {
         "title": args.title,
@@ -422,24 +438,19 @@ def main() -> int:
         "files": args.files,
     }
     lines: list[str] = header(meta, summary)
-    lines += section_uses(load(args.dir, "uses.json"), 10)
-    lines += section_dependencies(load(args.dir, "dependencies.json"), 6)
-    lines += section_callers(load(args.dir, "callers.json"), 8)
-    lines += section_affected(load(args.dir, "affected.json"), args.limit)
-    lines += section_review(load(args.dir, "review.json"), 12)
-    lines += section_areas(load(args.dir, "areas.json"), 6)
-    lines += section_details(load(args.dir, "symbols.json"), 80)
+    lines += section_uses(views["uses"], 10)
+    lines += section_dependencies(views["dependencies"], 6)
+    lines += section_callers(views["callers"], 8)
+    lines += section_affected(views["affected"], args.limit)
+    lines += section_review(views["review"], 12)
+    lines += section_areas(views["areas"], 6)
+    lines += section_details(views["symbols"], 80)
     warnings = ""
     try:
         warnings = open(os.path.join(args.dir, "warnings.log"), encoding="utf-8").read()
     except OSError:
         pass
-    lines += section_footnotes(
-        load(args.dir, "filtered.json"),
-        load(args.dir, "silent.json"),
-        load(args.dir, "dead.json"),
-        warnings,
-    )
+    lines += section_footnotes(views["filtered"], views["silent"], views["dead"], warnings)
     print("\n".join(lines).strip() + "\n")
     return 0
 
