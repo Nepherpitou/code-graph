@@ -2,7 +2,7 @@
 
 All metrics are computed from one graph: project nodes are functions, methods, constructors, and constants/variables; call edges point caller → callee; data edges point function → referenced constant. External/library callees are counted but excluded from graph metrics unless `--include-external` is set.
 
-The report carries every node metric in `nodes[].metrics`, graph aggregates in `stats`, and leaderboards in `top`.
+The report carries every node metric in `nodes[].metrics`, graph aggregates in `stats`, and leaderboards in `top`. Where they are computed and persisted is described in [`internals.md`](internals.md#where-metrics-live); practical guidance on reading a delta after a commit is in [`metrics-interpretation.ru.md`](metrics-interpretation.ru.md).
 
 ## Structural metrics (base)
 
@@ -95,16 +95,6 @@ This is McCabe's metric, not cognitive complexity: nesting is ignored, so a deep
 | Halstead volume/effort | Token-level operator/operand complexity | Requires a token classifier per language; cyclomatic + LOC + IFC are already available. |
 | Type-hierarchy metrics (DIT/NOC) | Inheritance depth and breadth | LSP has `typeHierarchy`; it is not wired into the graph yet. |
 | Semantic clone detection | Duplication across functions | Requires embeddings or AST fingerprints; not an LSP feature. |
-
-## LSP surface used
-
-- `initialize` capabilities: `documentSymbol`, `callHierarchy`, `references`, `workspace/symbol`.
-- `textDocument/documentSymbol` → node universe (functions, methods, constructors, constants, class/impl containers).
-- `textDocument/prepareCallHierarchy` + `callHierarchy/outgoingCalls` → call edges and call-site ranges.
-- `textDocument/references` → constant usage and the inferred-edge fallback.
-- Rust readiness is checked by asking for one real call-hierarchy item, because rust-analyzer returns empty results (not errors) while the crate graph loads.
-
-Not used: diagnostics (unused variables would duplicate the dead-code heuristic), type hierarchy, semantic tokens, inlay hints. They are valid follow-ups but do not change the graph shape.
 
 ## Sources
 
