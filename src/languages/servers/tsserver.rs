@@ -24,7 +24,7 @@ impl Server for Tsserver {
         if let Waiting::TimedOut(pending) = wait_titles(&ctx, TITLES).await {
             return Readiness::TimedOut { pending };
         }
-        if !probe_workspace_symbol(ctx.client, ctx.samples, 3).await {
+        if !probe_workspace_symbol(&ctx, 3).await {
             return Readiness::TimedOut {
                 pending: vec!["workspace symbols".to_string()],
             };

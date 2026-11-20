@@ -1,9 +1,9 @@
-use std::time::Instant;
+use super::{announce, Readiness, ReadyCtx, Server};
 
-use super::{announce, probe_call_hierarchy, remaining, Readiness, ReadyCtx, Server};
-
-/// tsgo reports no work-done progress at all: it builds what a request needs
-/// and answers synchronously. Call hierarchy is therefore the only signal.
+/// tsgo reports no work-done progress and has no background index: it builds
+/// what a request needs and answers synchronously. Document symbols have
+/// already been collected by the time readiness runs, so there is nothing to
+/// wait for and nothing worth probing — a probe here only cost CI minutes.
 pub(super) struct Tsgo;
 
 pub(super) static SERVER: Tsgo = Tsgo;
@@ -19,12 +19,6 @@ impl Server for Tsgo {
 
     async fn wait_ready(&self, ctx: ReadyCtx<'_>) -> Readiness {
         announce(&ctx, self.command());
-        let started = Instant::now();
-        if !probe_call_hierarchy(ctx.client, ctx.samples, remaining(&ctx, started)).await {
-            return Readiness::TimedOut {
-                pending: vec!["call hierarchy".to_string()],
-            };
-        }
         Readiness::Ready
     }
 }

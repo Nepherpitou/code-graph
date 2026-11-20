@@ -17,7 +17,7 @@ impl Server for Pyright {
 
     async fn wait_ready(&self, ctx: ReadyCtx<'_>) -> Readiness {
         announce(&ctx, self.command());
-        if !probe_workspace_symbol(ctx.client, ctx.samples, 3).await {
+        if !probe_workspace_symbol(&ctx, 3).await {
             return Readiness::TimedOut {
                 pending: vec!["workspace symbols".to_string()],
             };
