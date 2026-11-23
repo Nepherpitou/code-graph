@@ -158,6 +158,9 @@ impl Builder {
     }
 
     pub(super) fn record(&mut self, record: NodeRecord) {
+        if record.node.kind.is_data() && !record.node.external {
+            self.constants_total += 1;
+        }
         let id = record.node.id.clone();
         let rel = record.rel.clone();
         let selection = record.selection.start;
@@ -285,12 +288,6 @@ impl Builder {
             .map(|record| record.node.clone())
             .collect();
         let edges = self.finish_edges();
-        if self.constants_total == 0 && self.constants_crawled == 0 {
-            self.constants_total = nodes
-                .iter()
-                .filter(|node| node.kind.is_data() && !node.external)
-                .count();
-        }
         BuilderOutput {
             nodes,
             edges,

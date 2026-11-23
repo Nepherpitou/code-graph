@@ -14,7 +14,7 @@ The report carries every node metric in `nodes[].metrics`, graph aggregates in `
 | `fanOut` | distinct project functions/constants the node calls or references | Constants count as data dependencies, matching the graph's edges. |
 | `callIn` / `callOut` | call/reference **sites**, counting multiplicity | A loop calling `f()` ten times adds 10. |
 | `transitiveFanIn` | BFS over reversed call edges, excluding self | "How many functions can reach this one." Capped at 3000 callables for cost; beyond that it equals direct fan-in. |
-| `transitiveFanOut` | BFS over call edges, excluding self | Reachable surface. Data edges are excluded from transitive reachability. |
+| `transitiveFanOut` | BFS over call edges, excluding self | Reachable surface, called `reach` elsewhere in the tool; see [Reach](#reach). Data edges are excluded. |
 | `depth` | 0 for a source SCC; otherwise the longest edge distance from a source SCC | Computed on the SCC condensation DAG, so cycles get a finite value. |
 | `height` | longest path from this SCC to a sink | Same condensation DAG. |
 | `scc`, `sccSize`, `inCycle` | Tarjan strongly connected components | A component larger than one node is a call cycle. |
@@ -22,6 +22,27 @@ The report carries every node metric in `nodes[].metrics`, graph aggregates in `
 | `crossFileRatio` (graph) | cross-file call edges / all call edges | A quick modularity smell: a very high ratio is normal in small projects, but a very low one suggests hidden coupling or dead modules. |
 
 Structural fan-in/out are the classic call-graph metrics used for defect prediction (Aivosto; Punia et al.). Multiplicity is kept separate from distinct degree so that a single hot call site does not hide broad coupling.
+
+## Reach
+
+`reach` is the transitive fan-out of one symbol: the number of distinct project callables it can get to through dependency call edges in one or more steps, not counting itself. It is the mirror of blast radius (`transitiveFanIn`); both run the same BFS in opposite directions over the same edge set.
+
+What counts:
+
+- call edges only — a function that reads a constant has data coupling but no reach;
+- excluded edges do not count: override links between same-named methods, DI constructor wiring, and any edge touching a test file (see the dependency rule at the top);
+- external/library callees are not nodes unless `--include-external`, so they add nothing;
+- computed exactly below 3000 callables; above that it falls back to direct fan-out.
+
+A leaf has reach 0. A route handler usually has reach in the tens; a bootstrap or an "everything" coordinator can reach most of the graph.
+
+Where the number appears:
+
+- `audit top --order-by transitive-fan-out` ranks current values (`transitive-out` in the text header);
+- the overview graph ranks entry points by reach (next section);
+- `audit diff --view reach` reports how the reach of changed callables moved, together with the calls the change added.
+
+Read it as surface, not risk: reach grows whenever a function starts calling a widely used helper, which is often the intended direction. The useful signal is the delta inside one change plus the new callees behind it. `audit metrics` prints the same definition in the CLI glossary.
 
 ## Entry-point ranking
 

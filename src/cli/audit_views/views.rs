@@ -65,6 +65,9 @@ pub(super) fn view_label(view: AuditDiffView) -> &'static str {
         AuditDiffView::FilteredEdges => "filtered-edges",
         AuditDiffView::Cycles => "cycles",
         AuditDiffView::DeadCode => "dead-code",
+        AuditDiffView::Reach => "reach",
+        AuditDiffView::FanIn => "fan-in",
+        AuditDiffView::Twins => "twins",
         AuditDiffView::SilentFiles => "silent-files",
     }
 }
@@ -703,6 +706,451 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
             "constantsCrawled": input.to.meta.constants_crawled,
         }),
     )
+}
+
+/// How far the changed entry points reach now, and what they started calling.
+pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
+    let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
+    let mut verify_old = input
+        .verify_calls
+        .then(|| Verification::new(&input.from.meta.root));
+    let (new_forward, new_reverse) =
+        adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions);
+    let (old_forward, _) = adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions);
+
+    let old_by_key: HashMap<NodeKey<'_>, &str> = input
+        .old_nodes
+        .iter()
+        .map(|node| ((node.file.as_str(), node.qname.as_str()), node.id.as_str()))
+        .collect();
+    let old_by_qname = qname_index(input.old_nodes);
+    let old_keys: HashMap<&str, NodeKey<'_>> = input
+        .old_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .collect();
+    let new_keys: HashMap<&str, NodeKey<'_>> = input
+        .new_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .collect();
+
+    let mut rows: Vec<(NodeKey<'_>, DiffStatus, usize, usize, usize, usize, Vec<&str>)> = Vec::new();
+    for (id, status) in touched_ids(input, graphs) {
+        let Some(node) = graphs.node(id) else {
+            continue;
+        };
+        if conventions.is_test_node(node) {
+            continue;
+        }
+        let entry_point = new_reverse.get(id).is_none_or(Vec::is_empty)
+            || conventions.is_framework_file(&node.file);
+        let key = (node.file.as_str(), node.qname.as_str());
+        let reach_after = reach_from(id, &new_forward).len();
+        let fan_out_after = new_forward.get(id).map(Vec::len).unwrap_or(0);
+        let (reach_before, fan_out_before, mut added) =
+            match old_id_for(&old_by_key, &old_by_qname, key) {
+            Some(old_id) => {
+                let before = reach_from(old_id, &old_forward).len();
+                let fan_out = old_forward.get(old_id).map(Vec::len).unwrap_or(0);
+                let known: HashSet<NodeKey<'_>> = old_forward
+                    .get(old_id)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|target| old_keys.get(target).copied())
+                    .collect();
+                let added: Vec<&str> = new_forward
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|target| new_keys.get(target).copied())
+                    .filter(|target| !known.contains(target))
+                    .map(|target| target.1)
+                    .collect();
+                (before, fan_out, added)
+            }
+            None => {
+                let added: Vec<&str> = new_forward
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|target| new_keys.get(target).copied())
+                    .map(|target| target.1)
+                    .collect();
+                (0, 0, added)
+            }
+        };
+        added.sort_unstable();
+        added.dedup();
+        if reach_after == reach_before && !entry_point {
+            continue;
+        }
+        rows.push((key, status, reach_before, reach_after, fan_out_before, fan_out_after, added));
+    }
+    rows.sort_by(|left, right| {
+        let left_delta = left.3 as i64 - left.2 as i64;
+        let right_delta = right.3 as i64 - right.2 as i64;
+        right_delta
+            .cmp(&left_delta)
+            .then_with(|| right.4.cmp(&left.4))
+            .then_with(|| left.0 .1.cmp(right.0 .1))
+    });
+    let limit = input.limit();
+    let shown = rows.iter().take(limit).collect::<Vec<_>>();
+    output_rows(
+        input,
+        AuditDiffView::Reach,
+        &["entry point", "status", "reach", "fan-out", "new calls"],
+        &[40, 8, 12, 12, 40],
+        shown
+            .iter()
+            .map(|(key, status, reach_before, reach_after, before, after, added)| {
+                (
+                    vec![
+                        key.1.to_string(),
+                        status_label(*status).to_string(),
+                        format!("{reach_before} → {reach_after}"),
+                        format!("{before} → {after}"),
+                        added.iter().take(3).copied().collect::<Vec<_>>().join(", "),
+                    ],
+                    json!({
+                        "symbol": key.1,
+                        "file": key.0,
+                        "status": status_label(*status),
+                        "reach": {"from": reach_before, "to": reach_after, "delta": *reach_after as i64 - *reach_before as i64},
+                        "fanOut": {"from": before, "to": after},
+                        "newCalls": added,
+                    }),
+                )
+            })
+            .collect(),
+        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    )
+}
+
+/// Who depends on the changed symbols now: caller count, stability, and whether
+/// a symbol turned into a single choke point.
+pub(super) fn fan_in(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
+    let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
+    let mut verify_old = input
+        .verify_calls
+        .then(|| Verification::new(&input.from.meta.root));
+    let (new_forward, new_reverse) =
+        adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions);
+    let (old_forward, old_reverse) =
+        adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions);
+    let old_by_key: HashMap<NodeKey<'_>, &str> = input
+        .old_nodes
+        .iter()
+        .map(|node| ((node.file.as_str(), node.qname.as_str()), node.id.as_str()))
+        .collect();
+    let old_by_qname = qname_index(input.old_nodes);
+
+    fn instability(forward: &HashMap<&str, Vec<&str>>, reverse: &HashMap<&str, Vec<&str>>, id: &str) -> f64 {
+        let out = forward.get(id).map(Vec::len).unwrap_or(0) as f64;
+        let incoming = reverse.get(id).map(Vec::len).unwrap_or(0) as f64;
+        if out + incoming == 0.0 {
+            0.0
+        } else {
+            out / (out + incoming)
+        }
+    }
+
+    let mut rows: Vec<(NodeKey<'_>, DiffStatus, usize, usize, f64, f64, usize, bool)> = Vec::new();
+    for (id, status) in touched_ids(input, graphs) {
+        let Some(node) = graphs.node(id) else {
+            continue;
+        };
+        if conventions.is_test_node(node) {
+            continue;
+        }
+        let key = (node.file.as_str(), node.qname.as_str());
+        let callers_after = new_reverse.get(id).map(Vec::len).unwrap_or(0);
+        let stability_after = instability(&new_forward, &new_reverse, id);
+        let modules = new_reverse
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter_map(|caller| graphs.node(caller))
+            .map(|caller| area(&caller.file))
+            .collect::<HashSet<_>>()
+            .len();
+        let (callers_before, stability_before) =
+            match old_id_for(&old_by_key, &old_by_qname, key) {
+            Some(old_id) => (
+                old_reverse.get(old_id).map(Vec::len).unwrap_or(0),
+                instability(&old_forward, &old_reverse, old_id),
+            ),
+            None => (0, 0.0),
+        };
+        let choke_point = absorbed_callers(callers_before, callers_after, modules);
+        rows.push((
+            key,
+            status,
+            callers_before,
+            callers_after,
+            stability_before,
+            stability_after,
+            modules,
+            choke_point,
+        ));
+    }
+    rows.sort_by(|left, right| {
+        let left_delta = left.3 as i64 - left.2 as i64;
+        let right_delta = right.3 as i64 - right.2 as i64;
+        right_delta
+            .cmp(&left_delta)
+            .then_with(|| right.3.cmp(&left.3))
+            .then_with(|| left.0 .1.cmp(right.0 .1))
+    });
+    let limit = input.limit();
+    let shown = rows.iter().take(limit).collect::<Vec<_>>();
+    output_rows(
+        input,
+        AuditDiffView::FanIn,
+        &["symbol", "status", "callers", "instability", "modules", "flag"],
+        &[40, 8, 12, 14, 8, 12],
+        shown
+            .iter()
+            .map(|(key, status, before, after, stability_before, stability_after, modules, choke)| {
+                (
+                    vec![
+                        key.1.to_string(),
+                        status_label(*status).to_string(),
+                        format!("{before} → {after}"),
+                        format!("{stability_before:.2} → {stability_after:.2}"),
+                        modules.to_string(),
+                        if *choke { "choke-point".into() } else { String::new() },
+                    ],
+                    json!({
+                        "symbol": key.1,
+                        "file": key.0,
+                        "status": status_label(*status),
+                        "callers": {"from": before, "to": after, "delta": *after as i64 - *before as i64},
+                        "instability": {"from": stability_before, "to": stability_after},
+                        "modules": modules,
+                        "chokePoint": choke,
+                    }),
+                )
+            })
+            .collect(),
+        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    )
+}
+
+type NodeKey<'a> = (&'a str, &'a str);
+
+/// Old snapshot id for a target key: the same `(file, qname)` when the symbol
+/// stayed put, otherwise a unique qname (moved symbol).
+fn old_id_for<'a>(
+    old_by_key: &HashMap<NodeKey<'a>, &'a str>,
+    old_by_qname: &HashMap<&'a str, Vec<&'a str>>,
+    key: NodeKey<'a>,
+) -> Option<&'a str> {
+    if let Some(id) = old_by_key.get(&key) {
+        return Some(id);
+    }
+    match old_by_qname.get(key.1)?.as_slice() {
+        [id] => Some(id),
+        _ => None,
+    }
+}
+
+fn qname_index<'a>(nodes: &'a [GraphNode]) -> HashMap<&'a str, Vec<&'a str>> {
+    let mut out: HashMap<&str, Vec<&str>> = HashMap::new();
+    for node in nodes {
+        out.entry(node.qname.as_str()).or_default().push(node.id.as_str());
+    }
+    out
+}
+
+fn status_label(status: DiffStatus) -> &'static str {
+    match status {
+        DiffStatus::Changed => "changed",
+        DiffStatus::Added => "added",
+        DiffStatus::Removed => "removed",
+        DiffStatus::Moved => "moved",
+    }
+}
+
+/// Outgoing call target names per symbol, keyed by `(file, qname)` so the same
+/// symbol lines up across snapshots even when its id changes. Names, not ids:
+/// the LSP reports a port interface and its implementation as two callees.
+fn dependency_sets<'a>(
+    forward: &HashMap<&'a str, Vec<&'a str>>,
+    keys: &HashMap<&'a str, NodeKey<'a>>,
+    names: &HashMap<&'a str, &'a str>,
+) -> HashMap<NodeKey<'a>, Vec<&'a str>> {
+    let mut out = HashMap::new();
+    for (id, targets) in forward {
+        let Some(key) = keys.get(id).copied() else {
+            continue;
+        };
+        let mut deps: Vec<&'a str> = targets
+            .iter()
+            .filter_map(|target| names.get(target).copied())
+            .collect();
+        deps.sort_unstable();
+        deps.dedup();
+        out.insert(key, deps);
+    }
+    out
+}
+
+/// Changed symbols that call exactly what another symbol calls.
+pub(super) fn twins(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
+    let conventions = Conventions::of(&input.to.meta.language);
+    let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
+    let mut verify_old = input
+        .verify_calls
+        .then(|| Verification::new(&input.from.meta.root));
+    let new_forward = adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions).0;
+    let old_forward = adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions).0;
+
+    let new_keys: HashMap<&str, NodeKey<'_>> = input
+        .new_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .collect();
+    let old_keys: HashMap<&str, NodeKey<'_>> = input
+        .old_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .collect();
+    let new_names: HashMap<&str, &str> = input
+        .new_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.name.as_str()))
+        .collect();
+    let old_names: HashMap<&str, &str> = input
+        .old_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.name.as_str()))
+        .collect();
+    let new_deps = dependency_sets(&new_forward, &new_keys, &new_names);
+    let old_deps = dependency_sets(&old_forward, &old_keys, &old_names);
+    let old_deps_by_qname: HashMap<&str, Vec<&str>> = old_deps
+        .iter()
+        .map(|(key, deps)| (key.1, deps.clone()))
+        .collect();
+    let touched: HashMap<NodeKey<'_>, DiffStatus> = touched_ids(input, graphs)
+        .into_iter()
+        .filter(|(id, _)| {
+            graphs
+                .node(id)
+                .is_some_and(|node| !conventions.is_test_node(node))
+        })
+        .filter_map(|(id, status)| new_keys.get(id).map(|key| (*key, status)))
+        .collect();
+
+    // Two symbols sharing fewer calls can match by accident; three is already
+    // a duplicated pipeline.
+    const MIN_SHARED: usize = 3;
+    let rows = find_twins(&new_deps, &old_deps, &old_deps_by_qname, &touched, MIN_SHARED);
+    let limit = input.limit();
+    let shown = rows.iter().take(limit).collect::<Vec<_>>();
+    output_rows(
+        input,
+        AuditDiffView::Twins,
+        &["symbol", "calls the same as", "shared", "same file"],
+        &[40, 40, 8, 10],
+        shown
+            .iter()
+            .map(|pair| {
+                (
+                    vec![
+                        pair.a.1.to_string(),
+                        pair.b.1.to_string(),
+                        pair.shared.to_string(),
+                        if pair.a.0 == pair.b.0 { "yes".into() } else { String::new() },
+                    ],
+                    json!({
+                        "a": pair.a.1,
+                        "aFile": pair.a.0,
+                        "aStatus": pair.left.map(status_label),
+                        "b": pair.b.1,
+                        "bFile": pair.b.0,
+                        "bStatus": pair.right.map(status_label),
+                        "shared": pair.shared,
+                        "sameFile": pair.a.0 == pair.b.0,
+                    }),
+                )
+            })
+            .collect(),
+        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    )
+}
+
+/// A symbol that picked up callers from several modules in one change is a
+/// choke point: every one of them now goes through it.
+pub(super) fn absorbed_callers(before: usize, after: usize, modules: usize) -> bool {
+    after >= 3 && after > before + 1 && modules >= 2
+}
+
+pub(super) struct TwinPair<'a> {
+    pub(super) a: NodeKey<'a>,
+    pub(super) b: NodeKey<'a>,
+    pub(super) left: Option<DiffStatus>,
+    pub(super) right: Option<DiffStatus>,
+    pub(super) shared: usize,
+}
+
+/// A pair of symbols with identical outgoing calls, at least one side touched
+/// by the change, and the pair not already matching in the base snapshot. A
+/// family of three or more such symbols is boilerplate (CRUD siblings, logger
+/// wrappers), not a copy, so it is skipped.
+pub(super) fn find_twins<'a>(
+    new_deps: &HashMap<NodeKey<'a>, Vec<&'a str>>,
+    old_deps: &HashMap<NodeKey<'a>, Vec<&'a str>>,
+    old_by_qname: &HashMap<&'a str, Vec<&'a str>>,
+    touched: &HashMap<NodeKey<'a>, DiffStatus>,
+    min_shared: usize,
+) -> Vec<TwinPair<'a>> {
+    let mut groups: HashMap<&[&'a str], Vec<NodeKey<'a>>> = HashMap::new();
+    for (key, deps) in new_deps {
+        if deps.len() >= min_shared {
+            groups.entry(deps.as_slice()).or_default().push(*key);
+        }
+    }
+    let mut rows = Vec::new();
+    for members in groups.values() {
+        if members.len() != 2 {
+            continue;
+        }
+        let (a, b) = (members[0], members[1]);
+        let left_status = touched.get(&a).copied();
+        let right_status = touched.get(&b).copied();
+        if left_status.is_none() && right_status.is_none() {
+            continue;
+        }
+        // Equal on both sides means the duplication predates the change; a moved
+        // symbol is found by qname because its file changed.
+        let before_a = old_deps.get(&a).or_else(|| old_by_qname.get(a.1));
+        let before_b = old_deps.get(&b).or_else(|| old_by_qname.get(b.1));
+        if before_a
+            .zip(before_b)
+            .is_some_and(|(left, right)| left == right)
+        {
+            continue;
+        }
+        rows.push(TwinPair {
+            a,
+            b,
+            left: left_status,
+            right: right_status,
+            shared: new_deps.get(&a).map(Vec::len).unwrap_or(0),
+        });
+    }
+    rows.sort_by(|left, right| {
+        let same_file = |pair: &TwinPair<'a>| pair.a.0 == pair.b.0;
+        same_file(right)
+            .cmp(&same_file(left))
+            .then_with(|| right.shared.cmp(&left.shared))
+            .then_with(|| left.a.1.cmp(right.a.1))
+    });
+    rows
 }
 
 pub(super) fn silent_files(input: &ViewInput<'_>) -> Result<ExitCode> {

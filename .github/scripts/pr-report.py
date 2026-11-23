@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 FRAMEWORK_SUFFIXES = (
@@ -96,7 +97,7 @@ def spoiler(lines: list[str]) -> list[str]:
     return out
 
 
-def header(meta: dict, summary: dict) -> list[str]:
+def header(meta: dict, summary: dict, views: dict) -> list[str]:
     title = meta.get("title") or "code-graph report"
     sha = (meta.get("sha") or "")[:8]
     churn = f"+{meta.get('additions', 0)}/−{meta.get('deletions', 0)}"
@@ -140,15 +141,126 @@ def header(meta: dict, summary: dict) -> list[str]:
         per_line += f", added {added:.2f}"
     loc_delta = delta("loc (analyzed files)")
 
+    signals: list[str] = []
+    reach_rows = rows(views["reach"])
+    if reach_rows:
+        top = reach_rows[0]
+        shift = top.get("reach") or {}
+        signals.append(
+            f"`{top.get('symbol', '')}` reach {shift.get('from', 0)} → {shift.get('to', 0)}"
+        )
+    fan_rows = rows(views["fan"])
+    gained = [
+        row
+        for row in fan_rows
+        if (row.get("callers") or {}).get("delta", 0) > 0
+    ]
+    if gained:
+        signals.append(f"{len(gained)} symbols gained callers")
+    chokes = [row for row in fan_rows if row.get("chokePoint")]
+    if chokes:
+        names = ", ".join(f"`{row['symbol']}`" for row in chokes[:2])
+        signals.append(f"choke point: {names}")
+    twins = rows(views["twins"])
+    if twins:
+        signals.append(f"{len(twins)} duplicated call sets")
+
     lines = [f"## code-graph: {title}", ""]
     lines.append(f"`{sha}` · {churn} lines in {files} files · {shape}")
     lines.append("")
-    affected = load(os.environ.get("VIEW_DIR", ""), "affected.json")
-    reach = affected.get("totalRows", 0)
-    lines.append(
-        f"{reach} existing symbols reach the changed files · {per_line} · loc (analyzed) {signed(loc_delta)}"
+    affected = views["affected"]
+    reached = affected.get("totalRows", 0)
+    line = f"{reached} existing symbols reach the changed files"
+    if signals:
+        line += " · " + " · ".join(signals[:3])
+    lines.append(line)
+    lines.extend(
+        [""]
+        + spoiler(
+            [
+                f"**cyclomatic/callable**: {per_line}",
+                f"**loc (analyzed files)**: {signed(loc_delta)}",
+            ]
+        )
     )
     return lines
+
+
+def section_reach(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
+    total = view.get("totalRows", len(items))
+    out = ["", f"### Reach ({total})", ""]
+    out.append("Changed callables: how much of the graph they cover now.")
+    out.append("")
+    out.append("| entry point | status | reach | fan-out | new calls |")
+    out.append("|---|---|---|---:|---|")
+    for item in items:
+        before = item.get("reach") or {}
+        fan = item.get("fanOut") or {}
+        added = ", ".join(f"`{name}`" for name in (item.get("newCalls") or [])[:3])
+        out.append(
+            f"| `{item['symbol']}` | {item['status']} | "
+            f"{before.get('from', 0)} → {before.get('to', 0)} | "
+            f"{fan.get('from', 0)} → {fan.get('to', 0)} | {added} |"
+        )
+    out.extend([""] + spoiler([
+        "**reach**: distinct callables reachable through outgoing call edges, before → after the change.",
+        "**fan-out**: direct callees; **new calls**: callees the change added.",
+        "Rows are changed callables whose reach moved, plus new callables with something to reach and entry points that lost all callers.",
+    ]))
+    return out
+
+
+def section_fan_in(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
+    total = view.get("totalRows", len(items))
+    out = ["", f"### Who depends on the change ({total})", ""]
+    out.append("Changed symbols: callers and stability, before → after.")
+    out.append("")
+    out.append("| symbol | status | callers | instability | modules | flag |")
+    out.append("|---|---|---|---:|---:|---|")
+    for item in items:
+        callers = item.get("callers") or {}
+        stability = item.get("instability") or {}
+        out.append(
+            f"| `{item['symbol']}` | {item['status']} | "
+            f"{callers.get('from', 0)} → {callers.get('to', 0)} | "
+            f"{float(stability.get('from', 0)):.2f} → {float(stability.get('to', 0)):.2f} | "
+            f"{item.get('modules', 0)} | {'choke-point' if item.get('chokePoint') else ''} |"
+        )
+    out.extend([""] + spoiler([
+        "**callers**: distinct project callables with a dependency edge to the symbol.",
+        "**instability**: callers / (callers + callees); a drop means more code now depends on it.",
+        "**modules**: how many top-level modules call it; **choke point**: it absorbed callers from several modules in this change.",
+    ]))
+    return out
+
+
+def section_twins(view: dict, limit: int) -> list[str]:
+    items = rows(view)[:limit]
+    if not items:
+        return []
+    total = view.get("totalRows", len(items))
+    out = ["", f"### Duplicated call sets ({total})", ""]
+    out.append("Changed symbols that call exactly what another symbol calls.")
+    out.append("")
+    out.append("| symbol | calls the same as | shared calls | file |")
+    out.append("|---|---|---:|---|")
+    for item in items:
+        file = "same file" if item.get("sameFile") else f"`{item.get('bFile', '')}`"
+        out.append(
+            f"| `{item['a']}` | `{item['b']}` | {item.get('shared', 0)} | {file} |"
+        )
+    out.extend([""] + spoiler([
+        "**shared calls**: identical set of direct callees, at least three.",
+        "Pairs that already matched in the base snapshot are not listed: this is new duplication.",
+        "A copy that works is still a copy; look for one caller to fold into the other.",
+    ]))
+    return out
 
 
 def section_uses(view: dict, limit: int) -> list[str]:
@@ -295,7 +407,8 @@ def section_review(view: dict, limit: int) -> list[str]:
     items = [
         row
         for row in rows(view)
-        if row.get("kind") not in ("constant", "constructor")
+        if row.get("kind") not in ("constant", "constructor", "variable")
+        and not re.search(r"(?:-?errors?|error-?codes?)(?:\.ts)?$", row.get("qname", ""), re.I)
         and not row.get("file", "").endswith(".spec.ts")
         and not is_test_symbol(row)
     ][:limit]
@@ -409,6 +522,7 @@ def main() -> int:
     os.environ["VIEW_DIR"] = args.dir
     views = {name: load(args.dir, f"{name}.json") for name in (
         "summary", "uses", "dependencies", "callers", "affected",
+        "reach", "fan", "twins",
         "review", "areas", "symbols", "filtered", "silent", "dead",
     )}
     summary = views["summary"]
@@ -425,6 +539,8 @@ def main() -> int:
         or rows(views["affected"])
         or rows(views["symbols"])
         or rows(views["dead"])
+        or rows(views["reach"])
+        or rows(views["twins"])
         or len(rows(views["areas"])) > 1
         or views["filtered"].get("newCallEdges", 0)
     ):
@@ -437,7 +553,10 @@ def main() -> int:
         "deletions": args.deletions,
         "files": args.files,
     }
-    lines: list[str] = header(meta, summary)
+    lines: list[str] = header(meta, summary, views)
+    lines += section_reach(views["reach"], 6)
+    lines += section_fan_in(views["fan"], 6)
+    lines += section_twins(views["twins"], 6)
     lines += section_uses(views["uses"], 10)
     lines += section_dependencies(views["dependencies"], 6)
     lines += section_callers(views["callers"], 8)

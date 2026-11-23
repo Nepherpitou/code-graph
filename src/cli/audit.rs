@@ -539,6 +539,7 @@ impl AuditOrder {
             AuditOrder::Priority => "priority",
             AuditOrder::Complexity => "cyclomatic",
             AuditOrder::BlastRadius => "transitive-in",
+            AuditOrder::TransitiveFanOut => "transitive-out",
             AuditOrder::FanIn => "fan-in",
             AuditOrder::FanOut => "fan-out",
             AuditOrder::CallFanIn => "call-fan-in",
@@ -559,6 +560,7 @@ impl AuditOrder {
             AuditOrder::Priority => node.metrics.refactor_priority,
             AuditOrder::Complexity => node.cyclomatic as f64,
             AuditOrder::BlastRadius => node.metrics.transitive_fan_in as f64,
+            AuditOrder::TransitiveFanOut => node.metrics.transitive_fan_out as f64,
             AuditOrder::FanIn => node.metrics.fan_in as f64,
             AuditOrder::FanOut => node.metrics.fan_out as f64,
             AuditOrder::CallFanIn => node.metrics.call_fan_in as f64,
@@ -1212,6 +1214,10 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
             "transitive fan-in: callables that can reach this node through call edges",
         ),
         (
+            "reach",
+            "transitive fan-out: callables this node reaches through call edges; 0 for a leaf",
+        ),
+        (
             "fan-in / fan-out",
             "total distinct call + data neighbours; call sites count multiplicity separately",
         ),
@@ -1247,6 +1253,10 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
             "dead-code candidate",
             "no incoming calls, no module references, not exported, not a constructor, not in a cycle",
         ),
+        (
+            "duplicate calls",
+            "two symbols whose direct callee names are identical, at least three of them",
+        ),
     ]
 }
 
@@ -1264,11 +1274,17 @@ fn metrics(args: AuditMetricsArgs) -> Result<()> {
         AuditFormat::Text => {
             println!("Metrics used by audit");
             for (name, description) in metric_definitions() {
-                println!("  {:<18} {}", name, description);
+                println!("  {:<20} {}", name, description);
             }
             println!();
+            println!("Graph metrics count dependency edges only: an override link between two");
+            println!("same-named methods, DI constructor wiring and any edge touching a test file");
+            println!("are stored but never raise fan-in, reach, centrality or priority. Site");
+            println!("counters and dead-code detection still count every call site.");
+            println!();
             println!("These are definitions, not smell thresholds.");
-            println!("`audit top --order-by <metric>` ranks the existing values.");
+            println!("`audit top --order-by <metric>` ranks the existing values;");
+            println!("`audit diff --view reach|fan-in|twins` reports how they moved in a change.");
         }
     }
     Ok(())

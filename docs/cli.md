@@ -65,7 +65,7 @@ code-graph audit diff --refresh
 
 Common flags: `--root <path>` (for subcommands), `--db <file>`, `--snapshot <id|latest>` (all audit subcommands except `diff`), `--format text|json`. The overview can take the path directly (`audit .`); subcommands use `--root`. `audit diff` selects snapshots with `--from`/`--to` instead of `--snapshot`.
 
-`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `fan-in`, `fan-out`, `call-fan-in`, `call-fan-out`, `data-fan-in`, `data-fan-out`, `ifc`, `betweenness`, `loc`, `sloc`, `params`. `fan-in`/`fan-out` are total degrees; the `call-*`/`data-*` variants split them by edge kind. `ifc` and `priority` use call edges only. `priority` is an absolute refactoring score: complexity times transitive impact times call instability. `hotspot` remains a relative centrality triage score. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
+`audit top --order-by` accepts: `priority`, `hotspot`, `complexity`, `blast-radius`, `transitive-fan-out`, `fan-in`, `fan-out`, `call-fan-in`, `call-fan-out`, `data-fan-in`, `data-fan-out`, `ifc`, `betweenness`, `loc`, `sloc`, `params`. `blast-radius` and `transitive-fan-out` are the transitive fan-in and fan-out; the latter is the `reach` explained in [`metrics.md`](metrics.md#reach). `fan-in`/`fan-out` are total degrees; the `call-*`/`data-*` variants split them by edge kind. `ifc` and `priority` use call edges only. `priority` is an absolute refactoring score: complexity times transitive impact times call instability. `hotspot` remains a relative centrality triage score. `audit metrics` prints the glossary of every metric, including the rule that graph metrics ignore override, DI-wiring and test edges. `--min` is a numeric filter, not a smell threshold. `--file` and `--kind` narrow the rows.
 
 `--format json` returns the same facts in a compact envelope for agents:
 
@@ -111,7 +111,7 @@ report hides rows whose only change is a graph-wide metric such as hotspot drift
 `--all-metrics` to include them.
 
 `--order-by` uses the same metric names as `audit top` (`priority`, `complexity`, `sloc`, `loc`,
-`fan-in`, ...), plus `name`. In `audit diff`, metric values are **deltas**: positive means the
+`fan-in`, `fan-out`, `transitive-fan-out`, ...), plus `name`. In `audit diff`, metric values are **deltas**: positive means the
 value increased. Added rows sort by their new absolute value, removed rows by their old absolute
 value.
 
@@ -149,6 +149,9 @@ comment formatting, so callers compose whatever report they need.
 | `filtered-edges` | how many added call edges survived, and why the rest were dropped (overrides of a base method, test files, DI wiring, interface/implementation duplicates, signature re-resolutions) |
 | `cycles` | cycles added, removed, or unchanged, with members |
 | `dead-code` | dead-code candidates that appeared in the target snapshot, with a DI/decorator flag; constants are skipped when either snapshot truncated the reference crawl (`constantsTruncated` in JSON) |
+| `reach` | changed callables whose transitive fan-out moved (or that lost all callers or live in framework files): reach and fan-out before → after, plus the calls they added |
+| `fan-in` | changed callables: caller count before → after, instability before → after, number of calling modules, and a `choke-point` flag when a symbol absorbed callers from several modules in one change |
+| `twins` | changed symbols whose outgoing call targets exactly match another symbol's (at least three shared targets, compared by callee name so a port and its implementation count once); pairs that already matched in the base snapshot, and families of three or more, are skipped |
 | `silent-files` | changed files that carry no symbol rows (ports, DTOs, schemas, tests) |
 
 `callers`, `affected`, `areas` and `silent-files` require `--changed-files`; the other views use
