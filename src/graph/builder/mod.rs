@@ -93,6 +93,8 @@ pub(crate) struct Builder {
     include_external: bool,
     include_constants: bool,
     truncated: bool,
+    constants_total: usize,
+    constants_crawled: usize,
     warnings: Vec<String>,
 }
 
@@ -101,6 +103,8 @@ pub(crate) struct BuilderOutput {
     pub edges: Vec<GraphEdge>,
     pub warnings: Vec<String>,
     pub truncated: bool,
+    pub constants_total: usize,
+    pub constants_crawled: usize,
 }
 
 impl Builder {
@@ -129,6 +133,8 @@ impl Builder {
             include_external,
             include_constants,
             truncated: false,
+            constants_total: 0,
+            constants_crawled: 0,
             warnings: Vec::new(),
         }
     }
@@ -279,11 +285,19 @@ impl Builder {
             .map(|record| record.node.clone())
             .collect();
         let edges = self.finish_edges();
+        if self.constants_total == 0 && self.constants_crawled == 0 {
+            self.constants_total = nodes
+                .iter()
+                .filter(|node| node.kind.is_data() && !node.external)
+                .count();
+        }
         BuilderOutput {
             nodes,
             edges,
             warnings: self.warnings,
             truncated: self.truncated,
+            constants_total: self.constants_total,
+            constants_crawled: self.constants_crawled,
         }
     }
 }

@@ -651,6 +651,10 @@ pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
 
 pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
     let conventions = Conventions::of(&input.to.meta.language);
+    // A constant outside the reference crawl has module_refs == 0 without ever
+    // being looked at, so it must not be reported as dead.
+    let constants_truncated = input.from.meta.constants_crawled < input.from.meta.constants_total
+        || input.to.meta.constants_crawled < input.to.meta.constants_total;
     let was_dead: HashSet<(&str, &str)> = input
         .old_nodes
         .iter()
@@ -662,6 +666,7 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
         .iter()
         .filter(|node| node.metrics.dead_code_candidate)
         .filter(|node| !conventions.is_test_node(node))
+        .filter(|node| !constants_truncated || !node.kind.is_data())
         .filter(|node| !was_dead.contains(&(node.file.as_str(), node.qname.as_str())))
         .collect();
     rows.sort_by(|left, right| left.qname.cmp(&right.qname));
@@ -691,7 +696,13 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+        json!({
+            "totalRows": rows.len(),
+            "truncated": rows.len() > shown.len(),
+            "constantsTruncated": constants_truncated,
+            "constantsTotal": input.to.meta.constants_total,
+            "constantsCrawled": input.to.meta.constants_crawled,
+        }),
     )
 }
 

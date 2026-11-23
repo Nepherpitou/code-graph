@@ -20,6 +20,12 @@ pub struct GraphMeta {
     pub node_count: usize,
     pub edge_count: usize,
     pub truncated: bool,
+    /// Constant/variable nodes in the snapshot.
+    #[serde(default)]
+    pub constants_total: usize,
+    /// How many of them had their references crawled.
+    #[serde(default)]
+    pub constants_crawled: usize,
     pub options: serde_json::Value,
 }
 

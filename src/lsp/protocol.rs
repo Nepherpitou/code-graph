@@ -26,7 +26,7 @@ pub(super) fn retryable(error: &LspError) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspPosition {
     pub line: u32,
