@@ -9,6 +9,8 @@ Nodes are code primitives: functions, methods, constructors, and constants/varia
 | data | function → constant | A function references a constant/variable. |
 | inferred | caller → callee | Found from callback arguments or `textDocument/references`, not call hierarchy (dashed). |
 
+Not every call edge is a dependency. An edge that only mirrors an override link between two same-named methods, an edge in either direction of a constructor (DI wiring), and an edge touching a test file are stored in the graph but skipped by the metrics: reach, fan-in/out, cycles, centrality and dead-code heuristics read dependency edges only. The audit views classify the same edges through `graph::conventions`, so the two never disagree.
+
 Result usage is decided from the tree-sitter AST: the call is an `expression_statement` → discarded; `void f()` → discarded; the callee position must be inside the call's callee field (so calls nested in macro arguments stay `unknown` instead of producing a wrong answer).
 
 Calls missed by call hierarchy are recovered with `textDocument/references` for callables that currently have **zero** incoming calls. This catches calls inside Rust macros and function-pointer registrations, at the cost of possible references-that-are-not-calls. Such edges are marked `inferred`.

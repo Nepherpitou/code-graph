@@ -2,6 +2,8 @@
 
 All metrics are computed from one graph: project nodes are functions, methods, constructors, and constants/variables; call edges point caller → callee; data edges point function → referenced constant. External/library callees are counted but excluded from graph metrics unless `--include-external` is set.
 
+Graph metrics count **dependency** edges only. Two same-named methods linked because one overrides the other, calls in either direction of a constructor (DI wiring), and calls to or from test files are stored as edges but do not contribute to `fanIn`/`fanOut`, reachability, cycles, centrality or priority. The site counters `callIn`/`callOut` and `resultIgnoredRatio` still count every call site, so a method that only tests call keeps a non-zero `callIn`.
+
 The report carries every node metric in `nodes[].metrics`, graph aggregates in `stats`, and leaderboards in `top`. Where they are computed and persisted is described in [`internals.md`](internals.md#where-metrics-live); practical guidance on reading a delta after a commit is in [`metrics-interpretation.ru.md`](metrics-interpretation.ru.md).
 
 ## Structural metrics (base)
@@ -77,7 +79,7 @@ This is McCabe's metric, not cognitive complexity: nesting is ignored, so a deep
 
 ## Quality signals
 
-- **Dead-code candidate**: `callIn == 0`, `moduleRefs == 0`, not exported, not entry-like (`main`, tests, framework hooks), name does not start with `_`, not a constructor, and not in a cycle. This catches unused private helpers. It can produce false positives for reflection, generated wiring, and handlers registered through patterns LSP cannot see; treat it as a candidate list, not proof. Constants and variables are only judged when their references were crawled: if `--max-constants` cut the crawl, the snapshot records the truncation and data-kind nodes are left out of the candidate list.
+- **Dead-code candidate**: `callIn == 0`, `moduleRefs == 0`, not exported, not entry-like (`main`, tests, framework hooks), name does not start with `_`, not a constructor, and not in a cycle. This catches unused private helpers. It can produce false positives for reflection, generated wiring, and handlers registered through patterns LSP cannot see; treat it as a candidate list, not proof. Constants and variables are only judged when their references were crawled: if `--max-constants` cut the crawl, the snapshot records the truncation and data-kind nodes are left out of the candidate list. Nodes in framework files — `*.controller.ts`, `*.module.ts`, `*.provider.ts`, `*.guard.ts`, `*.interceptor.ts` — are never candidates: decorators wire them without call edges, so a missing caller there means a route or a hook, not dead code.
 - **Cycles**: SCCs larger than one node. Cycles are not automatically bad (mutual recursion, protocol state machines), but they break layering and complicate testing.
 - **Ignored results**: see `resultIgnoredRatio`. A function with a high ratio is a candidate for returning `void` and documenting side effects.
 - **Isolated nodes**: no incoming and no outgoing edges; usually entry points, callbacks, or dead code.
