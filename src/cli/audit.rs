@@ -57,7 +57,7 @@ pub(super) fn analysis_options(root: &Path) -> AnalyzeOptions {
         include_constants: true,
         ref_fallback: true,
         max_nodes: 20_000,
-        max_constants: 500,
+        max_constants: 10_000,
         exclude: Vec::new(),
         verbose: false,
         quiet: true,

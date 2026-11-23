@@ -293,6 +293,8 @@ pub async fn analyze_with_progress(
 
     let output = builder.finish();
     let truncated = output.truncated;
+    let constants_total = output.constants_total;
+    let constants_crawled = output.constants_crawled;
     let mut nodes = output.nodes;
     let edges = output.edges;
     let mut warnings = output.warnings;
@@ -328,6 +330,8 @@ pub async fn analyze_with_progress(
         node_count,
         edge_count,
         truncated,
+        constants_total,
+        constants_crawled,
         options: json!({
             "lang": options.lang.map(|id| id.as_str()).unwrap_or("auto"),
             "includeExternal": options.include_external,

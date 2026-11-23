@@ -270,6 +270,17 @@ fn comparability_warnings(from: &GraphSummary, to: &GraphSummary) -> Result<Vec<
     if from.meta.truncated || to.meta.truncated {
         warnings.push("one or both snapshots are truncated; deltas may be incomplete".to_string());
     }
+    if from.meta.constants_crawled < from.meta.constants_total
+        || to.meta.constants_crawled < to.meta.constants_total
+    {
+        warnings.push(format!(
+            "constant crawl truncated ({} of {} on base, {} of {} on head); dead-code deltas are unreliable",
+            from.meta.constants_crawled,
+            from.meta.constants_total,
+            to.meta.constants_crawled,
+            to.meta.constants_total
+        ));
+    }
     if from.meta.version != to.meta.version {
         warnings.push(format!(
             "tool versions differ: {} → {}",

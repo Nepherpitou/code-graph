@@ -54,7 +54,7 @@ pub(super) struct AnalysisArgs {
     #[arg(long, default_value_t = 20_000)]
     pub(super) max_nodes: usize,
     /// Maximum number of constants whose references are crawled.
-    #[arg(long, default_value_t = 500)]
+    #[arg(long, default_value_t = 10_000)]
     pub(super) max_constants: usize,
     /// Extra path to ignore, relative to <root> (repeatable or comma-separated).
     #[arg(long, value_delimiter = ',')]

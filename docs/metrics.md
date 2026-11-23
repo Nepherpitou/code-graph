@@ -77,7 +77,7 @@ This is McCabe's metric, not cognitive complexity: nesting is ignored, so a deep
 
 ## Quality signals
 
-- **Dead-code candidate**: `callIn == 0`, `moduleRefs == 0`, not exported, not entry-like (`main`, tests, framework hooks), name does not start with `_`, not a constructor, and not in a cycle. This catches unused private helpers. It can produce false positives for reflection, generated wiring, and handlers registered through patterns LSP cannot see; treat it as a candidate list, not proof.
+- **Dead-code candidate**: `callIn == 0`, `moduleRefs == 0`, not exported, not entry-like (`main`, tests, framework hooks), name does not start with `_`, not a constructor, and not in a cycle. This catches unused private helpers. It can produce false positives for reflection, generated wiring, and handlers registered through patterns LSP cannot see; treat it as a candidate list, not proof. Constants and variables are only judged when their references were crawled: if `--max-constants` cut the crawl, the snapshot records the truncation and data-kind nodes are left out of the candidate list.
 - **Cycles**: SCCs larger than one node. Cycles are not automatically bad (mutual recursion, protocol state machines), but they break layering and complicate testing.
 - **Ignored results**: see `resultIgnoredRatio`. A function with a high ratio is a candidate for returning `void` and documenting side effects.
 - **Isolated nodes**: no incoming and no outgoing edges; usually entry points, callbacks, or dead code.

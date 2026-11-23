@@ -25,7 +25,7 @@ code-graph serve --db <database> [--bind 127.0.0.1:8787] [--web-dir web/dist]
 | `--no-constants` | Omit constant/variable nodes and reference crawling. |
 | `--no-ref-fallback` | Disable the references-based rescue for missed calls. |
 | `--max-nodes <n>` | Hard node cap (default 20000); partial graphs are reported. |
-| `--max-constants <n>` | Constant reference crawl cap (default 500). |
+| `--max-constants <n>` | Constant reference crawl cap (default 10000). |
 | `--exclude <paths>` | Extra ignored paths, relative to `<dir>`; repeatable or comma-separated. |
 | `-v, --verbose` | LSP protocol logging. |
 | `--quiet` | Suppress progress output. |
@@ -148,7 +148,7 @@ comment formatting, so callers compose whatever report they need.
 | `areas` | per-module added/removed/changed counts, mean cyclomatic per callable, loc delta |
 | `filtered-edges` | how many added call edges survived, and why the rest were dropped (overrides of a base method, test files, DI wiring, interface/implementation duplicates, signature re-resolutions) |
 | `cycles` | cycles added, removed, or unchanged, with members |
-| `dead-code` | dead-code candidates that appeared in the target snapshot, with a DI/decorator flag |
+| `dead-code` | dead-code candidates that appeared in the target snapshot, with a DI/decorator flag; constants are skipped when either snapshot truncated the reference crawl (`constantsTruncated` in JSON) |
 | `silent-files` | changed files that carry no symbol rows (ports, DTOs, schemas, tests) |
 
 `callers`, `affected`, `areas` and `silent-files` require `--changed-files`; the other views use
