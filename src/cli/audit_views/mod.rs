@@ -610,6 +610,9 @@ pub(super) async fn run(view: AuditDiffView, input: &ViewInput<'_>) -> Result<Ex
         AuditDiffView::FilteredEdges => views::filtered_edges(input, &graphs),
         AuditDiffView::Cycles => views::cycles(input),
         AuditDiffView::DeadCode => views::dead_code(input),
+        AuditDiffView::Reach => views::reach(input, &graphs),
+        AuditDiffView::FanIn => views::fan_in(input, &graphs),
+        AuditDiffView::Twins => views::twins(input, &graphs),
         AuditDiffView::SilentFiles => views::silent_files(input),
         AuditDiffView::Symbols => bail!("symbols view is handled by the diff itself"),
     }
@@ -730,6 +733,60 @@ mod tests {
         let cycles = sccs(&nodes, &edges, None, Conventions::of("typescript"));
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 2);
+    }
+
+    #[test]
+    fn twins_report_only_new_duplication() {
+        let shared = vec!["x", "y", "z"];
+        let mut new_deps: HashMap<(&str, &str), Vec<&str>> = HashMap::new();
+        new_deps.insert(("f.ts", "a"), shared.clone());
+        new_deps.insert(("f.ts", "b"), shared.clone());
+        new_deps.insert(("g.ts", "c"), vec!["x", "y"]);
+        let mut old_deps = HashMap::new();
+        old_deps.insert(("f.ts", "a"), shared.clone());
+        old_deps.insert(("f.ts", "b"), shared.clone());
+        let mut touched = HashMap::new();
+        touched.insert(("f.ts", "a"), DiffStatus::Changed);
+
+        let no_qnames = HashMap::new();
+        assert!(views::find_twins(&new_deps, &old_deps, &no_qnames, &touched, 3).is_empty());
+
+        old_deps.clear();
+        let rows = views::find_twins(&new_deps, &old_deps, &no_qnames, &touched, 3);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].shared, 3);
+        assert!(["a", "b"].contains(&rows[0].a.1));
+        assert!(["a", "b"].contains(&rows[0].b.1));
+        assert_eq!(rows[0].left.is_some(), rows[0].right.is_none());
+    }
+
+    #[test]
+    fn twins_skip_boilerplate_families() {
+        let shared = vec!["x", "y", "z"];
+        let mut new_deps: HashMap<(&str, &str), Vec<&str>> = HashMap::new();
+        for name in ["a", "b", "c"] {
+            new_deps.insert(("f.ts", name), shared.clone());
+        }
+        let mut touched = HashMap::new();
+        touched.insert(("f.ts", "a"), DiffStatus::Changed);
+
+        assert!(views::find_twins(&new_deps, &HashMap::new(), &HashMap::new(), &touched, 3).is_empty());
+    }
+
+    #[test]
+    fn fan_in_flags_only_real_choke_points() {
+        assert!(views::absorbed_callers(1, 4, 2));
+        assert!(!views::absorbed_callers(0, 3, 1));
+        assert!(!views::absorbed_callers(3, 4, 3));
+    }
+
+    #[test]
+    fn transitive_fan_out_is_a_cli_value() {
+        use clap::ValueEnum;
+        let diff = crate::cli::args::AuditDiffOrder::TransitiveFanOut;
+        assert_eq!(diff.to_possible_value().unwrap().get_name(), "transitive-fan-out");
+        let top = crate::cli::args::AuditOrder::TransitiveFanOut;
+        assert_eq!(top.to_possible_value().unwrap().get_name(), "transitive-fan-out");
     }
 
     #[test]

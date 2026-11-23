@@ -32,7 +32,6 @@ impl Builder {
             })
             .collect();
         let (total_constants, constants) = bounded_constants(constants, max_constants);
-        self.constants_total = total_constants;
         self.constants_crawled = constants.len();
         if constants.len() < total_constants {
             self.warnings.push(format!(

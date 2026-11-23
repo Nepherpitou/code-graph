@@ -147,6 +147,7 @@ pub(super) enum AuditOrder {
     Priority,
     Complexity,
     BlastRadius,
+    TransitiveFanOut,
     FanIn,
     FanOut,
     CallFanIn,
@@ -167,6 +168,7 @@ pub(super) enum AuditDiffOrder {
     Sloc,
     Loc,
     BlastRadius,
+    TransitiveFanOut,
     FanIn,
     FanOut,
     CallFanIn,
@@ -203,6 +205,12 @@ pub(super) enum AuditDiffView {
     Cycles,
     /// Dead-code candidates that appeared in the target snapshot.
     DeadCode,
+    /// How far the changed entry points reach.
+    Reach,
+    /// Who depends on the changed symbols now.
+    FanIn,
+    /// Changed symbols whose outgoing calls match another symbol's.
+    Twins,
     /// Changed files that carry no symbol-level rows.
     SilentFiles,
 }
