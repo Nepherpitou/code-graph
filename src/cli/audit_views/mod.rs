@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
+use crate::graph::conventions::{call_pairs, wiring_exclusion, Bucket, Conventions};
 use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind};
 use crate::store::GraphSummary;
 
@@ -18,10 +19,7 @@ use super::args::{AuditDiffArgs, AuditDiffView, AuditFormat};
 use super::audit::{pad, print_json, snapshot_json};
 use super::audit_diff::{DiffStatus, NodeDiff};
 
-mod conventions;
 mod views;
-
-use conventions::Conventions;
 
 /// Which snapshot pair a view has to explain, and what the caller considers changed.
 pub(super) struct ViewInput<'a> {
@@ -40,30 +38,6 @@ pub(super) struct ViewInput<'a> {
 impl ViewInput<'_> {
     fn limit(&self) -> usize {
         self.args.limit.clamp(1, 1000)
-    }
-}
-
-/// Why a call edge was left out of the dependency views.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Bucket {
-    Override,
-    Test,
-    Wiring,
-    Duplicate,
-    Resignature,
-    Unverified,
-}
-
-impl Bucket {
-    fn label(self) -> &'static str {
-        match self {
-            Bucket::Override => "override",
-            Bucket::Test => "test",
-            Bucket::Wiring => "wiring",
-            Bucket::Duplicate => "duplicate",
-            Bucket::Resignature => "resignature",
-            Bucket::Unverified => "unverified",
-        }
     }
 }
 
@@ -172,41 +146,6 @@ fn area(path: &str) -> &str {
         return head;
     }
     "root"
-}
-
-/// Same-named methods are linked by the LSP only for overrides and their siblings.
-fn is_override_link(
-    src: &GraphNode,
-    dst: &GraphNode,
-    new_pairs: &HashSet<(&str, &str)>,
-    conventions: &Conventions,
-) -> bool {
-    if src.name != dst.name {
-        return false;
-    }
-    if conventions.is_abstract(src) || conventions.is_abstract(dst) {
-        return true;
-    }
-    new_pairs.contains(&(dst.id.as_str(), src.id.as_str()))
-}
-
-/// Why a call edge is not a real dependency, or `None` when it is one.
-fn wiring_exclusion(
-    src: &GraphNode,
-    dst: &GraphNode,
-    pairs: &HashSet<(&str, &str)>,
-    conventions: &Conventions,
-) -> Option<Bucket> {
-    if is_override_link(src, dst, pairs, conventions) {
-        Some(Bucket::Override)
-    } else if conventions.is_test_file(&src.file) || conventions.is_test_file(&dst.file) {
-        Some(Bucket::Test)
-    } else if matches!(src.kind, NodeKind::Constructor) || matches!(dst.kind, NodeKind::Constructor)
-    {
-        Some(Bucket::Wiring)
-    } else {
-        None
-    }
 }
 
 /// Whether the call site line actually names the callee.
@@ -369,11 +308,7 @@ fn graph_call_edges<'a>(
     conventions: &Conventions,
 ) -> Vec<EdgeView<'a>> {
     let by_id: HashMap<&str, &GraphNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let pairs: HashSet<(&str, &str)> = edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Call)
-        .map(|e| (e.source.as_str(), e.target.as_str()))
-        .collect();
+    let pairs = call_pairs(edges);
     let mut out = Vec::new();
     for edge in edges {
         if edge.kind != EdgeKind::Call {
@@ -698,6 +633,7 @@ pub(super) async fn run(view: AuditDiffView, input: &ViewInput<'_>) -> Result<Ex
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::conventions::is_override_link;
     use crate::graph::ResultUsage;
 
     fn node(id: &str, name: &str, kind: NodeKind, file: &str, declaration: &str) -> GraphNode {

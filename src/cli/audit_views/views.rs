@@ -1,6 +1,5 @@
 //! The audit diff views themselves.
 
-use super::conventions::Conventions;
 use super::*;
 
 pub(super) struct AffectedRow<'a> {

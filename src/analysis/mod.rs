@@ -300,7 +300,8 @@ pub async fn analyze_with_progress(
     let mut warnings = output.warnings;
 
     reporter.emit("metrics", "computing metrics");
-    let (stats, top) = metrics::compute(&mut nodes, &edges);
+    let conventions = crate::graph::conventions::Conventions::of(adapter.id.as_str());
+    let (stats, top) = metrics::compute(&mut nodes, &edges, conventions);
     let files = summaries::build_file_summaries(&nodes, &edges);
 
     warnings.extend(local_warnings);

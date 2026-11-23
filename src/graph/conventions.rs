@@ -1,13 +1,17 @@
-//! Per-language conventions the audit diff views rely on.
+//! Per-language conventions shared by the metrics, the builder and the audit views.
 //!
 //! Test markers, framework suffixes, abstract markers, shared plumbing and the
 //! reasons a changed file produces no symbol rows are all knowledge about a
-//! stack. They live here and nowhere else: views resolve one `Conventions` from
-//! the snapshot language and ask it questions instead of matching path strings.
+//! stack. They live here and nowhere else: callers resolve one `Conventions`
+//! from the snapshot language and ask it questions instead of matching path
+//! strings. Call edges that come from overrides, DI wiring or tests are
+//! classified here too, so metrics and views cannot disagree about them.
 
-use crate::graph::GraphNode;
+use std::collections::HashSet;
 
-pub(super) struct Conventions {
+use super::model::{EdgeKind, GraphEdge, GraphNode, NodeKind};
+
+pub(crate) struct Conventions {
     test_suffixes: &'static [&'static str],
     test_segments: &'static [&'static str],
     test_qname_prefixes: &'static [&'static str],
@@ -81,7 +85,7 @@ const GENERIC: Conventions = Conventions {
 };
 
 impl Conventions {
-    pub(super) fn of(language: &str) -> &'static Self {
+    pub(crate) fn of(language: &str) -> &'static Self {
         match language {
             "typescript" | "javascript" => &TYPESCRIPT,
             "rust" => &RUST,
@@ -91,7 +95,7 @@ impl Conventions {
         }
     }
 
-    pub(super) fn is_test_file(&self, path: &str) -> bool {
+    pub(crate) fn is_test_file(&self, path: &str) -> bool {
         self.test_suffixes.iter().any(|suffix| path.ends_with(suffix))
             || self
                 .test_segments
@@ -100,14 +104,14 @@ impl Conventions {
     }
 
     /// Test functions are entry points for the harness, not code without callers.
-    pub(super) fn is_test_node(&self, node: &GraphNode) -> bool {
+    pub(crate) fn is_test_node(&self, node: &GraphNode) -> bool {
         self.test_qname_prefixes
             .iter()
             .any(|prefix| node.qname.starts_with(prefix))
             || self.is_test_file(&node.file)
     }
 
-    pub(super) fn is_framework_file(&self, path: &str) -> bool {
+    pub(crate) fn is_framework_file(&self, path: &str) -> bool {
         self.framework_suffixes
             .iter()
             .any(|suffix| path.ends_with(suffix))
@@ -115,7 +119,7 @@ impl Conventions {
 
     /// Abstract methods have no body in the declaration head; the marker is the
     /// language's way of saying so.
-    pub(super) fn is_abstract(&self, node: &GraphNode) -> bool {
+    pub(crate) fn is_abstract(&self, node: &GraphNode) -> bool {
         let head = node.declaration.trim_start();
         self.abstract_markers
             .iter()
@@ -124,19 +128,100 @@ impl Conventions {
 
     /// Shared plumbing: decorators, pipes, DTOs. Calls into it are not a
     /// dependency of the feature.
-    pub(super) fn is_shared_file(&self, path: &str) -> bool {
+    pub(crate) fn is_shared_file(&self, path: &str) -> bool {
         self.shared_prefixes
             .iter()
             .any(|prefix| path.starts_with(prefix))
     }
 
     /// Why a changed file produced no symbol rows, when conventions can tell.
-    pub(super) fn silent_reason(&self, file: &str) -> &'static str {
+    pub(crate) fn silent_reason(&self, file: &str) -> &'static str {
         for (needle, label) in self.silent_reasons {
             if file.contains(needle) {
                 return label;
             }
         }
         "no-callable-delta"
+    }
+}
+
+/// Why a call edge is not a dependency of the code under review.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Bucket {
+    Override,
+    Test,
+    Wiring,
+    Duplicate,
+    Resignature,
+    Unverified,
+}
+
+impl Bucket {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Bucket::Override => "override",
+            Bucket::Test => "test",
+            Bucket::Wiring => "wiring",
+            Bucket::Duplicate => "duplicate",
+            Bucket::Resignature => "resignature",
+            Bucket::Unverified => "unverified",
+        }
+    }
+}
+
+/// Whether a call edge only reflects the language server linking overrides of a
+/// base method to every sibling implementation.
+pub(crate) fn is_override_link(
+    src: &GraphNode,
+    dst: &GraphNode,
+    pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> bool {
+    if src.name != dst.name {
+        return false;
+    }
+    if conventions.is_abstract(src) || conventions.is_abstract(dst) {
+        return true;
+    }
+    pairs.contains(&(dst.id.as_str(), src.id.as_str()))
+}
+
+/// Call edges of one snapshot as id pairs, for override detection: a pair that
+/// exists in both directions is an override link, not a call.
+pub(crate) fn call_pairs(edges: &[GraphEdge]) -> HashSet<(&str, &str)> {
+    edges
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Call && !edge.external)
+        .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+        .collect()
+}
+
+/// Whether a call edge carries a dependency: not an override link, not DI
+/// wiring, not a test.
+pub(crate) fn is_dependency(
+    src: &GraphNode,
+    dst: &GraphNode,
+    pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> bool {
+    wiring_exclusion(src, dst, pairs, conventions).is_none()
+}
+
+/// Why a call edge is not a real dependency, or `None` when it is one.
+pub(crate) fn wiring_exclusion(
+    src: &GraphNode,
+    dst: &GraphNode,
+    pairs: &HashSet<(&str, &str)>,
+    conventions: &Conventions,
+) -> Option<Bucket> {
+    if is_override_link(src, dst, pairs, conventions) {
+        Some(Bucket::Override)
+    } else if conventions.is_test_file(&src.file) || conventions.is_test_file(&dst.file) {
+        Some(Bucket::Test)
+    } else if matches!(src.kind, NodeKind::Constructor) || matches!(dst.kind, NodeKind::Constructor)
+    {
+        Some(Bucket::Wiring)
+    } else {
+        None
     }
 }

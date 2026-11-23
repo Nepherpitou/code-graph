@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::graph::conventions::{call_pairs, is_dependency, Conventions};
 use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind, NodeMetrics};
 
 use super::centrality::{betweenness, page_rank};
@@ -32,6 +33,7 @@ pub(crate) fn refactor_priority(node: &GraphNode) -> f64 {
 struct GraphAnalysis<'a> {
     nodes: &'a mut [GraphNode],
     edges: &'a [GraphEdge],
+    conventions: &'a Conventions,
     project: Vec<usize>,
     id_to_idx: HashMap<String, usize>,
     out_adj: Vec<HashSet<usize>>,
@@ -46,7 +48,11 @@ struct GraphAnalysis<'a> {
 }
 
 impl<'a> GraphAnalysis<'a> {
-    fn new(nodes: &'a mut [GraphNode], edges: &'a [GraphEdge]) -> Self {
+    fn new(
+        nodes: &'a mut [GraphNode],
+        edges: &'a [GraphEdge],
+        conventions: &'a Conventions,
+    ) -> Self {
         let project: Vec<usize> = nodes
             .iter()
             .enumerate()
@@ -72,6 +78,7 @@ impl<'a> GraphAnalysis<'a> {
         Self {
             nodes,
             edges,
+            conventions,
             project,
             id_to_idx,
             out_adj: vec![HashSet::new(); n],
@@ -87,6 +94,7 @@ impl<'a> GraphAnalysis<'a> {
     }
 
     fn collect_edges(&mut self) {
+        let pairs = call_pairs(self.edges);
         for edge in self.edges {
             if edge.external {
                 continue;
@@ -99,24 +107,19 @@ impl<'a> GraphAnalysis<'a> {
             };
             match edge.kind {
                 EdgeKind::Call => {
-                    self.out_adj[source].insert(target);
-                    self.in_adj[target].insert(source);
-                    self.call_out[source] += edge.sites;
-                    self.call_in[target] += edge.sites;
-                    let known = edge
-                        .call_sites
-                        .iter()
-                        .filter(|site| site.result_used.is_some())
-                        .count() as u32;
-                    let used = edge
-                        .call_sites
-                        .iter()
-                        .filter(|site| site.result_used == Some(true))
-                        .count() as u32;
-                    self.known_sites[source] += known;
-                    self.ignored_sites[source] += known - used;
-                    self.nodes[source].metrics.consumes_results += used;
-                    self.nodes[target].metrics.provides_results += used;
+                    // Overrides, DI wiring and tests are call sites, but they are
+                    // not dependencies: reach, fan-in/out, cycles and centrality
+                    // must not grow because a method overrides a base one.
+                    if is_dependency(
+                        &self.nodes[source],
+                        &self.nodes[target],
+                        &pairs,
+                        self.conventions,
+                    ) {
+                        self.out_adj[source].insert(target);
+                        self.in_adj[target].insert(source);
+                    }
+                    self.add_call_site(edge, source, target);
                 }
                 EdgeKind::Data => {
                     self.data_out[source].insert(target);
@@ -133,6 +136,27 @@ impl<'a> GraphAnalysis<'a> {
                 NodeKind::Function | NodeKind::Method | NodeKind::Constructor
             );
         }
+    }
+
+    /// Site counters keep counting excluded edges: a method used only by its
+    /// tests still has callers, it just has no dependencies.
+    fn add_call_site(&mut self, edge: &GraphEdge, source: usize, target: usize) {
+        self.call_out[source] += edge.sites;
+        self.call_in[target] += edge.sites;
+        let known = edge
+            .call_sites
+            .iter()
+            .filter(|site| site.result_used.is_some())
+            .count() as u32;
+        let used = edge
+            .call_sites
+            .iter()
+            .filter(|site| site.result_used == Some(true))
+            .count() as u32;
+        self.known_sites[source] += known;
+        self.ignored_sites[source] += known - used;
+        self.nodes[source].metrics.consumes_results += used;
+        self.nodes[target].metrics.provides_results += used;
     }
 
     fn compute_degrees(&mut self) {
@@ -308,6 +332,11 @@ impl<'a> GraphAnalysis<'a> {
             let node = &self.nodes[*index];
             self.nodes[*index].metrics.dead_code_candidate = node.metrics.call_in == 0
                 && node.metrics.module_refs == 0
+                // Controllers, modules and providers are wired by decorators the
+                // call graph cannot see; a method without callers there is a route
+                // or a hook, not a dead helper.
+                && !self.conventions.is_framework_file(&node.file)
+                && !self.conventions.is_test_node(node)
                 && !node.exported
                 && !node.is_entry_like
                 && !node.name.starts_with('_')
@@ -556,8 +585,12 @@ fn bfs(start: usize, adjacency: &[HashSet<usize>]) -> u32 {
     seen.len() as u32
 }
 
-pub fn compute(nodes: &mut [GraphNode], edges: &[GraphEdge]) -> (GraphStats, GraphTop) {
-    let mut analysis = GraphAnalysis::new(nodes, edges);
+pub fn compute(
+    nodes: &mut [GraphNode],
+    edges: &[GraphEdge],
+    conventions: &Conventions,
+) -> (GraphStats, GraphTop) {
+    let mut analysis = GraphAnalysis::new(nodes, edges, conventions);
     analysis.collect_edges();
     analysis.compute_degrees();
     analysis.compute_reachability();
@@ -622,5 +655,75 @@ mod tests {
         let central = refactor_priority(&node(1, 6, 36, 0, 0));
         assert!(leaf < 3.0);
         assert!(central > leaf);
+    }
+
+    fn symbol(id: &str, name: &str, kind: NodeKind, file: &str) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            name: name.to_string(),
+            qname: name.to_string(),
+            kind,
+            file: file.to_string(),
+            line: 1,
+            end_line: 2,
+            loc: 1,
+            sloc: 1,
+            params: 0,
+            cyclomatic: 1,
+            exported: false,
+            external: false,
+            lazy: false,
+            synthetic: false,
+            is_entry_like: false,
+            declaration: String::new(),
+            metrics: NodeMetrics::default(),
+        }
+    }
+
+    fn call(source: &str, target: &str) -> GraphEdge {
+        GraphEdge {
+            id: format!("call:{source}->{target}"),
+            source: source.to_string(),
+            target: target.to_string(),
+            kind: EdgeKind::Call,
+            sites: 1,
+            result_used: crate::graph::ResultUsage::All,
+            external: false,
+            inferred: None,
+            call_sites: vec![crate::graph::CallSite {
+                file: String::new(),
+                line: 1,
+                character: 0,
+                result_used: Some(true),
+            }],
+        }
+    }
+
+    #[test]
+    fn overrides_are_not_dependencies_or_cycles() {
+        let mut nodes = vec![
+            symbol("a#run", "run", NodeKind::Method, "a.ts"),
+            symbol("b#run", "run", NodeKind::Method, "b.ts"),
+        ];
+        let edges = vec![call("a#run", "b#run"), call("b#run", "a#run")];
+        let (stats, _) = compute(&mut nodes, &edges, Conventions::of("typescript"));
+        assert_eq!(stats.cycles, 0);
+        assert_eq!(nodes[0].metrics.call_fan_in, 0);
+        assert_eq!(nodes[0].metrics.call_fan_out, 0);
+        assert!(!nodes[0].metrics.in_cycle);
+        assert_eq!(nodes[0].metrics.call_in, 1);
+    }
+
+    #[test]
+    fn framework_files_are_not_dead_code_but_private_helpers_are() {
+        let mut nodes = vec![
+            symbol("p#handle", "handle", NodeKind::Method, "src/users/users.provider.ts"),
+            symbol("h#helper", "helper", NodeKind::Function, "src/users/helpers.ts"),
+            symbol("t#case", "tests.case", NodeKind::Function, "src/lib.rs"),
+        ];
+        compute(&mut nodes, &[], Conventions::of("typescript"));
+        assert!(!nodes[0].metrics.dead_code_candidate);
+        assert!(nodes[1].metrics.dead_code_candidate);
+        assert!(!nodes[2].metrics.dead_code_candidate);
     }
 }
