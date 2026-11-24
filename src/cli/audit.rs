@@ -1284,7 +1284,7 @@ fn metrics(args: AuditMetricsArgs) -> Result<()> {
             println!();
             println!("These are definitions, not smell thresholds.");
             println!("`audit top --order-by <metric>` ranks the existing values;");
-            println!("`audit diff --view reach|fan-in|twins` reports how they moved in a change.");
+            println!("`audit diff --view reach|fan-in|similar` reports how they moved in a change.");
         }
     }
     Ok(())

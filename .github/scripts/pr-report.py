@@ -161,9 +161,9 @@ def header(meta: dict, summary: dict, views: dict) -> list[str]:
     if chokes:
         names = ", ".join(f"`{row['symbol']}`" for row in chokes[:2])
         signals.append(f"choke point: {names}")
-    twins = rows(views["twins"])
-    if twins:
-        signals.append(f"{len(twins)} duplicated call sets")
+    similar_rows = rows(views["similar"])
+    if similar_rows:
+        signals.append(f"{len(similar_rows)} similar call sets")
 
     lines = [f"## code-graph: {title}", ""]
     lines.append(f"`{sha}` · {churn} lines in {files} files · {shape}")
@@ -240,25 +240,29 @@ def section_fan_in(view: dict, limit: int) -> list[str]:
     return out
 
 
-def section_twins(view: dict, limit: int) -> list[str]:
+def section_similar(view: dict, limit: int) -> list[str]:
     items = rows(view)[:limit]
     if not items:
         return []
     total = view.get("totalRows", len(items))
-    out = ["", f"### Duplicated call sets ({total})", ""]
-    out.append("Changed symbols that call exactly what another symbol calls.")
+    out = ["", f"### Similar call sets ({total})", ""]
+    out.append("Changed symbols whose direct calls largely overlap another symbol's.")
     out.append("")
-    out.append("| symbol | calls the same as | shared calls | file |")
-    out.append("|---|---|---:|---|")
+    out.append("| symbol | similar to | shared | share | calls in common | file |")
+    out.append("|---|---|---:|---:|---|---|")
     for item in items:
         file = "same file" if item.get("sameFile") else f"`{item.get('bFile', '')}`"
+        calls = ", ".join(item.get("sharedCalls") or [])
         out.append(
-            f"| `{item['a']}` | `{item['b']}` | {item.get('shared', 0)} | {file} |"
+            f"| `{item['a']}` | `{item['b']}` | {item.get('shared', 0)} | "
+            f"{100 * float(item.get('containment', 0)):.0f}% | {calls} | {file} |"
         )
     out.extend([""] + spoiler([
-        "**shared calls**: identical set of direct callees, at least three.",
-        "Pairs that already matched in the base snapshot are not listed: this is new duplication.",
-        "A copy that works is still a copy; look for one caller to fold into the other.",
+        "**shared**: direct callees both symbols call, compared by node id.",
+        "**share**: shared / the smaller of the two call sets; at least 50%.",
+        "Both sides call at least three symbols, and a port and its implementation count once.",
+        "A direct call between the two, and pairs that already matched in the base snapshot, are skipped.",
+        "One best match per changed symbol: read the shared calls to tell a copy from shared plumbing.",
     ]))
     return out
 
@@ -522,7 +526,7 @@ def main() -> int:
     os.environ["VIEW_DIR"] = args.dir
     views = {name: load(args.dir, f"{name}.json") for name in (
         "summary", "uses", "dependencies", "callers", "affected",
-        "reach", "fan", "twins",
+        "reach", "fan", "similar",
         "review", "areas", "symbols", "filtered", "silent", "dead",
     )}
     summary = views["summary"]
@@ -540,7 +544,7 @@ def main() -> int:
         or rows(views["symbols"])
         or rows(views["dead"])
         or rows(views["reach"])
-        or rows(views["twins"])
+        or rows(views["similar"])
         or len(rows(views["areas"])) > 1
         or views["filtered"].get("newCallEdges", 0)
     ):
@@ -556,7 +560,7 @@ def main() -> int:
     lines: list[str] = header(meta, summary, views)
     lines += section_reach(views["reach"], 6)
     lines += section_fan_in(views["fan"], 6)
-    lines += section_twins(views["twins"], 6)
+    lines += section_similar(views["similar"], 6)
     lines += section_uses(views["uses"], 10)
     lines += section_dependencies(views["dependencies"], 6)
     lines += section_callers(views["callers"], 8)

@@ -209,8 +209,8 @@ pub(super) enum AuditDiffView {
     Reach,
     /// Who depends on the changed symbols now.
     FanIn,
-    /// Changed symbols whose outgoing calls match another symbol's.
-    Twins,
+    /// Changed symbols whose outgoing calls largely overlap another symbol's.
+    Similar,
     /// Changed files that carry no symbol-level rows.
     SilentFiles,
 }

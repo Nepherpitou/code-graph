@@ -67,7 +67,7 @@ pub(super) fn view_label(view: AuditDiffView) -> &'static str {
         AuditDiffView::DeadCode => "dead-code",
         AuditDiffView::Reach => "reach",
         AuditDiffView::FanIn => "fan-in",
-        AuditDiffView::Twins => "twins",
+        AuditDiffView::Similar => "similar",
         AuditDiffView::SilentFiles => "silent-files",
     }
 }
@@ -975,87 +975,135 @@ fn status_label(status: DiffStatus) -> &'static str {
     }
 }
 
-/// Outgoing call target names per symbol, keyed by `(file, qname)` so the same
-/// symbol lines up across snapshots even when its id changes. Names, not ids:
-/// the LSP reports a port interface and its implementation as two callees.
-fn dependency_sets<'a>(
-    forward: &HashMap<&'a str, Vec<&'a str>>,
-    keys: &HashMap<&'a str, NodeKey<'a>>,
-    names: &HashMap<&'a str, &'a str>,
-) -> HashMap<NodeKey<'a>, Vec<&'a str>> {
-    let mut out = HashMap::new();
-    for (id, targets) in forward {
-        let Some(key) = keys.get(id).copied() else {
+/// A symbol comparable to another: a real callable in project code whose file
+/// is not a test or a framework shell. A paired symbol has to clear the same
+/// bar, otherwise every controller and DI module becomes a candidate.
+fn comparable(node: &GraphNode, conventions: &Conventions) -> bool {
+    is_callable(node.kind)
+        && !node.synthetic
+        && !node.external
+        && !conventions.is_test_node(node)
+        && !conventions.is_framework_file(&node.file)
+        && !node.qname.ends_with(".constructor")
+}
+
+/// Outgoing call targets per symbol, keyed by node id. The LSP reports a port
+/// interface and its implementation as two callees of the same call site, so a
+/// name that has an abstract target keeps only the abstract ones: one semantic
+/// dependency, one id.
+pub(super) fn dependency_graph<'a>(
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    verify: Option<&mut Verification>,
+    conventions: &Conventions,
+) -> HashMap<&'a str, HashSet<&'a str>> {
+    let mut grouped: HashMap<&'a str, HashMap<&'a str, Vec<&'a GraphNode>>> = HashMap::new();
+    for edge in graph_call_edges(nodes, edges, verify, conventions) {
+        if edge.src.id == edge.dst.id
+            || !comparable(edge.src, conventions)
+            || edge.dst.external
+            || !is_callable(edge.dst.kind)
+        {
             continue;
-        };
-        let mut deps: Vec<&'a str> = targets
-            .iter()
-            .filter_map(|target| names.get(target).copied())
-            .collect();
-        deps.sort_unstable();
-        deps.dedup();
-        out.insert(key, deps);
+        }
+        grouped
+            .entry(edge.src.id.as_str())
+            .or_default()
+            .entry(edge.dst.name.as_str())
+            .or_default()
+            .push(edge.dst);
+    }
+    let mut out = HashMap::new();
+    for (source, by_name) in grouped {
+        let mut kept = HashSet::new();
+        for targets in by_name.values() {
+            let abstract_targets: Vec<&GraphNode> = targets
+                .iter()
+                .copied()
+                .filter(|target| conventions.is_abstract(target))
+                .collect();
+            if abstract_targets.is_empty() {
+                kept.extend(targets.iter().map(|target| target.id.as_str()));
+            } else {
+                kept.extend(abstract_targets.iter().map(|target| target.id.as_str()));
+            }
+        }
+        out.insert(source, kept);
     }
     out
 }
 
-/// Changed symbols that call exactly what another symbol calls.
-pub(super) fn twins(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
+/// Both functions already called the same symbols before the change, so their
+/// overlap is not new.
+fn matched_in_base<'a>(
+    a: &GraphNode,
+    b: &GraphNode,
+    old_sets: &'a HashMap<NodeKey<'a>, HashSet<NodeKey<'a>>>,
+    old_by_qname: &'a HashMap<&'a str, HashSet<NodeKey<'a>>>,
+) -> bool {
+    let before_a = old_sets
+        .get(&(a.file.as_str(), a.qname.as_str()))
+        .or_else(|| old_by_qname.get(a.qname.as_str()));
+    let before_b = old_sets
+        .get(&(b.file.as_str(), b.qname.as_str()))
+        .or_else(|| old_by_qname.get(b.qname.as_str()));
+    matches!((before_a, before_b), (Some(left), Some(right)) if left == right)
+}
+
+/// A changed symbol whose direct calls largely overlap another symbol's.
+pub(super) fn similar(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
     let conventions = Conventions::of(&input.to.meta.language);
     let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
     let mut verify_old = input
         .verify_calls
         .then(|| Verification::new(&input.from.meta.root));
-    let new_forward = adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions).0;
-    let old_forward = adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions).0;
+    let new_sets = dependency_graph(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions);
+    let old_sets = dependency_graph(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions);
 
-    let new_keys: HashMap<&str, NodeKey<'_>> = input
+    let new_by_id: HashMap<&str, &GraphNode> = input
         .new_nodes
         .iter()
-        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .map(|node| (node.id.as_str(), node))
         .collect();
-    let old_keys: HashMap<&str, NodeKey<'_>> = input
+    let old_by_id: HashMap<&str, &GraphNode> = input
         .old_nodes
         .iter()
-        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+        .map(|node| (node.id.as_str(), node))
         .collect();
-    let new_names: HashMap<&str, &str> = input
-        .new_nodes
+    let old_key_sets: HashMap<NodeKey<'_>, HashSet<NodeKey<'_>>> = old_sets
         .iter()
-        .map(|node| (node.id.as_str(), node.name.as_str()))
+        .filter_map(|(id, targets)| {
+            let node = old_by_id.get(id)?;
+            let mut keys = HashSet::new();
+            for target in targets {
+                let target = old_by_id.get(target)?;
+                keys.insert((target.file.as_str(), target.qname.as_str()));
+            }
+            Some(((node.file.as_str(), node.qname.as_str()), keys))
+        })
         .collect();
-    let old_names: HashMap<&str, &str> = input
-        .old_nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node.name.as_str()))
-        .collect();
-    let new_deps = dependency_sets(&new_forward, &new_keys, &new_names);
-    let old_deps = dependency_sets(&old_forward, &old_keys, &old_names);
-    let old_deps_by_qname: HashMap<&str, Vec<&str>> = old_deps
-        .iter()
-        .map(|(key, deps)| (key.1, deps.clone()))
-        .collect();
-    let touched: HashMap<NodeKey<'_>, DiffStatus> = touched_ids(input, graphs)
+    let mut old_by_qname: HashMap<&str, HashSet<NodeKey<'_>>> = HashMap::new();
+    for (key, targets) in &old_key_sets {
+        old_by_qname.entry(key.1).or_insert_with(|| targets.clone());
+    }
+
+    let touched: HashMap<&str, DiffStatus> = touched_ids(input, graphs)
         .into_iter()
         .filter(|(id, _)| {
             graphs
                 .node(id)
-                .is_some_and(|node| !conventions.is_test_node(node))
+                .is_some_and(|node| comparable(node, conventions))
         })
-        .filter_map(|(id, status)| new_keys.get(id).map(|key| (*key, status)))
         .collect();
 
-    // Two symbols sharing fewer calls can match by accident; three is already
-    // a duplicated pipeline.
-    const MIN_SHARED: usize = 3;
-    let rows = find_twins(&new_deps, &old_deps, &old_deps_by_qname, &touched, MIN_SHARED);
+    let rows = find_similar(&new_sets, &new_by_id, &old_key_sets, &old_by_qname, &touched);
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
     output_rows(
         input,
-        AuditDiffView::Twins,
-        &["symbol", "calls the same as", "shared", "same file"],
-        &[40, 40, 8, 10],
+        AuditDiffView::Similar,
+        &["symbol", "similar to", "shared", "share", "calls in common", "same file"],
+        &[38, 38, 7, 7, 46, 8],
         shown
             .iter()
             .map(|pair| {
@@ -1064,6 +1112,8 @@ pub(super) fn twins(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
                         pair.a.1.to_string(),
                         pair.b.1.to_string(),
                         pair.shared.to_string(),
+                        format!("{:.0}%", pair.containment * 100.0),
+                        pair.shared_calls.join(", "),
                         if pair.a.0 == pair.b.0 { "yes".into() } else { String::new() },
                     ],
                     json!({
@@ -1074,12 +1124,22 @@ pub(super) fn twins(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
                         "bFile": pair.b.0,
                         "bStatus": pair.right.map(status_label),
                         "shared": pair.shared,
+                        "containment": pair.containment,
+                        "sharedCalls": pair.shared_calls,
                         "sameFile": pair.a.0 == pair.b.0,
                     }),
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+        json!({
+            "totalRows": rows.len(),
+            "truncated": rows.len() > shown.len(),
+            "thresholds": {
+                "minFanOut": SIMILAR_MIN_FANOUT,
+                "minShared": SIMILAR_MIN_SHARED,
+                "minContainment": SIMILAR_MIN_CONTAINMENT,
+            },
+        }),
     )
 }
 
@@ -1089,64 +1149,129 @@ pub(super) fn absorbed_callers(before: usize, after: usize, modules: usize) -> b
     after >= 3 && after > before + 1 && modules >= 2
 }
 
-pub(super) struct TwinPair<'a> {
+/// Calls below this count can match by accident, and a symbol with one or two
+/// callees is a wrapper, not a pipeline.
+const SIMILAR_MIN_FANOUT: usize = 3;
+/// The smallest overlap worth a row: three calls into the same symbols.
+const SIMILAR_MIN_SHARED: usize = 3;
+/// Share of the smaller callee set that has to be common: half of the skeleton.
+const SIMILAR_MIN_CONTAINMENT: f64 = 0.5;
+
+pub(super) struct SimilarPair<'a> {
     pub(super) a: NodeKey<'a>,
     pub(super) b: NodeKey<'a>,
     pub(super) left: Option<DiffStatus>,
     pub(super) right: Option<DiffStatus>,
     pub(super) shared: usize,
+    pub(super) containment: f64,
+    pub(super) shared_calls: Vec<&'a str>,
 }
 
-/// A pair of symbols with identical outgoing calls, at least one side touched
-/// by the change, and the pair not already matching in the base snapshot. A
-/// family of three or more such symbols is boilerplate (CRUD siblings, logger
-/// wrappers), not a copy, so it is skipped.
-pub(super) fn find_twins<'a>(
-    new_deps: &HashMap<NodeKey<'a>, Vec<&'a str>>,
-    old_deps: &HashMap<NodeKey<'a>, Vec<&'a str>>,
-    old_by_qname: &HashMap<&'a str, Vec<&'a str>>,
-    touched: &HashMap<NodeKey<'a>, DiffStatus>,
-    min_shared: usize,
-) -> Vec<TwinPair<'a>> {
-    let mut groups: HashMap<&[&'a str], Vec<NodeKey<'a>>> = HashMap::new();
-    for (key, deps) in new_deps {
-        if deps.len() >= min_shared {
-            groups.entry(deps.as_slice()).or_default().push(*key);
+/// For every touched symbol its closest partner in the snapshot. Both sides
+/// need at least [`SIMILAR_MIN_FANOUT`] callees and at least
+/// [`SIMILAR_MIN_SHARED`] of them in common; the common part must cover half of
+/// the smaller set. A direct call between the two disqualifies the pair — a
+/// helper and its caller share calls by construction — as does a pair that
+/// already matched in the base snapshot.
+pub(super) fn find_similar<'a>(
+    new_sets: &HashMap<&'a str, HashSet<&'a str>>,
+    new_by_id: &HashMap<&'a str, &'a GraphNode>,
+    old_sets: &HashMap<NodeKey<'a>, HashSet<NodeKey<'a>>>,
+    old_by_qname: &HashMap<&'a str, HashSet<NodeKey<'a>>>,
+    touched: &HashMap<&'a str, DiffStatus>,
+) -> Vec<SimilarPair<'a>> {
+    let ids: Vec<&'a str> = new_sets
+        .iter()
+        .filter(|(_, targets)| targets.len() >= SIMILAR_MIN_FANOUT)
+        .map(|(id, _)| *id)
+        .collect();
+    let mut rows: Vec<SimilarPair<'a>> = Vec::new();
+    for (&source, &status) in touched {
+        let Some(set_a) = new_sets.get(source) else {
+            continue;
+        };
+        let Some(node_a) = new_by_id.get(source).copied() else {
+            continue;
+        };
+        if set_a.len() < SIMILAR_MIN_FANOUT {
+            continue;
+        }
+        let mut best: Option<SimilarPair<'a>> = None;
+        for &other in &ids {
+            if source == other || set_a.contains(other) || new_sets[other].contains(source) {
+                continue;
+            }
+            let set_b = &new_sets[other];
+            let shared = set_a.intersection(set_b).count();
+            if shared < SIMILAR_MIN_SHARED {
+                continue;
+            }
+            let containment = shared as f64 / set_a.len().min(set_b.len()) as f64;
+            if containment < SIMILAR_MIN_CONTAINMENT {
+                continue;
+            }
+            let Some(node_b) = new_by_id.get(other).copied() else {
+                continue;
+            };
+            if matched_in_base(node_a, node_b, old_sets, old_by_qname) {
+                continue;
+            }
+            let mut shared_calls: Vec<&str> = set_a
+                .intersection(set_b)
+                .map(|id| new_by_id.get(id).map_or(*id, |node| node.qname.as_str()))
+                .collect();
+            shared_calls.sort_unstable();
+            let candidate = SimilarPair {
+                a: (node_a.file.as_str(), node_a.qname.as_str()),
+                b: (node_b.file.as_str(), node_b.qname.as_str()),
+                left: Some(status),
+                right: touched.get(other).copied(),
+                shared,
+                containment,
+                shared_calls,
+            };
+            let better = best.as_ref().is_none_or(|current| {
+                candidate.containment > current.containment
+                    || (candidate.containment == current.containment
+                        && (candidate.shared > current.shared
+                            || (candidate.shared == current.shared
+                                && candidate.b.1 < current.b.1)))
+            });
+            if better {
+                best = Some(candidate);
+            }
+        }
+        if let Some(pair) = best {
+            rows.push(pair);
         }
     }
-    let mut rows = Vec::new();
-    for members in groups.values() {
-        if members.len() != 2 {
-            continue;
+    let mut seen = HashSet::new();
+    rows.retain(|pair| {
+        let key = if pair.a <= pair.b {
+            (pair.a, pair.b)
+        } else {
+            (pair.b, pair.a)
+        };
+        seen.insert(key)
+    });
+    for pair in &mut rows {
+        let swapped = (pair.left.is_none() && pair.right.is_some())
+            || (pair.left.is_some() == pair.right.is_some() && pair.b < pair.a);
+        if swapped {
+            std::mem::swap(&mut pair.a, &mut pair.b);
+            std::mem::swap(&mut pair.left, &mut pair.right);
         }
-        let (a, b) = (members[0], members[1]);
-        let left_status = touched.get(&a).copied();
-        let right_status = touched.get(&b).copied();
-        if left_status.is_none() && right_status.is_none() {
-            continue;
-        }
-        // Equal on both sides means the duplication predates the change; a moved
-        // symbol is found by qname because its file changed.
-        let before_a = old_deps.get(&a).or_else(|| old_by_qname.get(a.1));
-        let before_b = old_deps.get(&b).or_else(|| old_by_qname.get(b.1));
-        if before_a
-            .zip(before_b)
-            .is_some_and(|(left, right)| left == right)
-        {
-            continue;
-        }
-        rows.push(TwinPair {
-            a,
-            b,
-            left: left_status,
-            right: right_status,
-            shared: new_deps.get(&a).map(Vec::len).unwrap_or(0),
-        });
     }
     rows.sort_by(|left, right| {
-        let same_file = |pair: &TwinPair<'a>| pair.a.0 == pair.b.0;
+        let same_file = |pair: &SimilarPair<'a>| pair.a.0 == pair.b.0;
         same_file(right)
             .cmp(&same_file(left))
+            .then_with(|| {
+                right
+                    .containment
+                    .partial_cmp(&left.containment)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| right.shared.cmp(&left.shared))
             .then_with(|| left.a.1.cmp(right.a.1))
     });

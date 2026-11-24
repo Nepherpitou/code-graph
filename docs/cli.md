@@ -151,7 +151,7 @@ comment formatting, so callers compose whatever report they need.
 | `dead-code` | dead-code candidates that appeared in the target snapshot, with a DI/decorator flag; constants are skipped when either snapshot truncated the reference crawl (`constantsTruncated` in JSON) |
 | `reach` | changed callables whose transitive fan-out moved (or that lost all callers or live in framework files): reach and fan-out before → after, plus the calls they added |
 | `fan-in` | changed callables: caller count before → after, instability before → after, number of calling modules, and a `choke-point` flag when a symbol absorbed callers from several modules in one change |
-| `twins` | changed symbols whose outgoing call targets exactly match another symbol's (at least three shared targets, compared by callee name so a port and its implementation count once); pairs that already matched in the base snapshot, and families of three or more, are skipped |
+| `similar` | changed callables whose direct calls largely overlap another symbol's: both sides call at least three symbols, at least three of them are the same node ids, and the common part covers at least half of the smaller call set; a direct call between the two, and pairs that already matched in the base snapshot, are skipped; one best match per changed symbol, with the shared calls listed |
 | `silent-files` | changed files that carry no symbol rows (ports, DTOs, schemas, tests) |
 
 `callers`, `affected`, `areas` and `silent-files` require `--changed-files`; the other views use

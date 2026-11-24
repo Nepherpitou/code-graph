@@ -612,7 +612,7 @@ pub(super) async fn run(view: AuditDiffView, input: &ViewInput<'_>) -> Result<Ex
         AuditDiffView::DeadCode => views::dead_code(input),
         AuditDiffView::Reach => views::reach(input, &graphs),
         AuditDiffView::FanIn => views::fan_in(input, &graphs),
-        AuditDiffView::Twins => views::twins(input, &graphs),
+        AuditDiffView::Similar => views::similar(input, &graphs),
         AuditDiffView::SilentFiles => views::silent_files(input),
         AuditDiffView::Symbols => bail!("symbols view is handled by the diff itself"),
     }
@@ -735,42 +735,191 @@ mod tests {
         assert_eq!(cycles[0].len(), 2);
     }
 
-    #[test]
-    fn twins_report_only_new_duplication() {
-        let shared = vec!["x", "y", "z"];
-        let mut new_deps: HashMap<(&str, &str), Vec<&str>> = HashMap::new();
-        new_deps.insert(("f.ts", "a"), shared.clone());
-        new_deps.insert(("f.ts", "b"), shared.clone());
-        new_deps.insert(("g.ts", "c"), vec!["x", "y"]);
-        let mut old_deps = HashMap::new();
-        old_deps.insert(("f.ts", "a"), shared.clone());
-        old_deps.insert(("f.ts", "b"), shared.clone());
-        let mut touched = HashMap::new();
-        touched.insert(("f.ts", "a"), DiffStatus::Changed);
+    fn similar_sets<'a>(entries: &[(&'a str, &[&'a str])]) -> HashMap<&'a str, HashSet<&'a str>> {
+        entries
+            .iter()
+            .map(|(id, deps)| (*id, deps.iter().copied().collect()))
+            .collect()
+    }
 
-        let no_qnames = HashMap::new();
-        assert!(views::find_twins(&new_deps, &old_deps, &no_qnames, &touched, 3).is_empty());
+    fn node_index(nodes: &[GraphNode]) -> HashMap<&str, &GraphNode> {
+        nodes.iter().map(|node| (node.id.as_str(), node)).collect()
+    }
 
-        old_deps.clear();
-        let rows = views::find_twins(&new_deps, &old_deps, &no_qnames, &touched, 3);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].shared, 3);
-        assert!(["a", "b"].contains(&rows[0].a.1));
-        assert!(["a", "b"].contains(&rows[0].b.1));
-        assert_eq!(rows[0].left.is_some(), rows[0].right.is_none());
+    fn touched(ids: &[&'static str]) -> HashMap<&'static str, DiffStatus> {
+        ids.iter().map(|id| (*id, DiffStatus::Changed)).collect()
     }
 
     #[test]
-    fn twins_skip_boilerplate_families() {
-        let shared = vec!["x", "y", "z"];
-        let mut new_deps: HashMap<(&str, &str), Vec<&str>> = HashMap::new();
-        for name in ["a", "b", "c"] {
-            new_deps.insert(("f.ts", name), shared.clone());
-        }
-        let mut touched = HashMap::new();
-        touched.insert(("f.ts", "a"), DiffStatus::Changed);
+    fn similar_reports_the_closest_partner_of_a_touched_symbol() {
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+        ];
+        let sets = similar_sets(&[
+            ("a#f", &["x", "y", "z", "q"][..]),
+            ("b#g", &["x", "y", "z", "w"][..]),
+        ]);
+        let rows = views::find_similar(
+            &sets,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].shared, 3);
+        assert!((rows[0].containment - 0.75).abs() < 1e-9);
+        assert_eq!(rows[0].b.1, "b");
+        assert_eq!(rows[0].shared_calls, vec!["x", "y", "z"]);
+        assert!(rows[0].left.is_some());
+        assert!(rows[0].right.is_none());
+    }
 
-        assert!(views::find_twins(&new_deps, &HashMap::new(), &HashMap::new(), &touched, 3).is_empty());
+    #[test]
+    fn similar_skips_leaves_and_direct_calls() {
+        let leaves = similar_sets(&[("a#f", &["x", "y"][..]), ("b#g", &["x", "y"][..])]);
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+        ];
+        assert!(views::find_similar(
+            &leaves,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        )
+        .is_empty());
+
+        let caller = similar_sets(&[
+            ("a#f", &["x", "y", "z", "b#g"][..]),
+            ("b#g", &["x", "y", "z"][..]),
+        ]);
+        assert!(views::find_similar(
+            &caller,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn similar_skips_pairs_that_already_matched_in_the_base() {
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+        ];
+        let sets = similar_sets(&[
+            ("a#f", &["x", "y", "z"][..]),
+            ("b#g", &["x", "y", "z"][..]),
+        ]);
+        let old: HashSet<(&str, &str)> = [("h.ts", "x"), ("h.ts", "y"), ("h.ts", "z")]
+            .into_iter()
+            .collect();
+        let mut base = HashMap::new();
+        base.insert(("f.ts", "a"), old.clone());
+        base.insert(("g.ts", "b"), old);
+        assert!(views::find_similar(
+            &sets,
+            &node_index(&nodes),
+            &base,
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn similar_keeps_only_the_best_partner_and_one_row_per_pair() {
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+            node("c#h", "c", NodeKind::Method, "h.ts", "c() {"),
+        ];
+        let sets = similar_sets(&[
+            ("a#f", &["x", "y", "z", "q"][..]),
+            ("b#g", &["x", "y", "z"][..]),
+            ("c#h", &["x", "y", "z", "q"][..]),
+        ]);
+        let rows = views::find_similar(
+            &sets,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].b.1, "c");
+
+        let both = views::find_similar(
+            &sets,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f", "c#h"]),
+        );
+        assert_eq!(both.len(), 1);
+    }
+
+    #[test]
+    fn similar_accepts_half_overlap_and_rejects_less() {
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+        ];
+        let half = similar_sets(&[
+            ("a#f", &["x", "y", "z", "m", "n", "o"][..]),
+            ("b#g", &["x", "y", "z"][..]),
+        ]);
+        assert_eq!(
+            views::find_similar(
+                &half,
+                &node_index(&nodes),
+                &HashMap::new(),
+                &HashMap::new(),
+                &touched(&["a#f"]),
+            )
+            .len(),
+            1
+        );
+
+        let less = similar_sets(&[
+            ("a#f", &["x", "y", "z", "m", "n", "o", "t"][..]),
+            ("b#g", &["x", "y", "z", "p", "q", "r", "s"][..]),
+        ]);
+        assert!(views::find_similar(
+            &less,
+            &node_index(&nodes),
+            &HashMap::new(),
+            &HashMap::new(),
+            &touched(&["a#f"]),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn dependency_graph_keeps_one_id_per_port_name_and_skips_framework_files() {
+        let nodes = vec![
+            node("c#f", "f", NodeKind::Function, "c.ts", "function f() {"),
+            node("d#g", "g", NodeKind::Function, "d.ts", "function g() {"),
+            node("k#h", "h", NodeKind::Function, "c.controller.ts", "h() {"),
+            node("p#mark", "mark", NodeKind::Method, "ports/p.ts", "abstract mark(): void;"),
+            node("i#mark", "mark", NodeKind::Method, "infra/i.ts", "mark(): void {"),
+        ];
+        let edges = vec![
+            edge("c#f", "p#mark"),
+            edge("c#f", "i#mark"),
+            edge("d#g", "p#mark"),
+            edge("k#h", "p#mark"),
+        ];
+        let sets = views::dependency_graph(&nodes, &edges, None, Conventions::of("typescript"));
+        assert_eq!(sets["c#f"].len(), 1);
+        assert!(sets["c#f"].contains("p#mark"));
+        assert_eq!(sets["d#g"].len(), 1);
+        assert!(!sets.contains_key("k#h"));
     }
 
     #[test]

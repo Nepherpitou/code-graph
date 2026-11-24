@@ -84,6 +84,7 @@ jobs:
             run_view dependencies.json dependencies --limit 6
             run_view callers.json callers --limit 8
             run_view affected.json affected --limit 8
+            run_view similar.json similar --limit 8
             run_view areas.json areas --limit 6
             run_view filtered.json filtered-edges
             run_view silent.json silent-files --limit 1
