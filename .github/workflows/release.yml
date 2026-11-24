@@ -60,10 +60,10 @@ jobs:
             os: ubuntu-latest
             linker: zig
           # macOS 14 runners were retired in November 2026. Build each
-          # architecture on its own image: macos-15 is arm64, macos-15-intel
-          # is x86_64.
+          # architecture on its own image: macos-26 is the current arm64
+          # image, macos-15-intel is the current standard x86_64 one.
           - target: aarch64-apple-darwin
-            os: macos-15
+            os: macos-26
             linker: native
           - target: x86_64-apple-darwin
             os: macos-15-intel
