@@ -116,6 +116,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # gh release create --generate-notes runs git for the notes; without a
+      # checkout the publish job is not a repository.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: dist
