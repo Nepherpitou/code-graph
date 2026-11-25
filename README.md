@@ -47,7 +47,7 @@ table is in [How analysis works](docs/analysis.md#language-servers).
 | [Graph semantics](docs/graph-semantics.md) | nodes, edge kinds, result usage, stable identifiers |
 | [Analysis](docs/analysis.md) | pipeline, language servers, tsgo/tsrs, readiness |
 | [Metrics](docs/metrics.md) | definitions, formulas, per-language complexity rules |
-| [Reading metric deltas](docs/metrics-interpretation.ru.md) | практические пороги и что делать с ростом |
+| [Reading metric deltas (Russian)](docs/metrics-interpretation.ru.md) | practical thresholds and what to do when a metric grows |
 | [Internals](docs/internals.md) | repository layout, run model, where metrics live, fixtures |
 | [Releases](docs/releases.md) | tagging, targets, asset verification |
 | [Limits](docs/limits.md) | what static LSP analysis cannot see |
