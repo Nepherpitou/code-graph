@@ -347,14 +347,82 @@ pub(super) fn callers(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
     })
 }
 
+struct DiffGraphs<'a> {
+    conventions: &'static Conventions,
+    forward: super::Adjacency<'a>,
+    reverse: super::Adjacency<'a>,
+    old_forward: super::Adjacency<'a>,
+    old_reverse: super::Adjacency<'a>,
+    old_by_key: HashMap<NodeKey<'a>, &'a str>,
+    old_by_qname: HashMap<&'a str, Vec<&'a str>>,
+    old_keys: HashMap<&'a str, NodeKey<'a>>,
+    new_keys: HashMap<&'a str, NodeKey<'a>>,
+}
+
+impl<'a> DiffGraphs<'a> {
+    fn build(input: &'a ViewInput<'a>, with_old: bool) -> Self {
+        let conventions = Conventions::of(&input.to.meta.language);
+        let mut verify_new = input
+            .verify_calls
+            .then(|| Verification::new(&input.to.meta.root));
+        let (forward, reverse) = adjacency(
+            input.new_nodes,
+            input.new_edges,
+            verify_new.as_mut(),
+            &conventions,
+        );
+        let (old_forward, old_reverse, old_by_key) = if with_old {
+            let mut verify_old = input
+                .verify_calls
+                .then(|| Verification::new(&input.from.meta.root));
+            let (forward, reverse) = adjacency(
+                input.old_nodes,
+                input.old_edges,
+                verify_old.as_mut(),
+                &conventions,
+            );
+            let by_key = input
+                .old_nodes
+                .iter()
+                .map(|node| ((node.file.as_str(), node.qname.as_str()), node.id.as_str()))
+                .collect();
+            (forward, reverse, by_key)
+        } else {
+            (HashMap::new(), HashMap::new(), HashMap::new())
+        };
+        let old_keys = input
+            .old_nodes
+            .iter()
+            .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+            .collect();
+        let new_keys = input
+            .new_nodes
+            .iter()
+            .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
+            .collect();
+        Self {
+            conventions,
+            forward,
+            reverse,
+            old_forward,
+            old_reverse,
+            old_by_key,
+            old_by_qname: qname_index(input.old_nodes),
+            old_keys,
+            new_keys,
+        }
+    }
+
+    fn old_id(&self, key: NodeKey<'a>) -> Option<&'a str> {
+        old_id_for(&self.old_by_key, &self.old_by_qname, key)
+    }
+}
+
 pub(super) fn affected(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
     let changed_files = require_changed_files(input, "affected")?;
     let touched = touched_ids(input, graphs);
-    let mut verify = input
-        .verify_calls
-        .then(|| Verification::new(&input.to.meta.root));
-    let conventions = Conventions::of(&input.to.meta.language);
-    let (forward, reverse) = adjacency(input.new_nodes, input.new_edges, verify.as_mut(), conventions);
+    let setup = DiffGraphs::build(input, false);
+    let (forward, reverse) = (&setup.forward, &setup.reverse);
 
     let mut counts: HashMap<&str, (u32, u32)> = HashMap::new();
     for (id, status) in &touched {
@@ -720,31 +788,11 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
 
 /// How far the changed entry points reach now, and what they started calling.
 pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
-    let conventions = Conventions::of(&input.to.meta.language);
-    let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
-    let mut verify_old = input
-        .verify_calls
-        .then(|| Verification::new(&input.from.meta.root));
-    let (new_forward, new_reverse) =
-        adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions);
-    let (old_forward, _) = adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions);
-
-    let old_by_key: HashMap<NodeKey<'_>, &str> = input
-        .old_nodes
-        .iter()
-        .map(|node| ((node.file.as_str(), node.qname.as_str()), node.id.as_str()))
-        .collect();
-    let old_by_qname = qname_index(input.old_nodes);
-    let old_keys: HashMap<&str, NodeKey<'_>> = input
-        .old_nodes
-        .iter()
-        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
-        .collect();
-    let new_keys: HashMap<&str, NodeKey<'_>> = input
-        .new_nodes
-        .iter()
-        .map(|node| (node.id.as_str(), (node.file.as_str(), node.qname.as_str())))
-        .collect();
+    let setup = DiffGraphs::build(input, true);
+    let conventions = setup.conventions;
+    let (new_forward, new_reverse) = (&setup.forward, &setup.reverse);
+    let old_forward = &setup.old_forward;
+    let (old_keys, new_keys) = (&setup.old_keys, &setup.new_keys);
 
     let mut rows: Vec<(NodeKey<'_>, DiffStatus, usize, usize, usize, usize, Vec<&str>)> = Vec::new();
     for (id, status) in touched_ids(input, graphs) {
@@ -759,8 +807,7 @@ pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
         let key = (node.file.as_str(), node.qname.as_str());
         let reach_after = reach_from(id, &new_forward).len();
         let fan_out_after = new_forward.get(id).map(Vec::len).unwrap_or(0);
-        let (reach_before, fan_out_before, mut added) =
-            match old_id_for(&old_by_key, &old_by_qname, key) {
+        let (reach_before, fan_out_before, mut added) = match setup.old_id(key) {
             Some(old_id) => {
                 let before = reach_from(old_id, &old_forward).len();
                 let fan_out = old_forward.get(old_id).map(Vec::len).unwrap_or(0);
@@ -842,21 +889,10 @@ pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
 /// Who depends on the changed symbols now: caller count, stability, and whether
 /// a symbol turned into a single choke point.
 pub(super) fn fan_in(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
-    let conventions = Conventions::of(&input.to.meta.language);
-    let mut verify_new = input.verify_calls.then(|| Verification::new(&input.to.meta.root));
-    let mut verify_old = input
-        .verify_calls
-        .then(|| Verification::new(&input.from.meta.root));
-    let (new_forward, new_reverse) =
-        adjacency(input.new_nodes, input.new_edges, verify_new.as_mut(), conventions);
-    let (old_forward, old_reverse) =
-        adjacency(input.old_nodes, input.old_edges, verify_old.as_mut(), conventions);
-    let old_by_key: HashMap<NodeKey<'_>, &str> = input
-        .old_nodes
-        .iter()
-        .map(|node| ((node.file.as_str(), node.qname.as_str()), node.id.as_str()))
-        .collect();
-    let old_by_qname = qname_index(input.old_nodes);
+    let setup = DiffGraphs::build(input, true);
+    let conventions = setup.conventions;
+    let (new_forward, new_reverse) = (&setup.forward, &setup.reverse);
+    let (old_forward, old_reverse) = (&setup.old_forward, &setup.old_reverse);
 
     fn instability(forward: &HashMap<&str, Vec<&str>>, reverse: &HashMap<&str, Vec<&str>>, id: &str) -> f64 {
         let out = forward.get(id).map(Vec::len).unwrap_or(0) as f64;
@@ -887,8 +923,7 @@ pub(super) fn fan_in(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitC
             .map(|caller| area(&caller.file))
             .collect::<HashSet<_>>()
             .len();
-        let (callers_before, stability_before) =
-            match old_id_for(&old_by_key, &old_by_qname, key) {
+        let (callers_before, stability_before) = match setup.old_id(key) {
             Some(old_id) => (
                 old_reverse.get(old_id).map(Vec::len).unwrap_or(0),
                 instability(&old_forward, &old_reverse, old_id),
@@ -1259,6 +1294,69 @@ fn shared_counts<'a>(
     counts
 }
 
+fn similar_candidate<'a>(
+    source: &'a str,
+    other: &'a str,
+    shared: usize,
+    status: DiffStatus,
+    set_a: &HashSet<&'a str>,
+    new_sets: &HashMap<&'a str, HashSet<&'a str>>,
+    new_by_id: &HashMap<&'a str, &'a GraphNode>,
+    old_sets: &HashMap<NodeKey<'a>, HashSet<NodeKey<'a>>>,
+    old_by_qname: &HashMap<&'a str, HashSet<NodeKey<'a>>>,
+) -> Option<SimilarPair<'a>> {
+    if shared < SIMILAR_MIN_SHARED {
+        return None;
+    }
+    let set_b = new_sets.get(other)?;
+    if set_a.contains(other) || set_b.contains(source) {
+        return None;
+    }
+    let containment = shared as f64 / set_a.len().min(set_b.len()) as f64;
+    if containment < SIMILAR_MIN_CONTAINMENT {
+        return None;
+    }
+    let node_a = new_by_id.get(source).copied()?;
+    let node_b = new_by_id.get(other).copied()?;
+    if matched_in_base(node_a, node_b, old_sets, old_by_qname) {
+        return None;
+    }
+    let mut shared_calls: Vec<&str> = set_a
+        .intersection(set_b)
+        .map(|id| new_by_id.get(id).map_or(*id, |node| node.qname.as_str()))
+        .collect();
+    shared_calls.sort_unstable();
+    Some(SimilarPair {
+        a: (node_a.file.as_str(), node_a.qname.as_str()),
+        b: (node_b.file.as_str(), node_b.qname.as_str()),
+        left: Some(status),
+        right: None,
+        shared,
+        containment,
+        shared_calls,
+    })
+}
+
+fn dedupe_and_orient(rows: &mut Vec<SimilarPair<'_>>) {
+    let mut seen = HashSet::new();
+    rows.retain(|pair| {
+        let key = if pair.a <= pair.b {
+            (pair.a, pair.b)
+        } else {
+            (pair.b, pair.a)
+        };
+        seen.insert(key)
+    });
+    for pair in rows.iter_mut() {
+        let swapped = (pair.left.is_none() && pair.right.is_some())
+            || (pair.left.is_some() == pair.right.is_some() && pair.b < pair.a);
+        if swapped {
+            std::mem::swap(&mut pair.a, &mut pair.b);
+            std::mem::swap(&mut pair.left, &mut pair.right);
+        }
+    }
+}
+
 fn better_partner(current: Option<&SimilarPair<'_>>, candidate: &SimilarPair<'_>) -> bool {
     current.is_none_or(|current| {
         candidate.containment > current.containment
@@ -1289,46 +1387,26 @@ pub(super) fn find_similar<'a>(
         let Some(set_a) = new_sets.get(source) else {
             continue;
         };
-        let Some(node_a) = new_by_id.get(source).copied() else {
-            continue;
-        };
         if set_a.len() < SIMILAR_MIN_FANOUT {
             continue;
         }
         let counts = shared_counts(set_a, &by_callee, source);
         let mut best: Option<SimilarPair<'a>> = None;
         for (other, shared) in counts {
-            if shared < SIMILAR_MIN_SHARED {
-                continue;
-            }
-            if set_a.contains(other) || new_sets[other].contains(source) {
-                continue;
-            }
-            let set_b = &new_sets[other];
-            let containment = shared as f64 / set_a.len().min(set_b.len()) as f64;
-            if containment < SIMILAR_MIN_CONTAINMENT {
-                continue;
-            }
-            let Some(node_b) = new_by_id.get(other).copied() else {
-                continue;
-            };
-            if matched_in_base(node_a, node_b, old_sets, old_by_qname) {
-                continue;
-            }
-            let mut shared_calls: Vec<&str> = set_a
-                .intersection(set_b)
-                .map(|id| new_by_id.get(id).map_or(*id, |node| node.qname.as_str()))
-                .collect();
-            shared_calls.sort_unstable();
-            let candidate = SimilarPair {
-                a: (node_a.file.as_str(), node_a.qname.as_str()),
-                b: (node_b.file.as_str(), node_b.qname.as_str()),
-                left: Some(status),
-                right: touched.get(other).copied(),
+            let Some(mut candidate) = similar_candidate(
+                source,
+                other,
                 shared,
-                containment,
-                shared_calls,
+                status,
+                set_a,
+                new_sets,
+                new_by_id,
+                old_sets,
+                old_by_qname,
+            ) else {
+                continue;
             };
+            candidate.right = touched.get(other).copied();
             if better_partner(best.as_ref(), &candidate) {
                 best = Some(candidate);
             }
@@ -1337,23 +1415,7 @@ pub(super) fn find_similar<'a>(
             rows.push(pair);
         }
     }
-    let mut seen = HashSet::new();
-    rows.retain(|pair| {
-        let key = if pair.a <= pair.b {
-            (pair.a, pair.b)
-        } else {
-            (pair.b, pair.a)
-        };
-        seen.insert(key)
-    });
-    for pair in &mut rows {
-        let swapped = (pair.left.is_none() && pair.right.is_some())
-            || (pair.left.is_some() == pair.right.is_some() && pair.b < pair.a);
-        if swapped {
-            std::mem::swap(&mut pair.a, &mut pair.b);
-            std::mem::swap(&mut pair.left, &mut pair.right);
-        }
-    }
+    dedupe_and_orient(&mut rows);
     rows.sort_by(|left, right| {
         let same_file = |pair: &SimilarPair<'a>| pair.a.0 == pair.b.0;
         same_file(right)

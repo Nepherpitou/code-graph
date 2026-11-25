@@ -6,6 +6,7 @@ mod audit;
 mod audit_diff;
 mod audit_views;
 mod inspect;
+mod snapshot;
 
 use std::fs;
 use std::path::PathBuf;

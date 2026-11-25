@@ -12,10 +12,10 @@ use std::process::ExitCode;
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
-use crate::analysis::{analyze, AnalyzeOptions};
+use crate::analysis::AnalyzeOptions;
 use crate::graph::conventions::Conventions;
 use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind};
-use crate::query::QueryService;
+use crate::query::{FocusSlice, QueryService};
 use crate::store::{GraphSummary, Store};
 
 use super::args::{
@@ -24,6 +24,7 @@ use super::args::{
     AuditTopArgs,
 };
 use super::audit_diff;
+use super::snapshot;
 use super::audit_views::{
     all_similar_pairs, SimilarRow, SIMILAR_MIN_CONTAINMENT, SIMILAR_MIN_FANOUT, SIMILAR_MIN_SHARED,
 };
@@ -76,21 +77,15 @@ pub(super) fn analysis_options(
 
 async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
     let root = common.root.clone();
-    let db = common
-        .db
-        .clone()
-        .unwrap_or_else(|| root.join(".code-graph").join("code-graph.db"));
+    let db = snapshot::db_path(&root, common.db.clone());
 
     if let Some(selector) = &common.snapshot {
-        if !db.exists() {
-            bail!(
-                "snapshot database not found: {}\nRun `code-graph audit {}` first.",
-                db.display(),
-                root.display()
-            );
-        }
-        let store = Store::open(&db).await?;
-        let summary = resolve_snapshot(&store, selector).await?;
+        let store = snapshot::open_store(
+            &db,
+            &format!("Run `code-graph audit {}` first.", root.display()),
+        )
+        .await?;
+        let summary = snapshot::resolve(&store, selector, false).await?;
         return Ok(AuditContext {
             store,
             graph_id: summary.id,
@@ -103,8 +98,7 @@ async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
     }
 
     if !common.refresh && db.exists() {
-        let store = Store::open(&db).await?;
-        if let Some(summary) = store.latest_graph().await? {
+        if let Some((store, summary)) = snapshot::latest(&db).await? {
             return Ok(AuditContext {
                 graph_id: summary.id,
                 summary,
@@ -113,51 +107,13 @@ async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
         }
     }
 
-    eprintln!("[code-graph] analyzing {} ...", root.display());
-    let report = analyze(analysis_options(&root, &common.analysis)?).await?;
-    let store = Store::open(&db).await?;
-    let graph_id = store.insert_report(&report).await?;
-    let summary = store
-        .graph(graph_id)
-        .await?
-        .ok_or_else(|| anyhow!("snapshot #{graph_id} was stored but cannot be read back"))?;
-    eprintln!(
-        "[code-graph] stored snapshot #{graph_id} in {} ({} ms)",
-        db.display(),
-        report.meta.duration_ms
-    );
+    let options = analysis_options(&root, &common.analysis)?;
+    let (store, summary) = snapshot::build(&root, &db, options).await?;
     Ok(AuditContext {
         store,
-        graph_id,
+        graph_id: summary.id,
         summary,
     })
-}
-
-async fn resolve_snapshot(store: &Store, selector: &str) -> Result<GraphSummary> {
-    if selector.eq_ignore_ascii_case("latest") {
-        return store
-            .latest_graph()
-            .await?
-            .ok_or_else(|| anyhow!("no snapshots in database"));
-    }
-    let id: i64 = selector
-        .parse()
-        .map_err(|_| anyhow!("snapshot must be a numeric id or \"latest\", got {selector:?}"))?;
-    if let Some(summary) = store.graph(id).await? {
-        return Ok(summary);
-    }
-    let available = store
-        .graphs()
-        .await?
-        .iter()
-        .map(|graph| graph.id.to_string())
-        .take(8)
-        .collect::<Vec<_>>()
-        .join(", ");
-    if available.is_empty() {
-        bail!("snapshot #{id} not found; database has no snapshots")
-    }
-    bail!("snapshot #{id} not found; available: {available}")
 }
 
 async fn load_nodes(context: &AuditContext) -> Result<Vec<GraphNode>> {
@@ -417,6 +373,35 @@ fn print_cycle_edges(group: &CycleGroup) {
     }
 }
 
+fn print_hotspot_rows(summary: &GraphSummary) {
+    let rows = summary
+        .top
+        .hotspot
+        .iter()
+        .filter(|row| row.value > 0.0)
+        .take(5)
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        println!("  no ranked callables");
+        return;
+    }
+    println!(
+        "  {:>3}  {} {} hotspot",
+        "#",
+        pad("symbol", 34),
+        pad("file", 40)
+    );
+    for (index, row) in rows.iter().enumerate() {
+        println!(
+            "  {:>3}  {} {} {:>7}",
+            index + 1,
+            pad(&row.name, 34),
+            pad(&row.file, 40),
+            metric(row.value)
+        );
+    }
+}
+
 async fn overview(common: AuditCommon) -> Result<()> {
     let context = open_context(&common).await?;
     let nodes = load_nodes(&context).await?;
@@ -463,33 +448,7 @@ async fn overview(common: AuditCommon) -> Result<()> {
 
             println!();
             println!("Top by hotspot score");
-            let hotspot_rows = context
-                .summary
-                .top
-                .hotspot
-                .iter()
-                .filter(|row| row.value > 0.0)
-                .take(5)
-                .collect::<Vec<_>>();
-            if hotspot_rows.is_empty() {
-                println!("  no ranked callables");
-            } else {
-                println!(
-                    "  {:>3}  {} {} hotspot",
-                    "#",
-                    pad("symbol", 34),
-                    pad("file", 40)
-                );
-                for (index, row) in hotspot_rows.iter().enumerate() {
-                    println!(
-                        "  {:>3}  {} {} {:>7}",
-                        index + 1,
-                        pad(&row.name, 34),
-                        pad(&row.file, 40),
-                        metric(row.value)
-                    );
-                }
-            }
+            print_hotspot_rows(&context.summary);
 
             println!();
             println!("Cycles");
@@ -649,89 +608,91 @@ async fn top(args: AuditTopArgs) -> Result<()> {
                     .collect::<Vec<_>>(),
             }))?;
         }
-        AuditFormat::Text => {
-            text_header(&context.summary);
-            println!();
-            if rows.is_empty() {
-                println!("No callables match this filter.");
-                return Ok(());
-            }
-            println!(
-                "Top {} by {} ({})",
-                rows.len(),
-                args.order_by.label(),
-                if args.ascending {
-                    "ascending"
-                } else {
-                    "descending"
-                }
-            );
-            if args.min.is_some() {
-                println!(
-                    "  filter: {} ≥ {}",
-                    args.order_by.label(),
-                    args.min.unwrap_or_default()
-                );
-            }
-            let show_in = !matches!(
-                args.order_by,
-                AuditOrder::FanIn | AuditOrder::CallFanIn | AuditOrder::DataFanIn
-            );
-            let show_out = !matches!(
-                args.order_by,
-                AuditOrder::FanOut | AuditOrder::CallFanOut | AuditOrder::DataFanOut
-            );
-            let show_cyclo = !matches!(args.order_by, AuditOrder::Complexity);
-            let show_loc = !matches!(args.order_by, AuditOrder::Loc | AuditOrder::Sloc);
-
-            print!(
-                "  {:>3}  {} {} {:>8}",
-                "#",
-                pad("symbol", 32),
-                pad("file", 38),
-                args.order_by.label()
-            );
-            if show_in {
-                print!(" {:>5}", "in");
-            }
-            if show_out {
-                print!(" {:>5}", "out");
-            }
-            if show_cyclo {
-                print!(" {:>6}", "cyclo");
-            }
-            if show_loc {
-                print!(" {:>5}", "loc");
-            }
-            println!();
-            for (index, node) in rows.iter().enumerate() {
-                print!(
-                    "  {:>3}  {} {} {:>8}",
-                    index + 1,
-                    pad(&node.qname, 32),
-                    pad(&node.file, 38),
-                    metric(args.order_by.value(node))
-                );
-                if show_in {
-                    print!(" {:>5}", node.metrics.fan_in);
-                }
-                if show_out {
-                    print!(" {:>5}", node.metrics.fan_out);
-                }
-                if show_cyclo {
-                    print!(" {:>6}", node.cyclomatic);
-                }
-                if show_loc {
-                    print!(" {:>5}", node.loc);
-                }
-                println!();
-            }
-            println!();
-            println!("  metric: {}", args.order_by.label());
-            println!("  next:   code-graph audit focus <symbol>");
-        }
+        AuditFormat::Text => print_top_text(&context.summary, &args, &rows),
     }
     Ok(())
+}
+
+fn print_top_text(summary: &GraphSummary, args: &AuditTopArgs, rows: &[&GraphNode]) {
+    text_header(summary);
+    println!();
+    if rows.is_empty() {
+        println!("No callables match this filter.");
+        return;
+    }
+    println!(
+        "Top {} by {} ({})",
+        rows.len(),
+        args.order_by.label(),
+        if args.ascending {
+            "ascending"
+        } else {
+            "descending"
+        }
+    );
+    if args.min.is_some() {
+        println!(
+            "  filter: {} ≥ {}",
+            args.order_by.label(),
+            args.min.unwrap_or_default()
+        );
+    }
+    let show_in = !matches!(
+        args.order_by,
+        AuditOrder::FanIn | AuditOrder::CallFanIn | AuditOrder::DataFanIn
+    );
+    let show_out = !matches!(
+        args.order_by,
+        AuditOrder::FanOut | AuditOrder::CallFanOut | AuditOrder::DataFanOut
+    );
+    let show_cyclo = !matches!(args.order_by, AuditOrder::Complexity);
+    let show_loc = !matches!(args.order_by, AuditOrder::Loc | AuditOrder::Sloc);
+
+    print!(
+        "  {:>3}  {} {} {:>8}",
+        "#",
+        pad("symbol", 32),
+        pad("file", 38),
+        args.order_by.label()
+    );
+    if show_in {
+        print!(" {:>5}", "in");
+    }
+    if show_out {
+        print!(" {:>5}", "out");
+    }
+    if show_cyclo {
+        print!(" {:>6}", "cyclo");
+    }
+    if show_loc {
+        print!(" {:>5}", "loc");
+    }
+    println!();
+    for (index, node) in rows.iter().enumerate() {
+        print!(
+            "  {:>3}  {} {} {:>8}",
+            index + 1,
+            pad(&node.qname, 32),
+            pad(&node.file, 38),
+            metric(args.order_by.value(node))
+        );
+        if show_in {
+            print!(" {:>5}", node.metrics.fan_in);
+        }
+        if show_out {
+            print!(" {:>5}", node.metrics.fan_out);
+        }
+        if show_cyclo {
+            print!(" {:>6}", node.cyclomatic);
+        }
+        if show_loc {
+            print!(" {:>5}", node.loc);
+        }
+        println!();
+    }
+    println!();
+    println!("  metric: {}", args.order_by.label());
+    println!("  next:   code-graph audit focus <symbol>");
 }
 
 fn resolve_focus(args: &AuditFocusArgs, nodes: &[GraphNode]) -> Result<GraphNode> {
@@ -859,6 +820,71 @@ fn relation_json(relation: &Relation) -> Value {
     })
 }
 
+fn print_focus_metrics(node: &GraphNode) {
+    println!();
+    println!("Metrics");
+    println!(
+        "  priority       {:>8}",
+        metric(node.metrics.refactor_priority)
+    );
+    println!("  hotspot        {:>8}", metric(node.metrics.hotspot));
+    println!("  fan-in         {:>8}", node.metrics.fan_in);
+    println!("  fan-out        {:>8}", node.metrics.fan_out);
+    println!(
+        "  call-in/out    {:>8}",
+        format!("{}/{}", node.metrics.call_fan_in, node.metrics.call_fan_out)
+    );
+    println!(
+        "  data-in/out    {:>8}",
+        format!("{}/{}", node.metrics.data_fan_in, node.metrics.data_fan_out)
+    );
+    println!("  transitive-in  {:>8}", node.metrics.transitive_fan_in);
+    println!("  transitive-out {:>8}", node.metrics.transitive_fan_out);
+    println!("  cyclomatic     {:>8}", node.cyclomatic);
+    println!("  loc            {:>8}", node.loc);
+    println!("  sloc           {:>8}", node.sloc);
+    println!("  params         {:>8}", node.params);
+    println!("  ifc            {:>8}", metric(node.metrics.ifc));
+    println!("  betweenness    {:>8}", metric(node.metrics.betweenness));
+    println!("  instability    {:>8}", metric(node.metrics.instability));
+    println!(
+        "  ignored result {:>7.1}%",
+        node.metrics.result_ignored_ratio * 100.0
+    );
+}
+
+fn print_focus_route(
+    focus_slice: &FocusSlice,
+    by_id: &HashMap<&str, &GraphNode>,
+    route: &[String],
+) {
+    println!();
+    println!("Route");
+    if focus_slice.entry.is_none() && focus_slice.exit.is_none() {
+        println!("  no entry/exit route found");
+        return;
+    }
+    if let Some(entry) = focus_slice.entry.as_deref() {
+        let entry = by_id
+            .get(entry)
+            .map(|node| node.qname.as_str())
+            .unwrap_or(entry);
+        println!("  entry  {entry}");
+    }
+    if let Some(exit) = focus_slice.exit.as_deref() {
+        let exit = by_id
+            .get(exit)
+            .map(|node| node.qname.as_str())
+            .unwrap_or(exit);
+        println!("  exit   {exit}");
+    }
+    if route.is_empty() {
+        println!("  path   (route not included)");
+    } else {
+        println!("  path   {}", route.join(" → "));
+    }
+}
+
 fn print_relations(label: &str, relations: &[Relation], limit: usize) {
     println!("{} ({})", label, relations.len());
     if relations.is_empty() {
@@ -945,65 +971,12 @@ async fn focus(args: AuditFocusArgs) -> Result<()> {
                     node.metrics.scc, node.metrics.scc_size
                 );
             }
-            println!();
-            println!("Metrics");
-            println!(
-                "  priority       {:>8}",
-                metric(node.metrics.refactor_priority)
-            );
-            println!("  hotspot        {:>8}", metric(node.metrics.hotspot));
-            println!("  fan-in         {:>8}", node.metrics.fan_in);
-            println!("  fan-out        {:>8}", node.metrics.fan_out);
-            println!(
-                "  call-in/out    {:>8}",
-                format!("{}/{}", node.metrics.call_fan_in, node.metrics.call_fan_out)
-            );
-            println!(
-                "  data-in/out    {:>8}",
-                format!("{}/{}", node.metrics.data_fan_in, node.metrics.data_fan_out)
-            );
-            println!("  transitive-in  {:>8}", node.metrics.transitive_fan_in);
-            println!("  transitive-out {:>8}", node.metrics.transitive_fan_out);
-            println!("  cyclomatic     {:>8}", node.cyclomatic);
-            println!("  loc            {:>8}", node.loc);
-            println!("  sloc           {:>8}", node.sloc);
-            println!("  params         {:>8}", node.params);
-            println!("  ifc            {:>8}", metric(node.metrics.ifc));
-            println!("  betweenness    {:>8}", metric(node.metrics.betweenness));
-            println!("  instability    {:>8}", metric(node.metrics.instability));
-            println!(
-                "  ignored result {:>7.1}%",
-                node.metrics.result_ignored_ratio * 100.0
-            );
+            print_focus_metrics(&node);
             println!();
             print_relations("Callers", &callers, limit);
             println!();
             print_relations("Callees", &callees, limit);
-            println!();
-            println!("Route");
-            if focus_slice.entry.is_none() && focus_slice.exit.is_none() {
-                println!("  no entry/exit route found");
-            } else {
-                if let Some(entry) = focus_slice.entry.as_deref() {
-                    let entry = by_id
-                        .get(entry)
-                        .map(|node| node.qname.as_str())
-                        .unwrap_or(entry);
-                    println!("  entry  {entry}");
-                }
-                if let Some(exit) = focus_slice.exit.as_deref() {
-                    let exit = by_id
-                        .get(exit)
-                        .map(|node| node.qname.as_str())
-                        .unwrap_or(exit);
-                    println!("  exit   {exit}");
-                }
-                if route.is_empty() {
-                    println!("  path   (route not included)");
-                } else {
-                    println!("  path   {}", route.join(" → "));
-                }
-            }
+            print_focus_route(&focus_slice, &by_id, &route);
             println!();
             println!("Next");
             println!(

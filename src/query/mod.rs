@@ -659,53 +659,14 @@ impl QueryService {
     ) -> Result<GraphSlice> {
         let depth = depth.min(8);
         let limit = limit.clamp(1, 5000);
-        let capacity = limit.min(index.keys.len());
-        let mut visited: HashSet<usize> = HashSet::with_capacity(capacity);
-        let mut queue: VecDeque<(usize, usize)> = VecDeque::with_capacity(capacity);
-        for root in roots {
-            if let Some(&node) = index.key_to_idx.get(root) {
-                if visited.insert(node) {
-                    queue.push_back((node, 0));
-                }
-            }
-        }
-        while let Some((node, distance)) = queue.pop_front() {
-            if distance >= depth || visited.len() >= limit {
-                continue;
-            }
-            for edge in index.out_all[node].iter().chain(index.in_all[node].iter()) {
-                let edge = &index.edges[*edge];
-                let next = if edge.source == node {
-                    edge.target
-                } else {
-                    edge.source
-                };
-                if visited.insert(next) {
-                    if visited.len() >= limit {
-                        break;
-                    }
-                    queue.push_back((next, distance + 1));
-                }
-            }
-        }
+        let visited = collect_slice_nodes(index, roots, depth, limit);
         let mut keys: Vec<String> = Vec::with_capacity(visited.len());
         keys.extend(
             visited
                 .iter()
                 .filter_map(|node| index.keys.get(*node).cloned()),
         );
-        let mut edge_ids: HashSet<i64> = HashSet::with_capacity(visited.len().saturating_mul(2));
-        for node in &visited {
-            for edge in index.out_all[*node]
-                .iter()
-                .chain(index.in_all[*node].iter())
-            {
-                let edge = &index.edges[*edge];
-                if visited.contains(&edge.source) && visited.contains(&edge.target) {
-                    edge_ids.insert(edge.id);
-                }
-            }
-        }
+        let edge_ids = collect_slice_edges(index, &visited);
         let mut edge_id_list: Vec<i64> = Vec::with_capacity(edge_ids.len());
         edge_id_list.extend(edge_ids);
         let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
@@ -846,22 +807,65 @@ impl QueryService {
                 .iter()
                 .filter_map(|node| index.keys.get(*node).cloned()),
         );
-        let mut edge_ids: HashSet<i64> = HashSet::with_capacity(visited.len().saturating_mul(2));
-        for node in &visited {
-            for edge in index.out_all[*node]
-                .iter()
-                .chain(index.in_all[*node].iter())
-            {
-                let edge = &index.edges[*edge];
-                if visited.contains(&edge.source) && visited.contains(&edge.target) {
-                    edge_ids.insert(edge.id);
-                }
-            }
-        }
+        let edge_ids = collect_slice_edges(index.as_ref(), &visited);
         let mut edge_id_list: Vec<i64> = Vec::with_capacity(edge_ids.len());
         edge_id_list.extend(edge_ids);
         let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
         let edges = self.store.edges_by_ids(graph_id, &edge_id_list).await?;
         Ok(GraphSlice { nodes, edges })
     }
+}
+
+fn collect_slice_nodes(
+    index: &GraphIndex,
+    roots: &[String],
+    depth: usize,
+    limit: usize,
+) -> HashSet<usize> {
+    let capacity = limit.min(index.keys.len());
+    let mut visited: HashSet<usize> = HashSet::with_capacity(capacity);
+    let mut queue: VecDeque<(usize, usize)> = VecDeque::with_capacity(capacity);
+    for root in roots {
+        if let Some(&node) = index.key_to_idx.get(root) {
+            if visited.insert(node) {
+                queue.push_back((node, 0));
+            }
+        }
+    }
+    while let Some((node, distance)) = queue.pop_front() {
+        if distance >= depth || visited.len() >= limit {
+            continue;
+        }
+        for edge in index.out_all[node].iter().chain(index.in_all[node].iter()) {
+            let edge = &index.edges[*edge];
+            let next = if edge.source == node {
+                edge.target
+            } else {
+                edge.source
+            };
+            if visited.insert(next) {
+                if visited.len() >= limit {
+                    break;
+                }
+                queue.push_back((next, distance + 1));
+            }
+        }
+    }
+    visited
+}
+
+fn collect_slice_edges(index: &GraphIndex, visited: &HashSet<usize>) -> HashSet<i64> {
+    let mut edge_ids: HashSet<i64> = HashSet::with_capacity(visited.len().saturating_mul(2));
+    for node in visited {
+        for edge in index.out_all[*node]
+            .iter()
+            .chain(index.in_all[*node].iter())
+        {
+            let edge = &index.edges[*edge];
+            if visited.contains(&edge.source) && visited.contains(&edge.target) {
+                edge_ids.insert(edge.id);
+            }
+        }
+    }
+    edge_ids
 }

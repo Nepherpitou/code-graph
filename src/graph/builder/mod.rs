@@ -61,6 +61,24 @@ pub(super) struct Resolved {
     created_callable: bool,
 }
 
+impl Resolved {
+    pub(super) fn external() -> Self {
+        Self {
+            id: None,
+            external: true,
+            created_callable: false,
+        }
+    }
+
+    pub(super) fn found(id: String, created_callable: bool) -> Self {
+        Self {
+            id: Some(id),
+            external: false,
+            created_callable,
+        }
+    }
+}
+
 // LSP SymbolKind values used by document symbols. These are protocol constants,
 // not language-specific guesses.
 pub(super) const LSP_MODULE: u32 = 2;

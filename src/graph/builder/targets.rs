@@ -6,6 +6,22 @@ use super::{
 };
 use crate::graph::model::{GraphNode, NodeKind, NodeMetrics};
 
+fn raw_symbol(
+    item: &CallHierarchyItem,
+    name: String,
+    kind: u32,
+    detail: String,
+) -> RawSymbol {
+    RawSymbol {
+        name,
+        kind,
+        detail,
+        range: item.range,
+        selection: item.selection_range,
+        children: Vec::new(),
+    }
+}
+
 fn node_kind_from_lsp(kind: u32) -> Option<NodeKind> {
     match kind {
         LSP_CLASS => Some(NodeKind::Constructor),
@@ -64,122 +80,93 @@ impl Builder {
     }
 
     pub(super) fn resolve_target(&mut self, item: &CallHierarchyItem) -> Resolved {
-        let rel = self.to_relative(&item.uri);
-        let Some(rel) = rel else {
-            return Resolved {
-                id: None,
-                external: true,
-                created_callable: false,
-            };
+        let Some(rel) = self.to_relative(&item.uri) else {
+            return Resolved::external();
         };
         let selection_key = format!(
             "{rel}#{}:{}",
             item.selection_range.start.line, item.selection_range.start.character
         );
         if let Some(id) = self.uri_selection.get(&selection_key) {
-            return Resolved {
-                id: Some(id.clone()),
-                external: false,
-                created_callable: false,
-            };
+            return Resolved::found(id.clone(), false);
         }
         let class_key = format!(
             "{rel}#{}:{}",
             item.range.start.line, item.range.start.character
         );
-        if let Some(id) = self.class_map.get(&class_key) {
-            return Resolved {
-                id: Some(id.clone()),
-                external: false,
-                created_callable: false,
-            };
+        if let Some(id) = self
+            .class_map
+            .get(&class_key)
+            .or_else(|| self.class_map.get(&selection_key))
+        {
+            return Resolved::found(id.clone(), false);
         }
-        let class_key_alt = selection_key;
-        if let Some(id) = self.class_map.get(&class_key_alt) {
-            return Resolved {
-                id: Some(id.clone()),
-                external: false,
-                created_callable: false,
-            };
-        }
-
         if let Some(containing_id) = self.caller_in_file(&rel, item.selection_range.start) {
-            let kind = node_kind_from_lsp(item.kind);
-            if let Some(kind) = kind {
-                if kind.is_callable() {
-                    if self.records.len() >= self.max_nodes {
-                        self.truncated = true;
-                        return Resolved {
-                            id: None,
-                            external: true,
-                            created_callable: false,
-                        };
-                    }
-                    let containing_qname = self
-                        .records
-                        .get(&containing_id)
-                        .map(|record| record.node.qname.clone())
-                        .unwrap_or_else(|| item.name.clone());
-                    let symbol = RawSymbol {
-                        name: item.name.clone(),
-                        kind: item.kind,
-                        detail: item.detail.clone().unwrap_or_default(),
-                        range: item.range,
-                        selection: item.selection_range,
-                        children: Vec::new(),
-                    };
-                    if let Some(id) = self.create_node(NodeSpec {
-                        symbol: &symbol,
-                        rel: &rel,
-                        qname: format!("{containing_qname}.{}", item.name),
-                        kind,
-                        parent_exported: false,
-                        synthetic: false,
-                        lazy: true,
-                    }) {
-                        return Resolved {
-                            id: Some(id),
-                            external: false,
-                            created_callable: true,
-                        };
-                    }
-                }
-            }
-            return Resolved {
-                id: Some(containing_id),
-                external: false,
-                created_callable: false,
-            };
+            return self.resolve_containing(item, &rel, containing_id);
         }
+        self.resolve_new(item, &rel)
+    }
 
+    fn resolve_containing(
+        &mut self,
+        item: &CallHierarchyItem,
+        rel: &str,
+        containing_id: String,
+    ) -> Resolved {
         let Some(kind) = node_kind_from_lsp(item.kind) else {
-            return Resolved {
-                id: None,
-                external: true,
-                created_callable: false,
-            };
+            return Resolved::found(containing_id, false);
+        };
+        if !kind.is_callable() {
+            return Resolved::found(containing_id, false);
+        }
+        if self.at_capacity() {
+            return Resolved::external();
+        }
+        let containing_qname = self
+            .records
+            .get(&containing_id)
+            .map(|record| record.node.qname.clone())
+            .unwrap_or_else(|| item.name.clone());
+        let symbol = raw_symbol(
+            item,
+            item.name.clone(),
+            item.kind,
+            item.detail.clone().unwrap_or_default(),
+        );
+        let qname = format!("{containing_qname}.{}", item.name);
+        match self.create_node(NodeSpec {
+            symbol: &symbol,
+            rel,
+            qname,
+            kind,
+            parent_exported: false,
+            synthetic: false,
+            lazy: true,
+        }) {
+            Some(id) => Resolved::found(id, true),
+            None => Resolved::found(containing_id, false),
+        }
+    }
+
+    fn resolve_new(&mut self, item: &CallHierarchyItem, rel: &str) -> Resolved {
+        let Some(kind) = node_kind_from_lsp(item.kind) else {
+            return Resolved::external();
         };
         if kind == NodeKind::Constructor && item.kind == LSP_CLASS {
-            if self.records.len() >= self.max_nodes {
-                self.truncated = true;
-                return Resolved {
-                    id: None,
-                    external: true,
-                    created_callable: false,
-                };
+            if self.at_capacity() {
+                return Resolved::external();
             }
-            let symbol = RawSymbol {
-                name: format!("{}.constructor", item.name),
-                kind: LSP_CONSTRUCTOR,
-                detail: "implicit constructor".to_string(),
-                range: item.range,
-                selection: item.selection_range,
-                children: Vec::new(),
-            };
+            let name = format!("{}.constructor", item.name);
+            let symbol = raw_symbol(
+                item,
+                name.clone(),
+                LSP_CONSTRUCTOR,
+                "implicit constructor".to_string(),
+            );
             let id = self.create_node(NodeSpec {
                 symbol: &symbol,
-                rel: &rel,
-                qname: format!("{}.constructor", item.name),
+                rel,
+                qname: name,
                 kind: NodeKind::Constructor,
                 parent_exported: false,
                 synthetic: true,
@@ -191,25 +178,18 @@ impl Builder {
                 created_callable: false,
             };
         }
-        if self.records.len() >= self.max_nodes {
-            self.truncated = true;
-            return Resolved {
-                id: None,
-                external: true,
-                created_callable: false,
-            };
+        if self.at_capacity() {
+            return Resolved::external();
         }
-        let symbol = RawSymbol {
-            name: item.name.clone(),
-            kind: item.kind,
-            detail: item.detail.clone().unwrap_or_default(),
-            range: item.range,
-            selection: item.selection_range,
-            children: Vec::new(),
-        };
+        let symbol = raw_symbol(
+            item,
+            item.name.clone(),
+            item.kind,
+            item.detail.clone().unwrap_or_default(),
+        );
         let id = self.create_node(NodeSpec {
             symbol: &symbol,
-            rel: &rel,
+            rel,
             qname: item.name.clone(),
             kind,
             parent_exported: false,
@@ -220,6 +200,15 @@ impl Builder {
             id,
             external: false,
             created_callable: kind.is_callable(),
+        }
+    }
+
+    fn at_capacity(&mut self) -> bool {
+        if self.records.len() >= self.max_nodes {
+            self.truncated = true;
+            true
+        } else {
+            false
         }
     }
 }

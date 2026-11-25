@@ -30,6 +30,14 @@ pub(crate) fn refactor_priority(node: &GraphNode) -> f64 {
     complexity * impact * (1.0 + instability)
 }
 
+struct EdgeTotals<'a> {
+    call_edges: Vec<&'a GraphEdge>,
+    data_edges: usize,
+    cross_file: usize,
+    global_known: u32,
+    global_used: u32,
+}
+
 struct GraphAnalysis<'a> {
     nodes: &'a mut [GraphNode],
     edges: &'a [GraphEdge],
@@ -199,7 +207,37 @@ impl<'a> GraphAnalysis<'a> {
         }
     }
 
-    fn compute_reachability(&mut self) {
+    fn component_labels(components: &[Vec<usize>], node_count: usize) -> Vec<usize> {
+    let mut component_of = vec![usize::MAX; node_count];
+    for (component_index, component) in components.iter().enumerate() {
+        for node in component {
+            component_of[*node] = component_index;
+        }
+    }
+    component_of
+}
+
+fn component_depths(order: &[usize], edges: &[HashSet<usize>]) -> Vec<u32> {
+    let mut depth = vec![0u32; edges.len()];
+    for component in order {
+        for next in &edges[*component] {
+            depth[*next] = depth[*next].max(depth[*component] + 1);
+        }
+    }
+    depth
+}
+
+fn component_heights(order: &[usize], edges: &[HashSet<usize>]) -> Vec<u32> {
+    let mut height = vec![0u32; edges.len()];
+    for component in order.iter().rev() {
+        for next in &edges[*component] {
+            height[*component] = height[*component].max(height[*next] + 1);
+        }
+    }
+    height
+}
+
+fn compute_reachability(&mut self) {
         let callable_count = self
             .project
             .iter()
@@ -235,14 +273,27 @@ impl<'a> GraphAnalysis<'a> {
             .map(|neighbors| neighbors.iter().copied().collect())
             .collect();
         let components = strongly_connected(&self.project, &out_vec);
-        let mut component_of = vec![usize::MAX; self.nodes.len()];
-        for (component_index, component) in components.iter().enumerate() {
-            for node in component {
-                component_of[*node] = component_index;
-            }
-        }
-        let component_count = components.len();
-        let mut component_edges: Vec<HashSet<usize>> = vec![HashSet::new(); component_count];
+        let component_of = Self::component_labels(&components, self.nodes.len());
+        let component_edges = self.component_edges(&component_of);
+        let order = topological_order(&component_edges);
+        let component_depth = Self::component_depths(&order, &component_edges);
+        let component_height = Self::component_heights(&order, &component_edges);
+        self.apply_component_metrics(
+            &components,
+            &component_of,
+            &component_depth,
+            &component_height,
+        );
+        components
+    }
+
+    fn component_edges(&self, component_of: &[usize]) -> Vec<HashSet<usize>> {
+        let mut component_edges: Vec<HashSet<usize>> = vec![HashSet::new(); component_of
+            .iter()
+            .copied()
+            .filter(|index| *index != usize::MAX)
+            .max()
+            .map_or(0, |last| last + 1)];
         for index in &self.project {
             let from = component_of[*index];
             if from == usize::MAX {
@@ -255,22 +306,16 @@ impl<'a> GraphAnalysis<'a> {
                 }
             }
         }
-        let order = topological_order(&component_edges);
-        let mut component_depth = vec![0u32; component_count];
-        for component in &order {
-            for next in &component_edges[*component] {
-                component_depth[*next] =
-                    component_depth[*next].max(component_depth[*component] + 1);
-            }
-        }
-        let mut component_height = vec![0u32; component_count];
-        for component in order.iter().rev() {
-            let mut height = 0;
-            for next in &component_edges[*component] {
-                height = height.max(component_height[*next] + 1);
-            }
-            component_height[*component] = height;
-        }
+        component_edges
+    }
+
+    fn apply_component_metrics(
+        &mut self,
+        components: &[Vec<usize>],
+        component_of: &[usize],
+        component_depth: &[u32],
+        component_height: &[u32],
+    ) {
         for index in &self.project {
             let component = component_of[*index];
             if component == usize::MAX {
@@ -285,7 +330,6 @@ impl<'a> GraphAnalysis<'a> {
                 metrics.height = component_height[component];
             }
         }
-        components
     }
 
     fn compute_centrality(&mut self) {
@@ -391,13 +435,15 @@ impl<'a> GraphAnalysis<'a> {
         }
     }
 
-    fn graph_stats(&self, components: &[Vec<usize>]) -> GraphStats {
-        let callables: Vec<usize> = self
-            .project
+    fn callable_indices(&self) -> Vec<usize> {
+        self.project
             .iter()
             .copied()
             .filter(|index| self.callable[*index])
-            .collect();
+            .collect()
+    }
+
+    fn edge_totals(&self) -> EdgeTotals<'_> {
         let call_edges: Vec<&GraphEdge> = self
             .edges
             .iter()
@@ -416,13 +462,6 @@ impl<'a> GraphAnalysis<'a> {
                     && self.id_to_idx.contains_key(&edge.target)
             })
             .count();
-
-        let cycles: Vec<&Vec<usize>> = components
-            .iter()
-            .filter(|component| {
-                component.len() > 1 && component.iter().any(|node| self.callable[*node])
-            })
-            .collect();
         let cross_file = call_edges
             .iter()
             .filter(|edge| {
@@ -430,30 +469,60 @@ impl<'a> GraphAnalysis<'a> {
                     != self.nodes[self.id_to_idx[&edge.target]].file
             })
             .count();
-        let global_known: u32 = call_edges
+        let global_known = call_edges
             .iter()
             .flat_map(|edge| edge.call_sites.iter())
             .filter(|site| site.result_used.is_some())
             .count() as u32;
-        let global_used: u32 = call_edges
+        let global_used = call_edges
             .iter()
             .flat_map(|edge| edge.call_sites.iter())
             .filter(|site| site.result_used == Some(true))
             .count() as u32;
+        EdgeTotals {
+            call_edges,
+            data_edges,
+            cross_file,
+            global_known,
+            global_used,
+        }
+    }
 
+    fn cycle_totals(&self, components: &[Vec<usize>]) -> (u32, u32, u32) {
+        let cycles: Vec<&Vec<usize>> = components
+            .iter()
+            .filter(|component| {
+                component.len() > 1 && component.iter().any(|node| self.callable[*node])
+            })
+            .collect();
+        (
+            cycles.len() as u32,
+            cycles.iter().map(|component| component.len() as u32).sum(),
+            cycles
+                .iter()
+                .map(|component| component.len() as u32)
+                .max()
+                .unwrap_or(0),
+        )
+    }
+
+    fn graph_stats(&self, components: &[Vec<usize>]) -> GraphStats {
+        let callables = self.callable_indices();
+        let totals = self.edge_totals();
+        let (cycles, nodes_in_cycles, largest_cycle) = self.cycle_totals(components);
         let functions = callables.len() as u32;
         let stats = GraphStats {
             nodes: self.project.len() as u32,
             functions,
             constants: self.project.len() as u32 - functions,
-            edges: call_edges.len() as u32,
-            data_edges: data_edges as u32,
+            edges: totals.call_edges.len() as u32,
+            data_edges: totals.data_edges as u32,
             external_edges: callables
                 .iter()
                 .map(|index| self.nodes[*index].metrics.external_fan_out)
                 .sum(),
             density: if functions > 1 {
-                call_edges.len() as f64 / (functions as f64 * (functions as f64 - 1.0))
+                totals.call_edges.len() as f64 / (functions as f64 * (functions as f64 - 1.0))
             } else {
                 0.0
             },
@@ -485,13 +554,9 @@ impl<'a> GraphAnalysis<'a> {
                 .map(|index| self.nodes[*index].metrics.fan_out)
                 .max()
                 .unwrap_or(0),
-            cycles: cycles.len() as u32,
-            nodes_in_cycles: cycles.iter().map(|component| component.len() as u32).sum(),
-            largest_cycle: cycles
-                .iter()
-                .map(|component| component.len() as u32)
-                .max()
-                .unwrap_or(0),
+            cycles,
+            nodes_in_cycles,
+            largest_cycle,
             dead_code: self
                 .project
                 .iter()
@@ -513,14 +578,14 @@ impl<'a> GraphAnalysis<'a> {
                 .map(|index| self.nodes[*index].metrics.depth)
                 .max()
                 .unwrap_or(0),
-            cross_file_edges: cross_file as u32,
-            cross_file_ratio: if call_edges.is_empty() {
+            cross_file_edges: totals.cross_file as u32,
+            cross_file_ratio: if totals.call_edges.is_empty() {
                 0.0
             } else {
-                cross_file as f64 / call_edges.len() as f64
+                totals.cross_file as f64 / totals.call_edges.len() as f64
             },
-            result_ignored_ratio: if global_known > 0 {
-                (global_known - global_used) as f64 / global_known as f64
+            result_ignored_ratio: if totals.global_known > 0 {
+                (totals.global_known - totals.global_used) as f64 / totals.global_known as f64
             } else {
                 0.0
             },

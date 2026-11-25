@@ -9,12 +9,11 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::analysis::analyze;
-use crate::graph::{EdgeKind, GraphEdge, GraphNode};
+use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind};
 use crate::store::{GraphSummary, Store};
 
 use super::args::{AuditDiffArgs, AuditDiffOrder, AuditDiffStatus, AuditDiffView, AuditFormat};
@@ -22,6 +21,7 @@ use super::audit_views::{self, ViewInput};
 use super::audit::{
     analysis_options, fit, metric, metric_json, pad, parse_kind, print_json, snapshot_json,
 };
+use super::snapshot;
 
 #[derive(Clone, Debug)]
 struct DiffContext {
@@ -31,18 +31,12 @@ struct DiffContext {
 }
 
 pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
-    if args.min_delta.is_some() && matches!(args.order_by, AuditDiffOrder::Name) {
-        bail!("--min-delta needs a metric --order-by, not name");
-    }
-    let context = open_context(&args).await?;
+    validate_args(&args)?;
+    let (context, old_nodes, new_nodes, data) = load_data(&args).await?;
     let warnings = comparability_warnings(&context.from, &context.to)?;
     for warning in &warnings {
         eprintln!("[code-graph] warning: {warning}");
     }
-
-    let old_nodes = context.store.all_nodes(context.from.id).await?;
-    let new_nodes = context.store.all_nodes(context.to.id).await?;
-    let data = match_nodes(&old_nodes, &new_nodes);
 
     let kind = args.kind.as_deref().map(parse_kind).transpose()?;
     let changed_files = match &args.changed_files {
@@ -51,36 +45,18 @@ pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
     };
 
     let mut rows = data.rows;
-    if !args.all_metrics {
-        rows.retain(|row| {
-            matches!(row.status, DiffStatus::Added | DiffStatus::Removed)
-                || !row.flags.is_empty()
-                || row
-                    .delta
-                    .as_ref()
-                    .is_some_and(MetricDelta::has_meaningful_change)
-        });
-    }
-    rows.retain(|row| row_matches(row, &args, kind, changed_files.as_ref()));
-    rows.retain(|row| row_passes_min_delta(row, &args));
-    sort_rows(&mut rows, &args);
+    filter_rows(&mut rows, &args, kind, changed_files.as_ref());
 
     if args.view != AuditDiffView::Symbols {
-        let old_edges = context.store.all_edges(context.from.id).await?;
-        let new_edges = context.store.all_edges(context.to.id).await?;
-        let view_input = ViewInput {
-            from: &context.from,
-            to: &context.to,
-            old_nodes: &old_nodes,
-            new_nodes: &new_nodes,
-            old_edges: &old_edges,
-            new_edges: &new_edges,
-            rows: &rows,
-            changed_files: changed_files.as_ref(),
-            verify_calls: !args.no_verify_calls,
-            args: &args,
-        };
-        return audit_views::run(args.view, &view_input).await;
+        return run_view(
+            &args,
+            &context,
+            &old_nodes,
+            &new_nodes,
+            &rows,
+            changed_files.as_ref(),
+        )
+        .await;
     }
 
     let total_rows = rows.len();
@@ -88,9 +64,7 @@ pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
     let shown_rows: Vec<&NodeDiff> = rows.iter().take(limit).collect();
 
     let edges = if args.edges {
-        let old_edges = context.store.all_edges(context.from.id).await?;
-        let new_edges = context.store.all_edges(context.to.id).await?;
-        Some(diff_edges(&old_edges, &new_edges, &data.node_map))
+        Some(changed_edges(&context, &data.node_map).await?)
     } else {
         None
     };
@@ -140,11 +114,80 @@ pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn validate_args(args: &AuditDiffArgs) -> Result<()> {
+    if args.min_delta.is_some() && matches!(args.order_by, AuditDiffOrder::Name) {
+        bail!("--min-delta needs a metric --order-by, not name");
+    }
+    Ok(())
+}
+
+async fn load_data(
+    args: &AuditDiffArgs,
+) -> Result<(DiffContext, Vec<GraphNode>, Vec<GraphNode>, DiffData)> {
+    let context = open_context(args).await?;
+    let old_nodes = context.store.all_nodes(context.from.id).await?;
+    let new_nodes = context.store.all_nodes(context.to.id).await?;
+    let data = match_nodes(&old_nodes, &new_nodes);
+    Ok((context, old_nodes, new_nodes, data))
+}
+
+fn filter_rows(
+    rows: &mut Vec<NodeDiff>,
+    args: &AuditDiffArgs,
+    kind: Option<NodeKind>,
+    changed_files: Option<&HashSet<String>>,
+) {
+    if !args.all_metrics {
+        rows.retain(|row| {
+            matches!(row.status, DiffStatus::Added | DiffStatus::Removed)
+                || !row.flags.is_empty()
+                || row
+                    .delta
+                    .as_ref()
+                    .is_some_and(MetricDelta::has_meaningful_change)
+        });
+    }
+    rows.retain(|row| row_matches(row, args, kind, changed_files));
+    rows.retain(|row| row_passes_min_delta(row, args));
+    sort_rows(rows, args);
+}
+
+async fn run_view(
+    args: &AuditDiffArgs,
+    context: &DiffContext,
+    old_nodes: &[GraphNode],
+    new_nodes: &[GraphNode],
+    rows: &[NodeDiff],
+    changed_files: Option<&HashSet<String>>,
+) -> Result<ExitCode> {
+    let old_edges = context.store.all_edges(context.from.id).await?;
+    let new_edges = context.store.all_edges(context.to.id).await?;
+    let view_input = ViewInput {
+        from: &context.from,
+        to: &context.to,
+        old_nodes,
+        new_nodes,
+        old_edges: &old_edges,
+        new_edges: &new_edges,
+        rows,
+        changed_files,
+        verify_calls: !args.no_verify_calls,
+        args,
+    };
+    audit_views::run(args.view, &view_input).await
+}
+
+async fn changed_edges(
+    context: &DiffContext,
+    node_map: &HashMap<String, String>,
+) -> Result<EdgeDiff> {
+    let old_edges = context.store.all_edges(context.from.id).await?;
+    let new_edges = context.store.all_edges(context.to.id).await?;
+    Ok(diff_edges(&old_edges, &new_edges, node_map))
+}
+
 async fn open_context(args: &AuditDiffArgs) -> Result<DiffContext> {
-    let db = args
-        .db
-        .clone()
-        .unwrap_or_else(|| args.root.join(".code-graph").join("code-graph.db"));
+    let db = snapshot::db_path(&args.root, args.db.clone());
 
     if args.refresh {
         if args.to.is_some() {
@@ -156,7 +199,7 @@ async fn open_context(args: &AuditDiffArgs) -> Result<DiffContext> {
         let baseline = if db.exists() {
             let store = Store::open(&db).await?;
             match args.from.as_deref() {
-                Some(selector) => Some(resolve_selector(&store, selector).await?),
+                Some(selector) => Some(snapshot::resolve(&store, selector, true).await?),
                 None => store.latest_graph().await?,
             }
         } else {
@@ -170,19 +213,8 @@ async fn open_context(args: &AuditDiffArgs) -> Result<DiffContext> {
             );
         };
 
-        eprintln!("[code-graph] analyzing {} ...", args.root.display());
-        let report = analyze(analysis_options(&args.root, &args.analysis)?).await?;
-        let store = Store::open(&db).await?;
-        let graph_id = store.insert_report(&report).await?;
-        let target = store
-            .graph(graph_id)
-            .await?
-            .ok_or_else(|| anyhow!("snapshot #{graph_id} was stored but cannot be read back"))?;
-        eprintln!(
-            "[code-graph] stored snapshot #{graph_id} in {} ({} ms)",
-            db.display(),
-            report.meta.duration_ms
-        );
+        let options = analysis_options(&args.root, &args.analysis)?;
+        let (store, target) = snapshot::build(&args.root, &db, options).await?;
         ensure_distinct(&baseline, &target)?;
         return Ok(DiffContext {
             store,
@@ -191,16 +223,16 @@ async fn open_context(args: &AuditDiffArgs) -> Result<DiffContext> {
         });
     }
 
-    if !db.exists() {
-        bail!(
-            "snapshot database not found: {}\nRun `code-graph audit {} --refresh` first.",
-            db.display(),
+    let store = snapshot::open_store(
+        &db,
+        &format!(
+            "Run `code-graph audit {} --refresh` first.",
             args.root.display()
-        );
-    }
-    let store = Store::open(&db).await?;
-    let from = resolve_selector(&store, args.from.as_deref().unwrap_or("previous")).await?;
-    let to = resolve_selector(&store, args.to.as_deref().unwrap_or("latest")).await?;
+        ),
+    )
+    .await?;
+    let from = snapshot::resolve(&store, args.from.as_deref().unwrap_or("previous"), true).await?;
+    let to = snapshot::resolve(&store, args.to.as_deref().unwrap_or("latest"), true).await?;
     ensure_distinct(&from, &to)?;
     Ok(DiffContext { store, from, to })
 }
@@ -210,40 +242,6 @@ fn ensure_distinct(from: &GraphSummary, to: &GraphSummary) -> Result<()> {
         bail!("cannot diff snapshot #{} with itself", from.id);
     }
     Ok(())
-}
-
-async fn resolve_selector(store: &Store, selector: &str) -> Result<GraphSummary> {
-    if selector.eq_ignore_ascii_case("latest") {
-        return store
-            .latest_graph()
-            .await?
-            .ok_or_else(|| anyhow!("no snapshots in database"));
-    }
-    if selector.eq_ignore_ascii_case("previous") {
-        return store.previous_graph().await?.ok_or_else(|| {
-            anyhow!(
-                "no previous snapshot; database needs at least two snapshots.\nRun `code-graph audit <root> --refresh` to create another one."
-            )
-        });
-    }
-    let id: i64 = selector.parse().map_err(|_| {
-        anyhow!("snapshot must be a numeric id, \"latest\", or \"previous\", got {selector:?}")
-    })?;
-    if let Some(summary) = store.graph(id).await? {
-        return Ok(summary);
-    }
-    let available = store
-        .graphs()
-        .await?
-        .iter()
-        .map(|graph| graph.id.to_string())
-        .take(8)
-        .collect::<Vec<_>>()
-        .join(", ");
-    if available.is_empty() {
-        bail!("snapshot #{id} not found; database has no snapshots");
-    }
-    bail!("snapshot #{id} not found; available: {available}")
 }
 
 fn comparability_warnings(from: &GraphSummary, to: &GraphSummary) -> Result<Vec<String>> {
