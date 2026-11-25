@@ -1161,11 +1161,59 @@ pub(super) fn absorbed_callers(before: usize, after: usize, modules: usize) -> b
 
 /// Calls below this count can match by accident, and a symbol with one or two
 /// callees is a wrapper, not a pipeline.
-const SIMILAR_MIN_FANOUT: usize = 3;
+pub(crate) const SIMILAR_MIN_FANOUT: usize = 3;
 /// The smallest overlap worth a row: three calls into the same symbols.
-const SIMILAR_MIN_SHARED: usize = 3;
+pub(crate) const SIMILAR_MIN_SHARED: usize = 3;
 /// Share of the smaller callee set that has to be common: half of the skeleton.
-const SIMILAR_MIN_CONTAINMENT: f64 = 0.5;
+pub(crate) const SIMILAR_MIN_CONTAINMENT: f64 = 0.5;
+
+pub(crate) struct SimilarRow<'a> {
+    pub(crate) a: NodeKey<'a>,
+    pub(crate) b: NodeKey<'a>,
+    pub(crate) shared: usize,
+    pub(crate) containment: f64,
+    pub(crate) shared_calls: Vec<&'a str>,
+}
+
+/// Similar callables inside one snapshot: every comparable callable is a
+/// candidate, no base snapshot and no changed-symbol filter.
+pub(crate) fn all_similar_pairs<'a>(
+    nodes: &'a [GraphNode],
+    edges: &'a [GraphEdge],
+    conventions: &Conventions,
+) -> Vec<SimilarRow<'a>> {
+    let sets = dependency_graph(nodes, edges, None, conventions);
+    let by_id: HashMap<&'a str, &'a GraphNode> = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let touched: HashMap<&'a str, DiffStatus> = sets
+        .keys()
+        .map(|id| (*id, DiffStatus::Changed))
+        .collect();
+    let old_sets: HashMap<NodeKey<'a>, HashSet<NodeKey<'a>>> = HashMap::new();
+    let old_by_qname: HashMap<&'a str, HashSet<NodeKey<'a>>> = HashMap::new();
+    let mut rows: Vec<SimilarRow<'a>> =
+        find_similar(&sets, &by_id, &old_sets, &old_by_qname, &touched)
+            .into_iter()
+            .map(|pair| SimilarRow {
+                a: pair.a,
+                b: pair.b,
+                shared: pair.shared,
+                containment: pair.containment,
+                shared_calls: pair.shared_calls,
+            })
+            .collect();
+    rows.sort_by(|left, right| {
+        right
+            .shared
+            .cmp(&left.shared)
+            .then_with(|| right.containment.total_cmp(&left.containment))
+            .then_with(|| left.a.1.cmp(right.a.1))
+            .then_with(|| left.b.1.cmp(right.b.1))
+    });
+    rows
+}
 
 pub(super) struct SimilarPair<'a> {
     pub(super) a: NodeKey<'a>,

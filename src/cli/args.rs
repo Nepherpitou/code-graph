@@ -238,6 +238,8 @@ pub(super) enum AuditCommand {
     Search(AuditSearchArgs),
     /// Explain the metrics used by the audit.
     Metrics(AuditMetricsArgs),
+    /// Find callables whose outgoing calls largely overlap another symbol's.
+    Similar(AuditSimilarArgs),
     /// Compare two persisted snapshots.
     Diff(AuditDiffArgs),
 }
@@ -298,6 +300,22 @@ pub(super) struct AuditFocusArgs {
     /// Maximum callers/callees to print.
     #[arg(long, default_value_t = 8)]
     pub(super) limit: usize,
+}
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  code-graph audit similar
+  code-graph audit similar --file src/domain --limit 10
+")]
+pub(super) struct AuditSimilarArgs {
+    #[command(flatten)]
+    pub(super) common: AuditCommon,
+    /// Maximum number of pairs to print.
+    #[arg(long, default_value_t = 20)]
+    pub(super) limit: usize,
+    /// Only show pairs where either symbol is in this file or directory (substring match).
+    #[arg(long)]
+    pub(super) file: Option<String>,
 }
 
 #[derive(Args)]

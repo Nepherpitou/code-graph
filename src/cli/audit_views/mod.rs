@@ -21,6 +21,10 @@ use super::audit_diff::{DiffStatus, NodeDiff};
 
 mod views;
 
+pub(crate) use views::{
+    all_similar_pairs, SimilarRow, SIMILAR_MIN_CONTAINMENT, SIMILAR_MIN_FANOUT, SIMILAR_MIN_SHARED,
+};
+
 /// Which snapshot pair a view has to explain, and what the caller considers changed.
 pub(super) struct ViewInput<'a> {
     pub(super) from: &'a GraphSummary,
@@ -933,6 +937,30 @@ mod tests {
         assert!(sets["c#f"].contains("p#mark"));
         assert_eq!(sets["d#g"].len(), 1);
         assert!(!sets.contains_key("k#h"));
+    }
+
+    #[test]
+    fn all_similar_pairs_searches_the_whole_snapshot() {
+        let nodes = vec![
+            node("a#f", "a", NodeKind::Method, "f.ts", "a() {"),
+            node("b#g", "b", NodeKind::Method, "g.ts", "b() {"),
+            node("x#x", "x", NodeKind::Function, "x.ts", "function x() {"),
+            node("y#y", "y", NodeKind::Function, "y.ts", "function y() {"),
+            node("z#z", "z", NodeKind::Function, "z.ts", "function z() {"),
+        ];
+        let edges = vec![
+            edge("a#f", "x#x"),
+            edge("a#f", "y#y"),
+            edge("a#f", "z#z"),
+            edge("b#g", "x#x"),
+            edge("b#g", "y#y"),
+            edge("b#g", "z#z"),
+        ];
+        let rows = all_similar_pairs(&nodes, &edges, Conventions::of("typescript"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].a.1, "a");
+        assert_eq!(rows[0].b.1, "b");
+        assert_eq!(rows[0].shared, 3);
     }
 
     #[test]

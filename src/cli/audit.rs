@@ -13,15 +13,20 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
 use crate::analysis::{analyze, AnalyzeOptions};
+use crate::graph::conventions::Conventions;
 use crate::graph::{EdgeKind, GraphEdge, GraphNode, NodeKind};
 use crate::query::QueryService;
 use crate::store::{GraphSummary, Store};
 
 use super::args::{
     AuditArgs, AuditCommand, AuditCommon, AuditCyclesArgs, AuditDeadArgs,
-    AuditFocusArgs, AuditFormat, AuditMetricsArgs, AuditOrder, AuditSearchArgs, AuditTopArgs,
+    AuditFocusArgs, AuditFormat, AuditMetricsArgs, AuditOrder, AuditSearchArgs, AuditSimilarArgs,
+    AuditTopArgs,
 };
 use super::audit_diff;
+use super::audit_views::{
+    all_similar_pairs, SimilarRow, SIMILAR_MIN_CONTAINMENT, SIMILAR_MIN_FANOUT, SIMILAR_MIN_SHARED,
+};
 
 pub(super) async fn run(args: AuditArgs) -> Result<ExitCode> {
     let mut common = args.common;
@@ -37,6 +42,7 @@ pub(super) async fn run(args: AuditArgs) -> Result<ExitCode> {
         Some(AuditCommand::DeadCode(args)) => dead_code(args).await?,
         Some(AuditCommand::Search(args)) => search(args).await?,
         Some(AuditCommand::Metrics(args)) => metrics(args)?,
+        Some(AuditCommand::Similar(args)) => similar(args).await?,
         Some(AuditCommand::Diff(args)) => return audit_diff::run(args).await,
     }
     Ok(ExitCode::SUCCESS)
@@ -1105,6 +1111,86 @@ async fn dead_code(args: AuditDeadArgs) -> Result<()> {
             println!("Heuristic: no incoming calls, no module references, not exported, not a constructor, not in a cycle.");
             println!("Test helpers can still appear when the analyzer could not mark them as entry-like.");
             println!("Treat this as a candidate list, not proof.");
+        }
+    }
+    Ok(())
+}
+
+async fn similar(args: AuditSimilarArgs) -> Result<()> {
+    let context = open_context(&args.common).await?;
+    let nodes = load_nodes(&context).await?;
+    let edges = load_edges(&context).await?;
+    let conventions = Conventions::of(&context.summary.meta.language);
+    let filtered: Vec<SimilarRow> = all_similar_pairs(&nodes, &edges, conventions)
+        .into_iter()
+        .filter(|row| {
+            args.file
+                .as_deref()
+                .is_none_or(|file| row.a.0.contains(file) || row.b.0.contains(file))
+        })
+        .collect();
+    let limit = args.limit.clamp(1, 1000);
+    let shown: Vec<&SimilarRow> = filtered.iter().take(limit).collect();
+
+    match args.common.format {
+        AuditFormat::Json => {
+            print_json(&json!({
+                "kind": "audit.similar",
+                "snapshot": snapshot_json(&context.summary),
+                "thresholds": {
+                    "minFanOut": SIMILAR_MIN_FANOUT,
+                    "minShared": SIMILAR_MIN_SHARED,
+                    "minContainment": SIMILAR_MIN_CONTAINMENT,
+                },
+                "totalRows": filtered.len(),
+                "shownRows": shown.len(),
+                "truncated": filtered.len() > shown.len(),
+                "rows": shown.iter().map(|row| json!({
+                    "symbol": row.a.1,
+                    "file": row.a.0,
+                    "similarTo": row.b.1,
+                    "similarFile": row.b.0,
+                    "shared": row.shared,
+                    "share": metric_json(row.containment),
+                    "sharedCalls": row.shared_calls,
+                })).collect::<Vec<_>>(),
+            }))?;
+        }
+        AuditFormat::Text => {
+            text_header(&context.summary);
+            println!();
+            println!("Similar callables ({})", filtered.len());
+            if shown.is_empty() {
+                println!("  none");
+            } else {
+                println!(
+                    "  {} {} {:>6} {:>6}  {}",
+                    pad("symbol", 40),
+                    pad("similar to", 40),
+                    "shared",
+                    "share",
+                    "calls in common"
+                );
+                for row in &shown {
+                    println!(
+                        "  {} {} {:>6} {:>6}  {}",
+                        pad(row.a.1, 40),
+                        pad(row.b.1, 40),
+                        row.shared,
+                        format!("{:.0}%", row.containment * 100.0),
+                        fit(&row.shared_calls.join(", "), 60)
+                    );
+                }
+                if filtered.len() > shown.len() {
+                    println!("  … {} more", filtered.len() - shown.len());
+                }
+            }
+            println!();
+            println!(
+                "Thresholds: at least {SIMILAR_MIN_FANOUT} callees on both sides, \
+                 {SIMILAR_MIN_SHARED} shared, and half of the smaller set."
+            );
+            println!("A pair is a review candidate, not proof of duplication.");
         }
     }
     Ok(())
