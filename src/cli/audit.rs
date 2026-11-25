@@ -6,7 +6,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{anyhow, bail, Result};
@@ -54,20 +54,24 @@ struct AuditContext {
     summary: GraphSummary,
 }
 
-pub(super) fn analysis_options(root: &Path) -> AnalyzeOptions {
-    AnalyzeOptions {
+pub(super) fn analysis_options(
+    root: &Path,
+    control: &super::args::AnalysisControlArgs,
+) -> Result<AnalyzeOptions> {
+    let lang = super::args::parse_language(&control.lang)?;
+    Ok(AnalyzeOptions {
         root: root.to_path_buf(),
-        lang: None,
-        server_cmd: None,
-        include_external: false,
-        include_constants: true,
-        ref_fallback: true,
-        max_nodes: 20_000,
-        max_constants: 10_000,
-        exclude: Vec::new(),
-        verbose: false,
-        quiet: true,
-    }
+        lang,
+        server_cmd: control.server_cmd.clone(),
+        include_external: control.include_external,
+        include_constants: !control.no_constants,
+        ref_fallback: !control.no_ref_fallback,
+        max_nodes: control.max_nodes,
+        max_constants: control.max_constants,
+        exclude: control.exclude.iter().map(PathBuf::from).collect(),
+        verbose: control.verbose,
+        quiet: control.quiet,
+    })
 }
 
 async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
@@ -110,7 +114,7 @@ async fn open_context(common: &AuditCommon) -> Result<AuditContext> {
     }
 
     eprintln!("[code-graph] analyzing {} ...", root.display());
-    let report = analyze(analysis_options(&root)).await?;
+    let report = analyze(analysis_options(&root, &common.analysis)?).await?;
     let store = Store::open(&db).await?;
     let graph_id = store.insert_report(&report).await?;
     let summary = store
@@ -1379,7 +1383,47 @@ fn metrics(args: AuditMetricsArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::args::{AnalysisControlArgs, Cli, Commands};
     use crate::graph::NodeKind;
+    use clap::Parser;
+
+    #[test]
+    fn audit_accepts_analysis_flags() {
+        let cli = Cli::try_parse_from([
+            "code-graph",
+            "audit",
+            "--lang",
+            "rust",
+            "--exclude",
+            "analyze-targets,target",
+            "--max-nodes",
+            "1234",
+        ])
+        .unwrap();
+        let Commands::Audit(args) = cli.command else {
+            panic!("expected audit command");
+        };
+        assert_eq!(args.common.analysis.lang, "rust");
+        assert_eq!(
+            args.common.analysis.exclude,
+            ["analyze-targets", "target"]
+        );
+        assert_eq!(args.common.analysis.max_nodes, 1234);
+    }
+
+    #[test]
+    fn audit_analysis_options_follow_flags() {
+        let control = AnalysisControlArgs {
+            lang: "rust".to_string(),
+            exclude: vec!["analyze-targets".to_string()],
+            max_nodes: 1234,
+            ..AnalysisControlArgs::default()
+        };
+        let options = analysis_options(Path::new("."), &control).unwrap();
+        assert_eq!(options.lang, Some(crate::languages::LanguageId::Rust));
+        assert_eq!(options.max_nodes, 1234);
+        assert_eq!(options.exclude, vec![PathBuf::from("analyze-targets")]);
+    }
 
     #[test]
     fn kind_aliases_parse() {

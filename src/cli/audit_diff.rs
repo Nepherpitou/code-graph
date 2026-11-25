@@ -171,7 +171,7 @@ async fn open_context(args: &AuditDiffArgs) -> Result<DiffContext> {
         };
 
         eprintln!("[code-graph] analyzing {} ...", args.root.display());
-        let report = analyze(analysis_options(&args.root)).await?;
+        let report = analyze(analysis_options(&args.root, &args.analysis)?).await?;
         let store = Store::open(&db).await?;
         let graph_id = store.insert_report(&report).await?;
         let target = store

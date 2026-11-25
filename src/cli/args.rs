@@ -30,11 +30,10 @@ pub(super) enum Commands {
     Serve(ServeArgs),
 }
 
-#[derive(Args)]
-pub(super) struct AnalysisArgs {
-    /// Directory to analyze.
-    #[arg(default_value = ".")]
-    pub(super) root: PathBuf,
+/// Flags that control how the project is analyzed, shared by `analyze`, `up`,
+/// and the audit commands that may build a snapshot.
+#[derive(Args, Default)]
+pub(super) struct AnalysisControlArgs {
     /// Language: typescript, rust, cpp, python, or auto.
     #[arg(long, default_value = "auto")]
     pub(super) lang: String,
@@ -62,9 +61,18 @@ pub(super) struct AnalysisArgs {
     /// LSP protocol logging.
     #[arg(short, long)]
     pub(super) verbose: bool,
-    /// Suppress progress output.
+    /// Suppress analysis progress output.
     #[arg(long)]
     pub(super) quiet: bool,
+}
+
+#[derive(Args)]
+pub(super) struct AnalysisArgs {
+    /// Directory to analyze.
+    #[arg(default_value = ".")]
+    pub(super) root: PathBuf,
+    #[command(flatten)]
+    pub(super) control: AnalysisControlArgs,
 }
 
 #[derive(Parser)]
@@ -133,6 +141,9 @@ pub(super) struct AuditCommon {
     /// Output format: human-readable text or JSON.
     #[arg(long, value_enum, default_value_t = AuditFormat::Text)]
     pub(super) format: AuditFormat,
+    /// How to analyze when the audit builds a snapshot (no snapshot or --refresh).
+    #[command(flatten)]
+    pub(super) analysis: AnalysisControlArgs,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -385,6 +396,9 @@ pub(super) struct AuditDiffArgs {
     /// Analyze the current root and use the new snapshot as the target.
     #[arg(long)]
     pub(super) refresh: bool,
+    /// How to analyze when --refresh builds a snapshot.
+    #[command(flatten)]
+    pub(super) analysis: AnalysisControlArgs,
     /// Output format: human-readable text or JSON.
     #[arg(long, value_enum, default_value_t = AuditFormat::Text)]
     pub(super) format: AuditFormat,

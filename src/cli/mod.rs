@@ -21,22 +21,23 @@ use crate::store::Store;
 use args::{AnalysisArgs, Cli, Commands};
 
 fn build_options(args: AnalysisArgs) -> Result<AnalyzeOptions> {
-    let lang = args::parse_language(&args.lang)?;
+    let control = args.control;
+    let lang = args::parse_language(&control.lang)?;
     if !args.root.exists() {
         return Err(anyhow!("path does not exist: {}", args.root.display()));
     }
     Ok(AnalyzeOptions {
         root: args.root,
         lang,
-        server_cmd: args.server_cmd,
-        include_external: args.include_external,
-        include_constants: !args.no_constants,
-        ref_fallback: !args.no_ref_fallback,
-        max_nodes: args.max_nodes,
-        max_constants: args.max_constants,
-        exclude: args.exclude.into_iter().map(PathBuf::from).collect(),
-        verbose: args.verbose,
-        quiet: args.quiet,
+        server_cmd: control.server_cmd,
+        include_external: control.include_external,
+        include_constants: !control.no_constants,
+        ref_fallback: !control.no_ref_fallback,
+        max_nodes: control.max_nodes,
+        max_constants: control.max_constants,
+        exclude: control.exclude.into_iter().map(PathBuf::from).collect(),
+        verbose: control.verbose,
+        quiet: control.quiet,
     })
 }
 
