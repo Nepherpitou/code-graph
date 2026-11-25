@@ -395,6 +395,81 @@ impl GraphIndex {
     }
 }
 
+fn entry_levels(
+    index: &GraphIndex,
+    roots: &[String],
+    depth: usize,
+    limit: usize,
+) -> (HashSet<usize>, bool) {
+    let mut visited = HashSet::with_capacity(limit.min(index.keys.len()));
+    // Spend the budget root by root: each entry point and then its direct
+    // callees, before moving to the next entry point. Second-level callees
+    // are only considered after every root and first level had a chance.
+    let mut first_level: Vec<usize> = Vec::new();
+    let mut truncated = false;
+    for root in roots {
+        let Some(&node) = index.key_to_idx.get(root) else {
+            continue;
+        };
+        if visited.contains(&node) {
+            continue;
+        }
+        if visited.len() >= limit {
+            truncated = true;
+            break;
+        }
+        visited.insert(node);
+        for edge in &index.out_call[node] {
+            let next = index.edges[*edge].target;
+            if visited.contains(&next) {
+                continue;
+            }
+            if visited.len() >= limit {
+                truncated = true;
+                continue;
+            }
+            visited.insert(next);
+            first_level.push(next);
+        }
+    }
+    let mut current_level = first_level;
+    for _ in 2..=depth {
+        let mut next_level: Vec<usize> = Vec::new();
+        for node in current_level {
+            for edge in &index.out_call[node] {
+                let next = index.edges[*edge].target;
+                if visited.contains(&next) {
+                    continue;
+                }
+                if visited.len() >= limit {
+                    truncated = true;
+                    continue;
+                }
+                visited.insert(next);
+                next_level.push(next);
+            }
+        }
+        if next_level.is_empty() {
+            break;
+        }
+        current_level = next_level;
+    }
+    (visited, truncated)
+}
+
+fn entry_edge_ids(index: &GraphIndex, visited: &HashSet<usize>) -> HashSet<i64> {
+    let mut edge_ids = HashSet::with_capacity(visited.len().saturating_mul(2));
+    for node in visited {
+        for edge in &index.out_call[*node] {
+            let edge = &index.edges[*edge];
+            if visited.contains(&edge.target) {
+                edge_ids.insert(edge.id);
+            }
+        }
+    }
+    edge_ids
+}
+
 pub struct QueryService {
     store: Store,
     indexes: RwLock<HashMap<i64, Arc<GraphIndex>>>,
@@ -458,72 +533,14 @@ impl QueryService {
         let index = self.index(graph_id).await?;
         let depth = depth.clamp(1, 8);
         let limit = limit.clamp(1, 5000);
-        let mut visited: HashSet<usize> = HashSet::new();
-        // Spend the budget root by root: each entry point and then its direct
-        // callees, before moving to the next entry point. Second-level callees
-        // are only considered after every root and first level had a chance.
-        let mut first_level: Vec<usize> = Vec::new();
-        let mut truncated = false;
-        for root in roots {
-            let Some(&node) = index.key_to_idx.get(root) else {
-                continue;
-            };
-            if visited.contains(&node) {
-                continue;
-            }
-            if visited.len() >= limit {
-                truncated = true;
-                break;
-            }
-            visited.insert(node);
-            for edge in &index.out_call[node] {
-                let next = index.edges[*edge].target;
-                if visited.contains(&next) {
-                    continue;
-                }
-                if visited.len() >= limit {
-                    truncated = true;
-                    continue;
-                }
-                visited.insert(next);
-                first_level.push(next);
-            }
-        }
-        let mut current_level = first_level;
-        for _ in 2..=depth {
-            let mut next_level: Vec<usize> = Vec::new();
-            for node in current_level {
-                for edge in &index.out_call[node] {
-                    let next = index.edges[*edge].target;
-                    if visited.contains(&next) {
-                        continue;
-                    }
-                    if visited.len() >= limit {
-                        truncated = true;
-                        continue;
-                    }
-                    visited.insert(next);
-                    next_level.push(next);
-                }
-            }
-            if next_level.is_empty() {
-                break;
-            }
-            current_level = next_level;
-        }
-        let keys: Vec<String> = visited
-            .iter()
-            .filter_map(|node| index.keys.get(*node).cloned())
-            .collect();
-        let mut edge_ids = HashSet::new();
-        for node in &visited {
-            for edge in &index.out_call[*node] {
-                let edge = &index.edges[*edge];
-                if visited.contains(&edge.target) {
-                    edge_ids.insert(edge.id);
-                }
-            }
-        }
+        let (visited, truncated) = entry_levels(&index, roots, depth, limit);
+        let mut keys: Vec<String> = Vec::with_capacity(visited.len());
+        keys.extend(
+            visited
+                .iter()
+                .filter_map(|node| index.keys.get(*node).cloned()),
+        );
+        let edge_ids = entry_edge_ids(&index, &visited);
         let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
         let edges = self
             .store
@@ -555,7 +572,7 @@ impl QueryService {
             return Ok(FocusSlice::default());
         };
         let limit = limit.clamp(1, 5000);
-        let mut selected = HashSet::new();
+        let mut selected = HashSet::with_capacity(limit.min(index.keys.len()));
         select_with_budget(&mut selected, root_idx, limit);
 
         // 1. Direct neighbours, both incoming and outgoing, all edge kinds.
@@ -642,8 +659,9 @@ impl QueryService {
     ) -> Result<GraphSlice> {
         let depth = depth.min(8);
         let limit = limit.clamp(1, 5000);
-        let mut visited: HashSet<usize> = HashSet::new();
-        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+        let capacity = limit.min(index.keys.len());
+        let mut visited: HashSet<usize> = HashSet::with_capacity(capacity);
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::with_capacity(capacity);
         for root in roots {
             if let Some(&node) = index.key_to_idx.get(root) {
                 if visited.insert(node) {
@@ -670,11 +688,13 @@ impl QueryService {
                 }
             }
         }
-        let keys: Vec<String> = visited
-            .iter()
-            .filter_map(|node| index.keys.get(*node).cloned())
-            .collect();
-        let mut edge_ids = HashSet::new();
+        let mut keys: Vec<String> = Vec::with_capacity(visited.len());
+        keys.extend(
+            visited
+                .iter()
+                .filter_map(|node| index.keys.get(*node).cloned()),
+        );
+        let mut edge_ids: HashSet<i64> = HashSet::with_capacity(visited.len().saturating_mul(2));
         for node in &visited {
             for edge in index.out_all[*node]
                 .iter()
@@ -686,11 +706,10 @@ impl QueryService {
                 }
             }
         }
+        let mut edge_id_list: Vec<i64> = Vec::with_capacity(edge_ids.len());
+        edge_id_list.extend(edge_ids);
         let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
-        let edges = self
-            .store
-            .edges_by_ids(graph_id, &edge_ids.into_iter().collect::<Vec<_>>())
-            .await?;
+        let edges = self.store.edges_by_ids(graph_id, &edge_id_list).await?;
         Ok(GraphSlice { nodes, edges })
     }
 
@@ -821,11 +840,13 @@ impl QueryService {
                 }
             }
         }
-        let keys: Vec<String> = visited
-            .iter()
-            .filter_map(|node| index.keys.get(*node).cloned())
-            .collect();
-        let mut edge_ids = HashSet::new();
+        let mut keys: Vec<String> = Vec::with_capacity(visited.len());
+        keys.extend(
+            visited
+                .iter()
+                .filter_map(|node| index.keys.get(*node).cloned()),
+        );
+        let mut edge_ids: HashSet<i64> = HashSet::with_capacity(visited.len().saturating_mul(2));
         for node in &visited {
             for edge in index.out_all[*node]
                 .iter()
@@ -837,11 +858,10 @@ impl QueryService {
                 }
             }
         }
+        let mut edge_id_list: Vec<i64> = Vec::with_capacity(edge_ids.len());
+        edge_id_list.extend(edge_ids);
         let nodes = self.store.nodes_by_keys(graph_id, &keys).await?;
-        let edges = self
-            .store
-            .edges_by_ids(graph_id, &edge_ids.into_iter().collect::<Vec<_>>())
-            .await?;
+        let edges = self.store.edges_by_ids(graph_id, &edge_id_list).await?;
         Ok(GraphSlice { nodes, edges })
     }
 }

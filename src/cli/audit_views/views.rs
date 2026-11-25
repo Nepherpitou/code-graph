@@ -72,14 +72,24 @@ pub(super) fn view_label(view: AuditDiffView) -> &'static str {
     }
 }
 
-pub(super) fn output_rows(
-    input: &ViewInput<'_>,
-    view: AuditDiffView,
-    headers: &[&str],
-    widths: &[usize],
-    rows: Vec<(Vec<String>, Value)>,
-    extra: Value,
-) -> Result<ExitCode> {
+pub(super) struct TableOutput<'a, 'b> {
+    pub(super) input: &'a ViewInput<'b>,
+    pub(super) view: AuditDiffView,
+    pub(super) headers: &'a [&'a str],
+    pub(super) widths: &'a [usize],
+    pub(super) rows: Vec<(Vec<String>, Value)>,
+    pub(super) extra: Value,
+}
+
+pub(super) fn output_rows(output: TableOutput<'_, '_>) -> Result<ExitCode> {
+    let TableOutput {
+        input,
+        view,
+        headers,
+        widths,
+        rows,
+        extra,
+    } = output;
     let displayed = rows.len();
     let total = extra
         .get("totalRows")
@@ -227,12 +237,12 @@ pub(super) fn uses(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCod
     rows.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.qname.cmp(&right.0.qname)));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Uses,
-        &["existing symbol", "new calls"],
-        &[52, 10],
-        shown
+        view: AuditDiffView::Uses,
+        headers: &["existing symbol", "new calls"],
+        widths: &[52, 10],
+        rows: shown
             .iter()
             .map(|(node, count)| {
                 (
@@ -245,8 +255,8 @@ pub(super) fn uses(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCod
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 pub(super) fn dependencies(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
@@ -268,12 +278,12 @@ pub(super) fn dependencies(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result
     rows.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Dependencies,
-        &["from", "to", "new calls"],
-        &[24, 24, 10],
-        shown
+        view: AuditDiffView::Dependencies,
+        headers: &["from", "to", "new calls"],
+        widths: &[24, 24, 10],
+        rows: shown
             .iter()
             .map(|((from, to), count)| {
                 let mutual = rows
@@ -290,12 +300,12 @@ pub(super) fn dependencies(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result
                 )
             })
             .collect(),
-        json!({
+        extra: json!({
             "totalRows": rows.len(),
             "truncated": rows.len() > shown.len(),
             "mutual": mutual.iter().map(|(from, to)| json!([from, to])).collect::<Vec<_>>(),
         }),
-    )
+    })
 }
 
 pub(super) fn callers(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
@@ -313,12 +323,12 @@ pub(super) fn callers(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
     });
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Callers,
-        &["existing caller", "now calls"],
-        &[44, 44],
-        shown
+        view: AuditDiffView::Callers,
+        headers: &["existing caller", "now calls"],
+        widths: &[44, 44],
+        rows: shown
             .iter()
             .map(|edge| {
                 (
@@ -333,8 +343,8 @@ pub(super) fn callers(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 pub(super) fn affected(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
@@ -421,12 +431,12 @@ pub(super) fn affected(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exi
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
     let changed_total = counts.values().filter(|(changed, _)| *changed > 0).count();
     let added_only = counts.values().filter(|(changed, _)| *changed == 0).count();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Affected,
-        &["existing symbol", "changed", "added", "share", "priority", "direct"],
-        &[44, 8, 6, 8, 10, 6],
-        shown
+        view: AuditDiffView::Affected,
+        headers: &["existing symbol", "changed", "added", "share", "priority", "direct"],
+        widths: &[44, 8, 6, 8, 10, 6],
+        rows: shown
             .iter()
             .map(|row| {
                 let share = f64::from(row.changed) / row.all_callees.max(1) as f64;
@@ -452,14 +462,14 @@ pub(super) fn affected(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exi
                 )
             })
             .collect(),
-        json!({
+        extra: json!({
             "totalRows": rows.len(),
             "affectedByChanged": changed_total,
             "affectedByAddedOnly": added_only,
             "direct": direct.len(),
             "truncated": rows.len() > shown.len(),
         }),
-    )
+    })
 }
 
 pub(super) fn areas(input: &ViewInput<'_>) -> Result<ExitCode> {
@@ -506,12 +516,12 @@ pub(super) fn areas(input: &ViewInput<'_>) -> Result<ExitCode> {
     });
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Areas,
-        &["area", "added", "removed", "changed", "cyclomatic/callable", "loc delta"],
-        &[24, 7, 8, 8, 20, 10],
-        shown
+        view: AuditDiffView::Areas,
+        headers: &["area", "added", "removed", "changed", "cyclomatic/callable", "loc delta"],
+        widths: &[24, 7, 8, 8, 20, 10],
+        rows: shown
             .iter()
             .map(|row| {
                 let cx = if row.old_mean == 0.0 || (row.old_mean - row.new_mean).abs() < 0.005 {
@@ -540,8 +550,8 @@ pub(super) fn areas(input: &ViewInput<'_>) -> Result<ExitCode> {
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 pub(super) fn filtered_edges(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCode> {
@@ -572,12 +582,12 @@ pub(super) fn filtered_edges(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Resu
     rows.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0)));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::FilteredEdges,
-        &["reason", "edges"],
-        &[20, 8],
-        shown
+        view: AuditDiffView::FilteredEdges,
+        headers: &["reason", "edges"],
+        widths: &[20, 8],
+        rows: shown
             .iter()
             .map(|(reason, count)| {
                 (
@@ -586,8 +596,8 @@ pub(super) fn filtered_edges(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Resu
                 )
             })
             .collect(),
-        json!({"newCallEdges": total, "used": real.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"newCallEdges": total, "used": real.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
@@ -633,12 +643,12 @@ pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
     rows.sort_by(|left, right| right.0.len().cmp(&left.0.len()).then_with(|| left.0.cmp(&right.0)));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Cycles,
-        &["status", "size", "members"],
-        &[10, 6, 120],
-        shown
+        view: AuditDiffView::Cycles,
+        headers: &["status", "size", "members"],
+        widths: &[10, 6, 120],
+        rows: shown
             .iter()
             .map(|(members, status)| {
                 (
@@ -647,8 +657,8 @@ pub(super) fn cycles(input: &ViewInput<'_>) -> Result<ExitCode> {
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
@@ -674,12 +684,12 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
     rows.sort_by(|left, right| left.qname.cmp(&right.qname));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::DeadCode,
-        &["symbol", "kind", "file", "framework"],
-        &[40, 10, 40, 10],
-        shown
+        view: AuditDiffView::DeadCode,
+        headers: &["symbol", "kind", "file", "framework"],
+        widths: &[40, 10, 40, 10],
+        rows: shown
             .iter()
             .map(|node| {
                 (
@@ -698,14 +708,14 @@ pub(super) fn dead_code(input: &ViewInput<'_>) -> Result<ExitCode> {
                 )
             })
             .collect(),
-        json!({
+        extra: json!({
             "totalRows": rows.len(),
             "truncated": rows.len() > shown.len(),
             "constantsTruncated": constants_truncated,
             "constantsTotal": input.to.meta.constants_total,
             "constantsCrawled": input.to.meta.constants_crawled,
         }),
-    )
+    })
 }
 
 /// How far the changed entry points reach now, and what they started calling.
@@ -798,12 +808,12 @@ pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
     });
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Reach,
-        &["entry point", "status", "reach", "fan-out", "new calls"],
-        &[40, 8, 12, 12, 40],
-        shown
+        view: AuditDiffView::Reach,
+        headers: &["entry point", "status", "reach", "fan-out", "new calls"],
+        widths: &[40, 8, 12, 12, 40],
+        rows: shown
             .iter()
             .map(|(key, status, reach_before, reach_after, before, after, added)| {
                 (
@@ -825,8 +835,8 @@ pub(super) fn reach(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitCo
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 /// Who depends on the changed symbols now: caller count, stability, and whether
@@ -907,12 +917,12 @@ pub(super) fn fan_in(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitC
     });
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::FanIn,
-        &["symbol", "status", "callers", "instability", "modules", "flag"],
-        &[40, 8, 12, 14, 8, 12],
-        shown
+        view: AuditDiffView::FanIn,
+        headers: &["symbol", "status", "callers", "instability", "modules", "flag"],
+        widths: &[40, 8, 12, 14, 8, 12],
+        rows: shown
             .iter()
             .map(|(key, status, before, after, stability_before, stability_after, modules, choke)| {
                 (
@@ -936,8 +946,8 @@ pub(super) fn fan_in(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<ExitC
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }
 
 type NodeKey<'a> = (&'a str, &'a str);
@@ -1099,12 +1109,12 @@ pub(super) fn similar(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
     let rows = find_similar(&new_sets, &new_by_id, &old_key_sets, &old_by_qname, &touched);
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::Similar,
-        &["symbol", "similar to", "shared", "share", "calls in common", "same file"],
-        &[38, 38, 7, 7, 46, 8],
-        shown
+        view: AuditDiffView::Similar,
+        headers: &["symbol", "similar to", "shared", "share", "calls in common", "same file"],
+        widths: &[38, 38, 7, 7, 46, 8],
+        rows: shown
             .iter()
             .map(|pair| {
                 (
@@ -1131,7 +1141,7 @@ pub(super) fn similar(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
                 )
             })
             .collect(),
-        json!({
+        extra: json!({
             "totalRows": rows.len(),
             "truncated": rows.len() > shown.len(),
             "thresholds": {
@@ -1140,7 +1150,7 @@ pub(super) fn similar(input: &ViewInput<'_>, graphs: &Graphs<'_>) -> Result<Exit
                 "minContainment": SIMILAR_MIN_CONTAINMENT,
             },
         }),
-    )
+    })
 }
 
 /// A symbol that picked up callers from several modules in one change is a
@@ -1167,6 +1177,49 @@ pub(super) struct SimilarPair<'a> {
     pub(super) shared_calls: Vec<&'a str>,
 }
 
+fn inverted_callee_index<'a>(
+    new_sets: &HashMap<&'a str, HashSet<&'a str>>,
+) -> HashMap<&'a str, Vec<&'a str>> {
+    let mut by_callee: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
+    for (&source, targets) in new_sets {
+        if targets.len() < SIMILAR_MIN_FANOUT {
+            continue;
+        }
+        for callee in targets {
+            by_callee.entry(*callee).or_default().push(source);
+        }
+    }
+    by_callee
+}
+
+fn shared_counts<'a>(
+    set_a: &HashSet<&'a str>,
+    by_callee: &HashMap<&'a str, Vec<&'a str>>,
+    source: &'a str,
+) -> HashMap<&'a str, usize> {
+    let mut counts: HashMap<&'a str, usize> = HashMap::new();
+    for callee in set_a {
+        let Some(sources) = by_callee.get(callee) else {
+            continue;
+        };
+        for &other in sources {
+            if other != source {
+                *counts.entry(other).or_insert(0) += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn better_partner(current: Option<&SimilarPair<'_>>, candidate: &SimilarPair<'_>) -> bool {
+    current.is_none_or(|current| {
+        candidate.containment > current.containment
+            || (candidate.containment == current.containment
+                && (candidate.shared > current.shared
+                    || (candidate.shared == current.shared && candidate.b.1 < current.b.1)))
+    })
+}
+
 /// For every touched symbol its closest partner in the snapshot. Both sides
 /// need at least [`SIMILAR_MIN_FANOUT`] callees and at least
 /// [`SIMILAR_MIN_SHARED`] of them in common; the common part must cover half of
@@ -1180,11 +1233,9 @@ pub(super) fn find_similar<'a>(
     old_by_qname: &HashMap<&'a str, HashSet<NodeKey<'a>>>,
     touched: &HashMap<&'a str, DiffStatus>,
 ) -> Vec<SimilarPair<'a>> {
-    let ids: Vec<&'a str> = new_sets
-        .iter()
-        .filter(|(_, targets)| targets.len() >= SIMILAR_MIN_FANOUT)
-        .map(|(id, _)| *id)
-        .collect();
+    // Inverted callee index: for each touched source, count shared callees
+    // instead of intersecting every candidate pair.
+    let by_callee = inverted_callee_index(new_sets);
     let mut rows: Vec<SimilarPair<'a>> = Vec::new();
     for (&source, &status) in touched {
         let Some(set_a) = new_sets.get(source) else {
@@ -1196,16 +1247,16 @@ pub(super) fn find_similar<'a>(
         if set_a.len() < SIMILAR_MIN_FANOUT {
             continue;
         }
+        let counts = shared_counts(set_a, &by_callee, source);
         let mut best: Option<SimilarPair<'a>> = None;
-        for &other in &ids {
-            if source == other || set_a.contains(other) || new_sets[other].contains(source) {
-                continue;
-            }
-            let set_b = &new_sets[other];
-            let shared = set_a.intersection(set_b).count();
+        for (other, shared) in counts {
             if shared < SIMILAR_MIN_SHARED {
                 continue;
             }
+            if set_a.contains(other) || new_sets[other].contains(source) {
+                continue;
+            }
+            let set_b = &new_sets[other];
             let containment = shared as f64 / set_a.len().min(set_b.len()) as f64;
             if containment < SIMILAR_MIN_CONTAINMENT {
                 continue;
@@ -1230,14 +1281,7 @@ pub(super) fn find_similar<'a>(
                 containment,
                 shared_calls,
             };
-            let better = best.as_ref().is_none_or(|current| {
-                candidate.containment > current.containment
-                    || (candidate.containment == current.containment
-                        && (candidate.shared > current.shared
-                            || (candidate.shared == current.shared
-                                && candidate.b.1 < current.b.1)))
-            });
-            if better {
+            if better_partner(best.as_ref(), &candidate) {
                 best = Some(candidate);
             }
         }
@@ -1292,12 +1336,12 @@ pub(super) fn silent_files(input: &ViewInput<'_>) -> Result<ExitCode> {
     rows.sort_by(|left, right| left.0.cmp(right.0));
     let limit = input.limit();
     let shown = rows.iter().take(limit).collect::<Vec<_>>();
-    output_rows(
+    output_rows(TableOutput {
         input,
-        AuditDiffView::SilentFiles,
-        &["file", "reason"],
-        &[64, 18],
-        shown
+        view: AuditDiffView::SilentFiles,
+        headers: &["file", "reason"],
+        widths: &[64, 18],
+        rows: shown
             .iter()
             .map(|(file, reason)| {
                 (
@@ -1306,6 +1350,6 @@ pub(super) fn silent_files(input: &ViewInput<'_>) -> Result<ExitCode> {
                 )
             })
             .collect(),
-        json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
-    )
+        extra: json!({"totalRows": rows.len(), "truncated": rows.len() > shown.len()}),
+    })
 }

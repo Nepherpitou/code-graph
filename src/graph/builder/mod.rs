@@ -12,6 +12,7 @@ mod references;
 mod symbols;
 mod targets;
 
+pub(super) use symbols::NodeSpec;
 pub(crate) use symbols::parse_symbols;
 
 use std::collections::{HashMap, HashSet};

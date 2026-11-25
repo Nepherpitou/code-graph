@@ -230,6 +230,16 @@ struct NodeShape {
     sloc: u32,
 }
 
+pub(crate) struct NodeSpec<'a> {
+    pub(super) symbol: &'a RawSymbol,
+    pub(super) rel: &'a str,
+    pub(super) qname: String,
+    pub(super) kind: NodeKind,
+    pub(super) parent_exported: bool,
+    pub(super) synthetic: bool,
+    pub(super) lazy: bool,
+}
+
 impl Builder {
     fn reserve_node(&mut self) -> bool {
         if self.records.len() >= self.max_nodes {
@@ -342,18 +352,16 @@ impl Builder {
         ensure_unique(base, &mut self.used_ids)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn create_node(
-        &mut self,
-        symbol: &RawSymbol,
-        rel: &str,
-        qname: String,
-        kind: NodeKind,
-        parent_exported: bool,
-        synthetic: bool,
-        lazy: bool,
-        _class_name: Option<String>,
-    ) -> Option<String> {
+    pub(super) fn create_node(&mut self, spec: NodeSpec<'_>) -> Option<String> {
+        let NodeSpec {
+            symbol,
+            rel,
+            qname,
+            kind,
+            parent_exported,
+            synthetic,
+            lazy,
+        } = spec;
         if !self.reserve_node() {
             return None;
         }
@@ -439,16 +447,15 @@ impl Builder {
             .iter()
             .find(|child| child.kind == LSP_CONSTRUCTOR)
         {
-            self.create_node(
-                constructor,
+            self.create_node(NodeSpec {
+                symbol: constructor,
                 rel,
-                format!("{qname}.constructor"),
-                NodeKind::Constructor,
-                class_exported,
-                false,
-                false,
-                Some(qname.to_string()),
-            )
+                qname: format!("{qname}.constructor"),
+                kind: NodeKind::Constructor,
+                parent_exported: class_exported,
+                synthetic: false,
+                lazy: false,
+            })
         } else {
             let synthetic = RawSymbol {
                 name: format!("{local}.constructor"),
@@ -458,16 +465,15 @@ impl Builder {
                 selection: symbol.selection,
                 children: Vec::new(),
             };
-            self.create_node(
-                &synthetic,
+            self.create_node(NodeSpec {
+                symbol: &synthetic,
                 rel,
-                format!("{qname}.constructor"),
-                NodeKind::Constructor,
-                class_exported,
-                true,
-                false,
-                Some(qname.to_string()),
-            )
+                qname: format!("{qname}.constructor"),
+                kind: NodeKind::Constructor,
+                parent_exported: class_exported,
+                synthetic: true,
+                lazy: false,
+            })
         };
         if let Some(id) = constructor_id {
             self.class_map.insert(class_key, id.clone());
@@ -499,16 +505,15 @@ impl Builder {
                 return;
             }
         }
-        self.create_node(
+        self.create_node(NodeSpec {
             symbol,
             rel,
             qname,
             kind,
             parent_exported,
-            false,
-            false,
-            container.map(str::to_string),
-        );
+            synthetic: false,
+            lazy: false,
+        });
     }
 
     pub(crate) fn add_symbol(

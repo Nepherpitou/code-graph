@@ -494,6 +494,15 @@ fn totals(nodes: &[GraphNode], conventions: &Conventions) -> (f64, f64, f64, i64
     (cyclomatic, loc, priority, dead)
 }
 
+struct TarjanState<'a> {
+    index: HashMap<&'a str, usize>,
+    low: HashMap<&'a str, usize>,
+    stack: Vec<&'a str>,
+    on_stack: HashSet<&'a str>,
+    counter: usize,
+    out: Vec<Vec<&'a str>>,
+}
+
 fn sccs<'a>(
     nodes: &'a [GraphNode],
     edges: &'a [GraphEdge],
@@ -501,33 +510,37 @@ fn sccs<'a>(
     conventions: &Conventions,
 ) -> Vec<Vec<&'a str>> {
     let (forward, _) = adjacency(nodes, edges, verify, conventions);
-    let mut index: HashMap<&str, usize> = HashMap::new();
-    let mut low: HashMap<&str, usize> = HashMap::new();
-    let mut stack: Vec<&str> = Vec::new();
-    let mut on_stack: HashSet<&str> = HashSet::new();
-    let mut counter = 0usize;
-    let mut out = Vec::new();
+    let mut state = TarjanState {
+        index: HashMap::new(),
+        low: HashMap::new(),
+        stack: Vec::new(),
+        on_stack: HashSet::new(),
+        counter: 0,
+        out: Vec::new(),
+    };
     let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     for root in ids {
-        if index.contains_key(root) {
+        if state.index.contains_key(root) {
             continue;
         }
-        strongconnect(root, &forward, &mut index, &mut low, &mut stack, &mut on_stack, &mut counter, &mut out);
+        strongconnect(root, &forward, &mut state);
     }
-    out
+    state.out
 }
 
-#[allow(clippy::too_many_arguments)]
 fn strongconnect<'a>(
     node: &'a str,
     forward: &HashMap<&'a str, Vec<&'a str>>,
-    index: &mut HashMap<&'a str, usize>,
-    low: &mut HashMap<&'a str, usize>,
-    stack: &mut Vec<&'a str>,
-    on_stack: &mut HashSet<&'a str>,
-    counter: &mut usize,
-    out: &mut Vec<Vec<&'a str>>,
+    state: &mut TarjanState<'a>,
 ) {
+    let TarjanState {
+        index,
+        low,
+        stack,
+        on_stack,
+        counter,
+        out,
+    } = state;
     let mut work: Vec<(&'a str, usize)> = vec![(node, 0)];
     while let Some((current, edge_index)) = work.pop() {
         if edge_index == 0 {

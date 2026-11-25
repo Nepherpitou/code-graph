@@ -7,9 +7,121 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, Transaction};
 
-use crate::graph::{EdgeKind, GraphEdge, GraphNode};
+use crate::graph::{EdgeKind, FileSummary, GraphEdge, GraphNode};
+
+/// Rows per multi-value INSERT. Well below SQLite's variable limit:
+/// 15 binds per node, 9 per edge, 3 per file.
+const INSERT_CHUNK: usize = 500;
+
+async fn insert_files(
+    tx: &mut Transaction<'_, Sqlite>,
+    graph_id: i64,
+    files: &[FileSummary],
+) -> Result<()> {
+    let payloads: Vec<String> = files
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    for (files, payloads) in files.chunks(INSERT_CHUNK).zip(payloads.chunks(INSERT_CHUNK)) {
+        let mut query =
+            QueryBuilder::<Sqlite>::new("INSERT INTO files (graph_id, path, payload_json) ");
+        query.push_values(files.iter().zip(payloads), |mut row, (file, payload)| {
+            row.push_bind(graph_id)
+                .push_bind(&file.file)
+                .push_bind(payload.as_str());
+        });
+        query.build().execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+async fn insert_nodes(
+    tx: &mut Transaction<'_, Sqlite>,
+    graph_id: i64,
+    nodes: &[GraphNode],
+) -> Result<()> {
+    let payloads: Vec<String> = nodes
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    for (nodes, payloads) in nodes.chunks(INSERT_CHUNK).zip(payloads.chunks(INSERT_CHUNK)) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO nodes
+             (graph_id, stable_key, name, qname, kind, file, external,
+              fan_in, fan_out, call_in, call_out, page_rank, hotspot, dead_code, payload_json) ",
+        );
+        query.push_values(nodes.iter().zip(payloads), |mut row, (node, payload)| {
+            row.push_bind(graph_id)
+                .push_bind(&node.id)
+                .push_bind(&node.name)
+                .push_bind(&node.qname)
+                .push_bind(node.kind.as_str())
+                .push_bind(&node.file)
+                .push_bind(i64::from(node.external))
+                .push_bind(node.metrics.fan_in as i64)
+                .push_bind(node.metrics.fan_out as i64)
+                .push_bind(node.metrics.call_in as i64)
+                .push_bind(node.metrics.call_out as i64)
+                .push_bind(node.metrics.page_rank)
+                .push_bind(node.metrics.hotspot)
+                .push_bind(i64::from(node.metrics.dead_code_candidate))
+                .push_bind(payload.as_str());
+        });
+        query.build().execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+async fn load_node_ids(
+    tx: &mut Transaction<'_, Sqlite>,
+    graph_id: i64,
+) -> Result<HashMap<String, i64>> {
+    let rows = sqlx::query("SELECT id, stable_key FROM nodes WHERE graph_id = ?")
+        .bind(graph_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.get::<String, _>("stable_key"), row.get::<i64, _>("id")))
+        .collect())
+}
+
+async fn insert_edges(
+    tx: &mut Transaction<'_, Sqlite>,
+    graph_id: i64,
+    edges: &[GraphEdge],
+    node_ids: &HashMap<String, i64>,
+) -> Result<()> {
+    let mut insertable: Vec<(&GraphEdge, String)> = Vec::with_capacity(edges.len());
+    for edge in edges {
+        if !node_ids.contains_key(&edge.source) || !node_ids.contains_key(&edge.target) {
+            continue;
+        }
+        insertable.push((edge, serde_json::to_string(edge)?));
+    }
+    for chunk in insertable.chunks(INSERT_CHUNK) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO edges
+             (graph_id, source_id, target_id, source_key, target_key, kind, sites,
+              external, payload_json) ",
+        );
+        query.push_values(chunk, |mut row, (edge, payload)| {
+            row.push_bind(graph_id)
+                .push_bind(node_ids[&edge.source])
+                .push_bind(node_ids[&edge.target])
+                .push_bind(&edge.source)
+                .push_bind(&edge.target)
+                .push_bind(edge_kind(edge.kind))
+                .push_bind(edge.sites as i64)
+                .push_bind(i64::from(edge.external))
+                .push_bind(payload.as_str());
+        });
+        query.build().execute(&mut **tx).await?;
+    }
+    Ok(())
+}
 use crate::metrics::{GraphStats, GraphTop};
 use crate::report::{GraphMeta, GraphReport};
 
@@ -86,68 +198,10 @@ impl Store {
         .fetch_one(&mut *tx)
         .await?;
 
-        for file in &report.files {
-            sqlx::query("INSERT INTO files (graph_id, path, payload_json) VALUES (?, ?, ?)")
-                .bind(graph_id)
-                .bind(&file.file)
-                .bind(serde_json::to_string(file)?)
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        let mut node_ids: HashMap<String, i64> = HashMap::with_capacity(report.nodes.len());
-        for node in &report.nodes {
-            let id = sqlx::query_scalar::<_, i64>(
-                "INSERT INTO nodes
-                 (graph_id, stable_key, name, qname, kind, file, external,
-                  fan_in, fan_out, call_in, call_out, page_rank, hotspot, dead_code, payload_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 RETURNING id",
-            )
-            .bind(graph_id)
-            .bind(&node.id)
-            .bind(&node.name)
-            .bind(&node.qname)
-            .bind(node.kind.as_str())
-            .bind(&node.file)
-            .bind(i64::from(node.external))
-            .bind(node.metrics.fan_in as i64)
-            .bind(node.metrics.fan_out as i64)
-            .bind(node.metrics.call_in as i64)
-            .bind(node.metrics.call_out as i64)
-            .bind(node.metrics.page_rank)
-            .bind(node.metrics.hotspot)
-            .bind(i64::from(node.metrics.dead_code_candidate))
-            .bind(serde_json::to_string(node)?)
-            .fetch_one(&mut *tx)
-            .await?;
-            node_ids.insert(node.id.clone(), id);
-        }
-
-        for edge in &report.edges {
-            let (Some(&source_id), Some(&target_id)) =
-                (node_ids.get(&edge.source), node_ids.get(&edge.target))
-            else {
-                continue;
-            };
-            sqlx::query(
-                "INSERT INTO edges
-                 (graph_id, source_id, target_id, source_key, target_key, kind, sites,
-                  external, payload_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(graph_id)
-            .bind(source_id)
-            .bind(target_id)
-            .bind(&edge.source)
-            .bind(&edge.target)
-            .bind(edge_kind(edge.kind))
-            .bind(edge.sites as i64)
-            .bind(i64::from(edge.external))
-            .bind(serde_json::to_string(edge)?)
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_files(&mut tx, graph_id, &report.files).await?;
+        insert_nodes(&mut tx, graph_id, &report.nodes).await?;
+        let node_ids = load_node_ids(&mut tx, graph_id).await?;
+        insert_edges(&mut tx, graph_id, &report.edges, &node_ids).await?;
 
         tx.commit().await?;
         Ok(graph_id)

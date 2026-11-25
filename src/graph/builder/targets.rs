@@ -1,7 +1,7 @@
 use crate::lsp::CallHierarchyItem;
 
 use super::{
-    Builder, NodeRecord, RawSymbol, Resolved, LSP_CLASS, LSP_CONSTANT, LSP_CONSTRUCTOR,
+    Builder, NodeRecord, NodeSpec, RawSymbol, Resolved, LSP_CLASS, LSP_CONSTANT, LSP_CONSTRUCTOR,
     LSP_FUNCTION, LSP_METHOD, LSP_VARIABLE,
 };
 use crate::graph::model::{GraphNode, NodeKind, NodeMetrics};
@@ -128,16 +128,15 @@ impl Builder {
                         selection: item.selection_range,
                         children: Vec::new(),
                     };
-                    if let Some(id) = self.create_node(
-                        &symbol,
-                        &rel,
-                        format!("{containing_qname}.{}", item.name),
+                    if let Some(id) = self.create_node(NodeSpec {
+                        symbol: &symbol,
+                        rel: &rel,
+                        qname: format!("{containing_qname}.{}", item.name),
                         kind,
-                        false,
-                        false,
-                        true,
-                        None,
-                    ) {
+                        parent_exported: false,
+                        synthetic: false,
+                        lazy: true,
+                    }) {
                         return Resolved {
                             id: Some(id),
                             external: false,
@@ -177,16 +176,15 @@ impl Builder {
                 selection: item.selection_range,
                 children: Vec::new(),
             };
-            let id = self.create_node(
-                &symbol,
-                &rel,
-                format!("{}.constructor", item.name),
-                NodeKind::Constructor,
-                false,
-                true,
-                false,
-                None,
-            );
+            let id = self.create_node(NodeSpec {
+                symbol: &symbol,
+                rel: &rel,
+                qname: format!("{}.constructor", item.name),
+                kind: NodeKind::Constructor,
+                parent_exported: false,
+                synthetic: true,
+                lazy: false,
+            });
             return Resolved {
                 id,
                 external: false,
@@ -209,16 +207,15 @@ impl Builder {
             selection: item.selection_range,
             children: Vec::new(),
         };
-        let id = self.create_node(
-            &symbol,
-            &rel,
-            item.name.clone(),
+        let id = self.create_node(NodeSpec {
+            symbol: &symbol,
+            rel: &rel,
+            qname: item.name.clone(),
             kind,
-            false,
-            false,
-            true,
-            None,
-        );
+            parent_exported: false,
+            synthetic: false,
+            lazy: true,
+        });
         Resolved {
             id,
             external: false,

@@ -391,7 +391,7 @@ impl<'a> GraphAnalysis<'a> {
         }
     }
 
-    fn finish(self, components: &[Vec<usize>]) -> (GraphStats, GraphTop) {
+    fn graph_stats(&self, components: &[Vec<usize>]) -> GraphStats {
         let callables: Vec<usize> = self
             .project
             .iter()
@@ -526,7 +526,11 @@ impl<'a> GraphAnalysis<'a> {
             },
         };
 
-        let top = GraphTop {
+        stats
+    }
+
+    fn graph_top(&self) -> GraphTop {
+        GraphTop {
             fan_in: top_by(self.nodes, &self.project, 10, |node| {
                 node.metrics.fan_in as f64
             }),
@@ -564,8 +568,12 @@ impl<'a> GraphAnalysis<'a> {
                     })
                     .collect()
             },
-        };
+        }
+    }
 
+    fn finish(self, components: &[Vec<usize>]) -> (GraphStats, GraphTop) {
+        let stats = self.graph_stats(components);
+        let top = self.graph_top();
         (stats, top)
     }
 }

@@ -13,7 +13,7 @@ use futures::stream::{self, StreamExt};
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::graph::{parse_symbols, Builder, RawSymbol};
+use crate::graph::{parse_symbols, Builder, BuilderOutput, RawSymbol};
 use crate::languages::{
     adapter, detect_language, file_language_id, Adapter, LanguageId, Readiness, ReadyCtx,
     ServerKind,
@@ -141,68 +141,89 @@ pub async fn analyze(options: AnalyzeOptions) -> Result<GraphReport> {
     analyze_with_progress(options, silent_callback()).await
 }
 
-pub async fn analyze_with_progress(
-    options: AnalyzeOptions,
-    callback: ProgressCallback,
-) -> Result<GraphReport> {
-    let reporter = Reporter::new(options.quiet, callback);
-    let started = Instant::now();
+struct AnalysisTarget {
+    root: PathBuf,
+    adapter: &'static Adapter,
+}
+
+fn resolve_target(options: &AnalyzeOptions) -> Result<AnalysisTarget> {
     let root = std::fs::canonicalize(&options.root)
         .map_err(|error| anyhow!("cannot resolve {}: {error}", options.root.display()))?;
     let language = options
         .lang
         .or_else(|| detect_language(&root))
         .ok_or_else(|| anyhow!("could not detect a supported language; pass --lang"))?;
-    let adapter = adapter(language);
+    Ok(AnalysisTarget {
+        root,
+        adapter: adapter(language),
+    })
+}
 
-    let (sources, source_file_count) = discover_sources(&root, adapter, &options, &reporter)?;
-
-    let (command, server_args) = if let Some(custom) = &options.server_cmd {
+fn resolve_server(
+    options: &AnalyzeOptions,
+    adapter: &Adapter,
+    root: &Path,
+) -> (String, Vec<String>) {
+    if let Some(custom) = &options.server_cmd {
         let mut parts = custom.split_whitespace();
         let command = parts.next().unwrap_or(custom).to_string();
-        (command, parts.map(str::to_string).collect())
-    } else if adapter.id == LanguageId::TypeScript {
-        resolve_typescript_server(&root).unwrap_or_else(|| {
-            resolve_server_command(adapter.server.command(), adapter.server.args(), &root)
-        })
-    } else {
-        resolve_server_command(adapter.server.command(), adapter.server.args(), &root)
-    };
-    // The behaviour follows the program that actually starts, not `--lang`:
-    // `--server-cmd "tsgo --lsp --stdio"` on TypeScript keeps tsgo's policy.
-    // A custom command may be wrapped (`npx … tsgo`, a proxy script), so the
-    // whole line is what names the server.
-    let server_kind = ServerKind::resolve(options.server_cmd.as_deref().unwrap_or(&command));
+        return (command, parts.map(str::to_string).collect());
+    }
+    if adapter.id == LanguageId::TypeScript {
+        return resolve_typescript_server(root).unwrap_or_else(|| {
+            resolve_server_command(adapter.server.command(), adapter.server.args(), root)
+        });
+    }
+    resolve_server_command(adapter.server.command(), adapter.server.args(), root)
+}
 
+async fn start_lsp(
+    root: &Path,
+    command: &str,
+    server_args: &[String],
+    verbose: bool,
+    reporter: &Reporter,
+) -> Result<(LspClient, Value)> {
     reporter.emit(
         "lsp",
         format!("starting LSP server: {command} {}", server_args.join(" ")),
     );
     let (client, initialize) = lsp::start(
-        root.clone(),
-        command.clone(),
-        server_args.clone(),
-        options.verbose,
+        root.to_path_buf(),
+        command.to_string(),
+        server_args.to_vec(),
+        verbose,
     )
     .await
     .map_err(|error| anyhow!("{error}"))?;
-
     let capabilities = initialize
         .get("capabilities")
         .cloned()
         .unwrap_or(Value::Null);
-    let mut local_warnings = Vec::new();
+    Ok((client, capabilities))
+}
+
+fn capability_warnings(capabilities: &Value) -> Vec<String> {
+    let mut warnings = Vec::new();
     if capabilities.get("callHierarchyProvider").is_none() {
-        local_warnings.push(
+        warnings.push(
             "LSP server does not advertise call hierarchy; call edges will be empty".to_string(),
         );
     }
     if capabilities.get("documentSymbolProvider").is_none() {
-        local_warnings.push("LSP server does not advertise document symbols".to_string());
+        warnings.push("LSP server does not advertise document symbols".to_string());
     }
+    warnings
+}
 
+async fn open_documents(
+    client: &LspClient,
+    sources: &HashMap<String, SourceFile>,
+    reporter: &Reporter,
+) -> usize {
     reporter.emit("lsp", format!("opening {} documents", sources.len()));
-    let mut open_failures = 0usize;
+    let started = Instant::now();
+    let mut failures = 0usize;
     for source in sources.values() {
         let uri = Url::from_file_path(&source.abs)
             .map(|url| url.to_string())
@@ -212,15 +233,21 @@ pub async fn analyze_with_progress(
             .await
             .is_err()
         {
-            open_failures += 1;
+            failures += 1;
         }
     }
-    if open_failures > 0 {
-        local_warnings.push(format!(
-            "failed to open {open_failures} documents in the LSP server"
-        ));
-    }
+    reporter.emit(
+        "lsp",
+        format!(
+            "opened {} documents in {} ms",
+            sources.len(),
+            started.elapsed().as_millis()
+        ),
+    );
+    failures
+}
 
+fn document_list(sources: &HashMap<String, SourceFile>) -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = sources
         .values()
         .map(|source| {
@@ -233,32 +260,106 @@ pub async fn analyze_with_progress(
         })
         .collect();
     files.sort_by(|left, right| left.0.cmp(&right.0));
+    files
+}
 
-    reporter.emit("symbols", "collecting document symbols");
-    let symbol_results = collect_symbols(&client, &files, &reporter).await;
-    let symbol_count: usize = symbol_results
-        .iter()
-        .map(|(_, result)| result.as_ref().map(Vec::len).unwrap_or(0))
-        .sum();
-
-    let mut builder = Builder::new(
-        root.clone(),
-        adapter,
-        sources,
-        options.max_nodes,
-        options.include_external,
-        options.include_constants,
-    );
-    for (rel, result) in &symbol_results {
+fn add_document_symbols(
+    builder: &mut Builder,
+    symbol_results: &[(String, Result<Vec<RawSymbol>, String>)],
+    warnings: &mut Vec<String>,
+) {
+    for (rel, result) in symbol_results {
         match result {
             Ok(symbols) => {
                 for symbol in symbols {
                     builder.add_symbol(symbol, rel, "", false, None);
                 }
             }
-            Err(error) => local_warnings.push(format!("documentSymbol failed for {rel}: {error}")),
+            Err(error) => warnings.push(format!("documentSymbol failed for {rel}: {error}")),
         }
     }
+}
+
+struct Prepared {
+    root: PathBuf,
+    adapter: &'static Adapter,
+    sources: HashMap<String, SourceFile>,
+    source_file_count: usize,
+    command: String,
+    server_args: Vec<String>,
+    server_kind: ServerKind,
+    client: LspClient,
+    warnings: Vec<String>,
+}
+
+async fn prepare(options: &AnalyzeOptions, reporter: &Reporter) -> Result<Prepared> {
+    let AnalysisTarget { root, adapter } = resolve_target(options)?;
+    let (sources, source_file_count) = discover_sources(&root, adapter, options, reporter)?;
+    let (command, server_args) = resolve_server(options, adapter, &root);
+    // The behaviour follows the program that actually starts, not `--lang`:
+    // `--server-cmd "tsgo --lsp --stdio"` on TypeScript keeps tsgo's policy.
+    // A custom command may be wrapped (`npx … tsgo`, a proxy script), so the
+    // whole line is what names the server.
+    let server_kind = ServerKind::resolve(options.server_cmd.as_deref().unwrap_or(&command));
+    let (client, capabilities) =
+        start_lsp(&root, &command, &server_args, options.verbose, reporter).await?;
+    let mut warnings = capability_warnings(&capabilities);
+    let open_failures = open_documents(&client, &sources, reporter).await;
+    if open_failures > 0 {
+        warnings.push(format!(
+            "failed to open {open_failures} documents in the LSP server"
+        ));
+    }
+    Ok(Prepared {
+        root,
+        adapter,
+        sources,
+        source_file_count,
+        command,
+        server_args,
+        server_kind,
+        client,
+        warnings,
+    })
+}
+
+struct BuildInput<'a> {
+    root: &'a Path,
+    adapter: &'static Adapter,
+    client: &'a LspClient,
+    sources: HashMap<String, SourceFile>,
+    options: &'a AnalyzeOptions,
+    reporter: &'a Reporter,
+    warnings: &'a mut Vec<String>,
+}
+
+async fn build_symbols(input: BuildInput<'_>) -> Result<(Builder, usize)> {
+    let BuildInput {
+        root,
+        adapter,
+        client,
+        sources,
+        options,
+        reporter,
+        warnings,
+    } = input;
+    let files = document_list(&sources);
+    reporter.emit("symbols", "collecting document symbols");
+    let symbol_results = collect_symbols(client, &files, reporter).await;
+    let symbol_count: usize = symbol_results
+        .iter()
+        .map(|(_, result)| result.as_ref().map(Vec::len).unwrap_or(0))
+        .sum();
+
+    let mut builder = Builder::new(
+        root.to_path_buf(),
+        adapter,
+        sources,
+        options.max_nodes,
+        options.include_external,
+        options.include_constants,
+    );
+    add_document_symbols(&mut builder, &symbol_results, warnings);
     reporter.emit(
         "symbols",
         format!(
@@ -266,7 +367,29 @@ pub async fn analyze_with_progress(
             builder.node_count()
         ),
     );
+    Ok((builder, symbol_count))
+}
 
+struct ReadyInput<'a> {
+    client: &'a LspClient,
+    builder: &'a Builder,
+    adapter: &'static Adapter,
+    root: &'a Path,
+    server_kind: ServerKind,
+    reporter: &'a Reporter,
+    warnings: &'a mut Vec<String>,
+}
+
+async fn wait_for_server(input: ReadyInput<'_>) {
+    let ReadyInput {
+        client,
+        builder,
+        adapter,
+        root,
+        server_kind,
+        reporter,
+        warnings,
+    } = input;
     let samples = builder.readiness_samples();
     let workspace = adapter
         .root_markers
@@ -274,24 +397,48 @@ pub async fn analyze_with_progress(
         .any(|marker| root.join(marker).exists());
     let readiness = server_kind
         .wait_ready(ReadyCtx {
-            client: &client,
+            client,
             samples: &samples,
-            reporter: &reporter,
+            reporter,
             budget: Duration::from_secs(60),
             workspace,
         })
         .await;
     if let Readiness::TimedOut { pending } = readiness {
-        local_warnings.push(format!(
+        warnings.push(format!(
             "{} did not finish within 60s ({}); results may be incomplete",
             adapter.id.as_str(),
             pending.join(", ")
         ));
     }
+}
 
-    run_builder(&mut builder, &client, adapter, &options, &reporter).await;
+struct ReportParts {
+    root: PathBuf,
+    adapter: &'static Adapter,
+    command: String,
+    server_args: Vec<String>,
+    started: Instant,
+    source_file_count: usize,
+    symbol_count: usize,
+    options: AnalyzeOptions,
+    local_warnings: Vec<String>,
+    output: BuilderOutput,
+}
 
-    let output = builder.finish();
+fn build_report(parts: ReportParts) -> GraphReport {
+    let ReportParts {
+        root,
+        adapter,
+        command,
+        server_args,
+        started,
+        source_file_count,
+        symbol_count,
+        options,
+        local_warnings,
+        output,
+    } = parts;
     let truncated = output.truncated;
     let constants_total = output.constants_total;
     let constants_crawled = output.constants_crawled;
@@ -299,7 +446,6 @@ pub async fn analyze_with_progress(
     let edges = output.edges;
     let mut warnings = output.warnings;
 
-    reporter.emit("metrics", "computing metrics");
     let conventions = crate::graph::conventions::Conventions::of(adapter.id.as_str());
     let (stats, top) = metrics::compute(&mut nodes, &edges, conventions);
     let files = summaries::build_file_summaries(&nodes, &edges);
@@ -344,8 +490,7 @@ pub async fn analyze_with_progress(
         }),
     };
 
-    client.stop().await;
-    Ok(GraphReport {
+    GraphReport {
         meta,
         nodes,
         edges,
@@ -353,7 +498,65 @@ pub async fn analyze_with_progress(
         stats,
         top,
         warnings,
+    }
+}
+
+pub async fn analyze_with_progress(
+    options: AnalyzeOptions,
+    callback: ProgressCallback,
+) -> Result<GraphReport> {
+    let reporter = Reporter::new(options.quiet, callback);
+    let started = Instant::now();
+    let prepared = prepare(&options, &reporter).await?;
+    let Prepared {
+        root,
+        adapter,
+        sources,
+        source_file_count,
+        command,
+        server_args,
+        server_kind,
+        client,
+        mut warnings,
+    } = prepared;
+
+    let (mut builder, symbol_count) = build_symbols(BuildInput {
+        root: &root,
+        adapter,
+        client: &client,
+        sources,
+        options: &options,
+        reporter: &reporter,
+        warnings: &mut warnings,
     })
+    .await?;
+    wait_for_server(ReadyInput {
+        client: &client,
+        builder: &builder,
+        adapter,
+        root: &root,
+        server_kind,
+        reporter: &reporter,
+        warnings: &mut warnings,
+    })
+    .await;
+    run_builder(&mut builder, &client, adapter, &options, &reporter).await;
+    let output = builder.finish();
+
+    reporter.emit("metrics", "computing metrics");
+    client.stop().await;
+    Ok(build_report(ReportParts {
+        root,
+        adapter,
+        command,
+        server_args,
+        started,
+        source_file_count,
+        symbol_count,
+        options,
+        local_warnings: warnings,
+        output,
+    }))
 }
 
 fn resolve_typescript_server(root: &Path) -> Option<(String, Vec<String>)> {

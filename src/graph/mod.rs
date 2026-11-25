@@ -5,5 +5,5 @@ mod builder;
 pub(crate) mod conventions;
 pub mod model;
 
-pub(crate) use builder::{parse_symbols, Builder, RawSymbol};
+pub(crate) use builder::{parse_symbols, Builder, BuilderOutput, RawSymbol};
 pub use model::*;

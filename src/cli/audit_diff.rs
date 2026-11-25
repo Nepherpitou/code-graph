@@ -123,14 +123,14 @@ pub(super) async fn run(args: AuditDiffArgs) -> Result<ExitCode> {
             print_json(&payload)?;
         }
         AuditFormat::Text => {
-            print_text(
-                &context,
-                &rows,
-                &shown_rows,
+            print_text(&TextReport {
+                context: &context,
+                rows: &rows,
+                shown_rows: &shown_rows,
                 total_rows,
-                &args,
-                edges.as_ref(),
-            );
+                args: &args,
+                edges: edges.as_ref(),
+            });
         }
     }
 
@@ -440,32 +440,37 @@ impl MetricDelta {
 
     fn has_meaningful_change(&self) -> bool {
         self.priority.abs() >= 1e-9
-            || self.cyclomatic != 0
-            || self.sloc != 0
-            || self.loc != 0
-            || self.params != 0
+            || [self.cyclomatic, self.sloc, self.loc, self.params]
+                .iter()
+                .any(|value| *value != 0)
     }
 
     fn is_zero(&self) -> bool {
-        self.priority.abs() < 1e-9
-            && self.cyclomatic == 0
-            && self.sloc == 0
-            && self.loc == 0
-            && self.params == 0
-            && self.fan_in == 0
-            && self.fan_out == 0
-            && self.call_fan_in == 0
-            && self.call_fan_out == 0
-            && self.data_fan_in == 0
-            && self.data_fan_out == 0
-            && self.transitive_fan_in == 0
-            && self.transitive_fan_out == 0
-            && self.instability.abs() < 1e-9
-            && self.ifc.abs() < 1e-9
-            && self.hotspot.abs() < 1e-9
-            && self.betweenness.abs() < 1e-9
-            && self.result_ignored_ratio.abs() < 1e-9
-            && self.scc_size == 0
+        let counts = [
+            self.cyclomatic,
+            self.sloc,
+            self.loc,
+            self.params,
+            self.fan_in,
+            self.fan_out,
+            self.call_fan_in,
+            self.call_fan_out,
+            self.data_fan_in,
+            self.data_fan_out,
+            self.transitive_fan_in,
+            self.transitive_fan_out,
+            self.scc_size,
+        ];
+        let scores = [
+            self.priority,
+            self.instability,
+            self.ifc,
+            self.hotspot,
+            self.betweenness,
+            self.result_ignored_ratio,
+        ];
+        counts.iter().all(|value| *value == 0)
+            && scores.iter().all(|value| value.abs() < 1e-9)
     }
 }
 
@@ -911,14 +916,24 @@ fn summary_json(from: &GraphSummary, to: &GraphSummary) -> Value {
     })
 }
 
-fn print_text(
-    context: &DiffContext,
-    rows: &[NodeDiff],
-    shown_rows: &[&NodeDiff],
+struct TextReport<'a> {
+    context: &'a DiffContext,
+    rows: &'a [NodeDiff],
+    shown_rows: &'a [&'a NodeDiff],
     total_rows: usize,
-    args: &AuditDiffArgs,
-    edges: Option<&EdgeDiff>,
-) {
+    args: &'a AuditDiffArgs,
+    edges: Option<&'a EdgeDiff>,
+}
+
+fn print_text(report: &TextReport<'_>) {
+    let TextReport {
+        context,
+        rows,
+        shown_rows,
+        total_rows,
+        args,
+        edges,
+    } = report;
     println!("snapshot #{} → #{}", context.from.id, context.to.id);
     print_snapshot("from", &context.from);
     print_snapshot("to", &context.to);
@@ -1000,7 +1015,7 @@ fn print_text(
         println!();
         println!("Edges: +{} / -{}", edges.added.len(), edges.removed.len());
     }
-    if total_rows > shown_rows.len() {
+    if *total_rows > shown_rows.len() {
         println!();
         println!(
             "shown {} of {} rows · use --limit to see more",

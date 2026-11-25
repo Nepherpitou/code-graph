@@ -305,6 +305,37 @@ struct GraphsResponse {
     graphs: Vec<GraphSummary>,
 }
 
+fn api_router(state: AppState) -> Router {
+    Router::new()
+        .route("/status", get(status))
+        .route("/refresh", post(refresh))
+        .route("/graphs", get(list_graphs))
+        .route("/graphs/{id}", get(get_graph))
+        .route("/graphs/{id}/search", get(search))
+        .route("/graphs/{id}/bootstrap", get(bootstrap))
+        .route("/graphs/{id}/overview", get(overview))
+        .route("/graphs/{id}/file", get(file))
+        .route("/graphs/{id}/nodes", get(nodes))
+        .route("/graphs/{id}/entry-points", get(entry_points))
+        .route("/graphs/{id}/subgraph", get(subgraph))
+        .route("/graphs/{id}/focus", get(focus))
+        .route("/graphs/{id}/path", get(path))
+        .route("/graphs/{id}/impact", get(impact))
+        .with_state(state)
+}
+
+fn build_router(state: AppState, web_dir: &Path) -> Router {
+    let mut router = Router::new()
+        .nest("/api/v1", api_router(state))
+        .layer(CorsLayer::permissive());
+    if web_dir.exists() {
+        let index = web_dir.join("index.html");
+        let files = ServeDir::new(web_dir).fallback(ServeFile::new(index));
+        router = router.fallback_service(files);
+    }
+    router
+}
+
 pub async fn serve(
     db: &Path,
     bind: &str,
@@ -331,32 +362,7 @@ pub async fn serve(
         job: job.clone(),
         analyze_options: analyze_options.clone(),
     };
-    let api = Router::new()
-        .route("/status", get(status))
-        .route("/refresh", post(refresh))
-        .route("/graphs", get(list_graphs))
-        .route("/graphs/{id}", get(get_graph))
-        .route("/graphs/{id}/search", get(search))
-        .route("/graphs/{id}/bootstrap", get(bootstrap))
-        .route("/graphs/{id}/overview", get(overview))
-        .route("/graphs/{id}/file", get(file))
-        .route("/graphs/{id}/nodes", get(nodes))
-        .route("/graphs/{id}/entry-points", get(entry_points))
-        .route("/graphs/{id}/subgraph", get(subgraph))
-        .route("/graphs/{id}/focus", get(focus))
-        .route("/graphs/{id}/path", get(path))
-        .route("/graphs/{id}/impact", get(impact))
-        .with_state(state);
-
-    let mut router = Router::new()
-        .nest("/api/v1", api)
-        .layer(CorsLayer::permissive());
-
-    if web_dir.exists() {
-        let index = web_dir.join("index.html");
-        let files = ServeDir::new(web_dir).fallback(ServeFile::new(index));
-        router = router.fallback_service(files);
-    }
+    let router = build_router(state, web_dir);
 
     let addr: SocketAddr = bind
         .parse()
