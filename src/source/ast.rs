@@ -296,15 +296,18 @@ fn cyclomatic(callable: Node<'_>, adapter: &Adapter) -> u32 {
             // counted above
         }
         if kind == "match_expression" {
-            let mut cursor = node.walk();
-            let arms = node
+            // tree-sitter-rust nests arms under the body's match_block, not
+            // directly under match_expression. Count them there, then keep
+            // walking so decisions inside the arms are not lost.
+            let body = node.child_by_field_name("body").unwrap_or(node);
+            let mut cursor = body.walk();
+            let arms = body
                 .named_children(&mut cursor)
                 .filter(|child| child.kind() == "match_arm")
                 .count();
             if arms > 0 {
                 *complexity += arms.saturating_sub(1) as u32;
             }
-            return;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -401,6 +404,40 @@ mod tests {
 
     fn position_of(text: &str, needle: &str) -> LspPosition {
         byte_to_lsp(text, text.find(needle).expect("needle in source"))
+    }
+
+    #[test]
+    fn match_arms_and_nested_branches_count() {
+        let text = "
+fn only_match(x: i32) {
+    match x {
+        0 => {}
+        1 => {}
+        _ => {}
+    }
+}
+
+fn nested(x: i32) {
+    match x {
+        0 => { if x > 0 { } }
+        1 => { if x < 0 { } }
+        _ => {}
+    }
+}
+";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&grammar(LanguageId::Rust, "sample.rs"))
+            .expect("rust grammar");
+        let tree = parser.parse(text, None).expect("parsed source");
+        let adapter = crate::languages::adapter(LanguageId::Rust);
+        let (_, only_match) =
+            describe_function(&tree, text, adapter, position_of(text, "only_match"))
+                .expect("only_match is callable");
+        assert_eq!(only_match, 3);
+        let (_, nested) = describe_function(&tree, text, adapter, position_of(text, "nested"))
+            .expect("nested is callable");
+        assert_eq!(nested, 5);
     }
 
     #[test]
