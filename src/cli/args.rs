@@ -316,6 +316,7 @@ pub(super) struct AuditFocusArgs {
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
   code-graph audit similar
+  code-graph audit similar -v
   code-graph audit similar --file src/domain --limit 10
 ")]
 pub(super) struct AuditSimilarArgs {

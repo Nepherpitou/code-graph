@@ -1135,6 +1135,7 @@ async fn similar(args: AuditSimilarArgs) -> Result<()> {
         .collect();
     let limit = args.limit.clamp(1, 1000);
     let shown: Vec<&SimilarRow> = filtered.iter().take(limit).collect();
+    let verbose = args.common.analysis.verbose;
 
     match args.common.format {
         AuditFormat::Json => {
@@ -1166,6 +1167,25 @@ async fn similar(args: AuditSimilarArgs) -> Result<()> {
             println!("Similar callables ({})", filtered.len());
             if shown.is_empty() {
                 println!("  none");
+            } else if verbose {
+                for row in &shown {
+                    println!();
+                    println!("  {}  [{}]", row.a.1, row.a.0);
+                    println!("  ≈ {}  [{}]", row.b.1, row.b.0);
+                    println!(
+                        "    shared {} callees ({:.0}% of the smaller set)",
+                        row.shared,
+                        row.containment * 100.0
+                    );
+                    println!("    calls: {}", row.shared_calls.join(", "));
+                }
+                if filtered.len() > shown.len() {
+                    println!();
+                    println!(
+                        "  … {} more · use --limit to see more",
+                        filtered.len() - shown.len()
+                    );
+                }
             } else {
                 println!(
                     "  {} {} {:>6} {:>6}  {}",
