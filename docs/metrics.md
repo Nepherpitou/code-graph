@@ -76,6 +76,8 @@ Centrality answers a different question than degree: a small utility can have hu
 | `constantsUsed` | distinct constant/variable data edges | Data coupling inside the project. |
 | `moduleRefs` | references from module scope | Constant usage or callable registration outside any function; excluded from call edges but relevant to dead-code decisions. |
 | `resultIgnoredRatio` | ignored call sites / call sites with known usage | Data-flow smell: a function that calls many things but discards every result is side-effect-driven. Unknown sites (macros, unsupported syntax) are excluded. |
+| `fragmentation` | `transitiveFanOut / (1 + Σ cyclomatic of reachable callables)` | Higher values mean many small callables behind this one relative to their combined decision count. Useful for spotting over-extraction; a leaf is 0. Above 3000 callables it falls back to direct fan-out. |
+| `passThrough` | `callFanIn == 1 && callFanOut == 1 && cyclomatic == 1` | Pure forwarding shape: one caller, one callee, no decisions. A candidate for review, not proof: adapters and deliberate wrappers match too. `passThroughRatio` is the share of callables with this shape. |
 
 The `instability` metric is normally defined on packages/classes (`Ce/(Ca+Ce)`); applying it to functions is a deliberate prototype-level analogy. The coupling.dev and ast-metrics write-ups give the original definition and the Stable Dependencies Principle.
 
@@ -87,7 +89,7 @@ The `instability` metric is normally defined on packages/classes (`Ce/(Ca+Ce)`);
 | `params` | Explicit parameters; receivers (`self`, `this`) are excluded. |
 | `loc` | Lines spanned by the declaration (LSP range). |
 | `ifc` | `LOC + (fanIn × fanOut)²` — information flow complexity from Punia et al. |
-| `hotspot` | Decision-first triage score: `raw = (cyclomatic−1) · (1+ln(1+transitiveFanIn)) · (1+ln(1+loc)) · (1+ln(1+fanOut))`, stored as `raw / max(raw)` so the value stays in 0..1. A function with no decisions scores zero regardless of fan-in; logarithmic factors compress heavy tails without thresholds. Only the final score is normalized, not each metric. Not a scientific metric. |
+| `hotspot` | Decision-first triage score: `raw = (cyclomatic−1) · (1+ln(1+transitiveFanIn)) · (1+ln(1+loc)) · (1+ln(1+fanOut)) · (1+fragmentation)`, stored as `raw / max(raw)` so the value stays in 0..1. A function with no decisions scores zero regardless of fan-in; fragmentation penalizes broad reach backed by few decisions. Logarithmic factors compress heavy tails without thresholds. Only the final score is normalized, not each metric. Not a scientific metric. |
 
 Cyclomatic decision nodes per language:
 

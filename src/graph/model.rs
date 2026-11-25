@@ -68,6 +68,10 @@ pub struct NodeMetrics {
     pub module_refs: u32,
     pub ifc: f64,
     pub dead_code_candidate: bool,
+    #[serde(default)]
+    pub pass_through: bool,
+    #[serde(default)]
+    pub fragmentation: f64,
     pub hotspot: f64,
     #[serde(default)]
     pub refactor_priority: f64,
@@ -102,6 +106,8 @@ impl Default for NodeMetrics {
             module_refs: 0,
             ifc: 0.0,
             dead_code_candidate: false,
+            pass_through: false,
+            fragmentation: 0.0,
             hotspot: 0.0,
             refactor_priority: 0.0,
         }

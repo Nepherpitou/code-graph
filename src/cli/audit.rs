@@ -246,6 +246,8 @@ fn node_row(node: &GraphNode, value: f64) -> Value {
         "sloc": node.sloc,
         "params": node.params,
         "hotspot": metric_json(node.metrics.hotspot),
+        "fragmentation": metric_json(node.metrics.fragmentation),
+        "passThrough": node.metrics.pass_through,
         "ifc": metric_json(node.metrics.ifc),
         "betweenness": metric_json(node.metrics.betweenness),
         "instability": metric_json(node.metrics.instability),
@@ -433,6 +435,11 @@ async fn overview(common: AuditCommon) -> Result<()> {
                 context.summary.stats.dead_code
             );
             println!("  isolated callables  {}", context.summary.stats.isolated);
+            println!(
+                "  pass-through        {} ({:.1}%)",
+                context.summary.stats.pass_through,
+                context.summary.stats.pass_through_ratio * 100.0
+            );
             println!(
                 "  cross-file calls    {} ({:.1}%)",
                 context.summary.stats.cross_file_edges,
@@ -847,6 +854,15 @@ fn print_focus_metrics(node: &GraphNode) {
     println!("  ifc            {:>8}", metric(node.metrics.ifc));
     println!("  betweenness    {:>8}", metric(node.metrics.betweenness));
     println!("  instability    {:>8}", metric(node.metrics.instability));
+    println!("  fragmentation  {:>8}", metric(node.metrics.fragmentation));
+    println!(
+        "  pass-through   {:>8}",
+        if node.metrics.pass_through {
+            "yes"
+        } else {
+            "no"
+        }
+    );
     println!(
         "  ignored result {:>7.1}%",
         node.metrics.result_ignored_ratio * 100.0

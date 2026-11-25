@@ -18,6 +18,10 @@ pub struct GraphStats {
     pub nodes_in_cycles: u32,
     pub largest_cycle: u32,
     pub dead_code: u32,
+    #[serde(default)]
+    pub pass_through: u32,
+    #[serde(default)]
+    pub pass_through_ratio: f64,
     pub isolated: u32,
     pub max_height: u32,
     pub max_depth: u32,

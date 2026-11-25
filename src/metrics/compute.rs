@@ -22,7 +22,7 @@ pub(crate) fn hotspot_score(node: &GraphNode) -> f64 {
     let impact = 1.0 + (1.0 + node.metrics.transitive_fan_in as f64).ln();
     let size = 1.0 + (1.0 + node.loc as f64).ln();
     let spread = 1.0 + (1.0 + node.metrics.fan_out as f64).ln();
-    decisions * impact * size * spread
+    decisions * impact * size * spread * (1.0 + node.metrics.fragmentation)
 }
 
 /// Absolute, snapshot-independent refactoring priority.
@@ -201,6 +201,10 @@ impl<'a> GraphAnalysis<'a> {
             metrics.data_fan_out = data_fan_out;
             metrics.call_in = self.call_in[*index];
             metrics.call_out = self.call_out[*index];
+            metrics.pass_through = self.callable[*index]
+                && call_fan_in == 1
+                && call_fan_out == 1
+                && self.nodes[*index].cyclomatic == 1;
             metrics.result_ignored_ratio = if known_sites > 0 {
                 ignored_sites as f64 / known_sites as f64
             } else {
@@ -248,31 +252,53 @@ fn component_heights(order: &[usize], edges: &[HashSet<usize>]) -> Vec<u32> {
     height
 }
 
-fn compute_reachability(&mut self) {
+    fn compute_reachability(&mut self) {
         let callable_count = self
             .project
             .iter()
             .filter(|index| self.callable[**index])
             .count();
+        let mut values = Vec::with_capacity(self.project.len());
         if callable_count <= TRANSITIVE_NODE_LIMIT {
+            let nodes = &*self.nodes;
             for index in &self.project {
                 if self.callable[*index] {
-                    let fan_out = bfs(*index, &self.out_adj);
+                    let (fan_out, reach_cyclo) =
+                        bfs_with_cyclomatic(*index, &self.out_adj, nodes);
                     let fan_in = bfs(*index, &self.in_adj);
-                    self.nodes[*index].metrics.transitive_fan_out = fan_out;
-                    self.nodes[*index].metrics.transitive_fan_in = fan_in;
+                    values.push((
+                        *index,
+                        fan_out,
+                        fan_in,
+                        fan_out as f64 / (1.0 + reach_cyclo as f64),
+                    ));
                 }
             }
         } else {
             for index in &self.project {
-                self.nodes[*index].metrics.transitive_fan_out = self.nodes[*index].metrics.fan_out;
-                self.nodes[*index].metrics.transitive_fan_in = self.nodes[*index].metrics.fan_in;
+                let fan_out = self.nodes[*index].metrics.fan_out;
+                let reach_cyclo: u32 = self.out_adj[*index]
+                    .iter()
+                    .map(|target| self.nodes[*target].cyclomatic)
+                    .sum();
+                values.push((
+                    *index,
+                    fan_out,
+                    self.nodes[*index].metrics.fan_in,
+                    fan_out as f64 / (1.0 + reach_cyclo as f64),
+                ));
             }
+        }
+        for (index, fan_out, fan_in, fragmentation) in values {
+            self.nodes[index].metrics.transitive_fan_out = fan_out;
+            self.nodes[index].metrics.transitive_fan_in = fan_in;
+            self.nodes[index].metrics.fragmentation = fragmentation;
         }
         for index in &self.project {
             if !self.callable[*index] {
                 self.nodes[*index].metrics.transitive_fan_in = self.nodes[*index].metrics.fan_in;
                 self.nodes[*index].metrics.transitive_fan_out = 0;
+                self.nodes[*index].metrics.fragmentation = 0.0;
             }
         }
     }
@@ -499,6 +525,10 @@ fn compute_reachability(&mut self) {
         let totals = self.edge_totals();
         let (cycles, nodes_in_cycles, largest_cycle) = self.cycle_totals(components);
         let functions = callables.len() as u32;
+        let pass_through = callables
+            .iter()
+            .filter(|index| self.nodes[**index].metrics.pass_through)
+            .count() as u32;
         let stats = GraphStats {
             nodes: self.project.len() as u32,
             functions,
@@ -550,6 +580,12 @@ fn compute_reachability(&mut self) {
                 .iter()
                 .filter(|index| self.nodes[**index].metrics.dead_code_candidate)
                 .count() as u32,
+            pass_through,
+            pass_through_ratio: if functions > 0 {
+                pass_through as f64 / functions as f64
+            } else {
+                0.0
+            },
             isolated: callables
                 .iter()
                 .filter(|index| {
@@ -629,6 +665,28 @@ fn compute_reachability(&mut self) {
         let top = self.graph_top();
         (stats, top)
     }
+}
+
+fn bfs_with_cyclomatic(
+    start: usize,
+    adjacency: &[HashSet<usize>],
+    nodes: &[GraphNode],
+) -> (u32, u32) {
+    let mut seen: HashSet<usize> = HashSet::new();
+    seen.insert(start);
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    queue.push_back(start);
+    let mut reachable_cyclo = 0u32;
+    while let Some(node) = queue.pop_front() {
+        for next in &adjacency[node] {
+            if seen.insert(*next) {
+                reachable_cyclo += nodes[*next].cyclomatic;
+                queue.push_back(*next);
+            }
+        }
+    }
+    seen.remove(&start);
+    (seen.len() as u32, reachable_cyclo)
 }
 
 fn bfs(start: usize, adjacency: &[HashSet<usize>]) -> u32 {
@@ -718,6 +776,25 @@ mod tests {
     }
 
     #[test]
+    fn fragmentation_penalizes_hotspot() {
+        let mut base = node(5, 10, 10, 0, 0);
+        let plain = hotspot_score(&base);
+        base.metrics.fragmentation = 2.0;
+        assert!(hotspot_score(&base) > plain);
+    }
+
+    #[test]
+    fn reach_cyclomatic_excludes_the_start() {
+        let mut start = node(5, 10, 0, 0, 0);
+        start.cyclomatic = 5;
+        let mut reachable = node(1, 10, 0, 0, 0);
+        reachable.cyclomatic = 7;
+        let nodes = [start, reachable];
+        let adjacency = vec![HashSet::from([1]), HashSet::new()];
+        assert_eq!(bfs_with_cyclomatic(0, &adjacency, &nodes), (1, 7));
+    }
+
+    #[test]
     fn hotspot_grows_with_decisions_impact_size_and_spread() {
         let base = node(5, 10, 10, 0, 0);
         assert!(hotspot_score(&node(6, 10, 10, 0, 0)) > hotspot_score(&base));
@@ -791,6 +868,22 @@ mod tests {
         assert_eq!(nodes[0].metrics.call_fan_out, 0);
         assert!(!nodes[0].metrics.in_cycle);
         assert_eq!(nodes[0].metrics.call_in, 1);
+    }
+
+    #[test]
+    fn pass_through_is_one_caller_one_callee_without_decisions() {
+        let mut nodes = vec![
+            symbol("a#run", "run", NodeKind::Function, "src/a.rs"),
+            symbol("b#forward", "forward", NodeKind::Function, "src/b.rs"),
+            symbol("c#leaf", "leaf", NodeKind::Function, "src/c.rs"),
+        ];
+        let edges = vec![call("a#run", "b#forward"), call("b#forward", "c#leaf")];
+        let (stats, _) = compute(&mut nodes, &edges, Conventions::of("rust"));
+        assert!(!nodes[0].metrics.pass_through);
+        assert!(nodes[1].metrics.pass_through);
+        assert!(!nodes[2].metrics.pass_through);
+        assert_eq!(stats.pass_through, 1);
+        assert!((stats.pass_through_ratio - 1.0 / 3.0).abs() < 1e-9);
     }
 
     #[test]
