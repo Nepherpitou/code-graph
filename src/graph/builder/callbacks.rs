@@ -4,13 +4,14 @@
 //! reports `map` but not the callback. Attribute the reference to the nearest
 //! named callable: a callback passed from `foo` is an edge `foo -> bar`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
 use crate::languages::Adapter;
 use crate::lsp::LspRange;
 use crate::source::ast::{byte_to_lsp, find_callable};
+use crate::source::SourceFile;
 
 use super::Builder;
 
@@ -36,7 +37,7 @@ fn binding_name(node: Node, text: &str) -> Option<String> {
 /// Collect identifiers bound by a destructuring/let/for/match pattern. This is
 /// deliberately conservative: a false local-binding match suppresses one
 /// inferred callback edge, while a miss creates a false call edge.
-fn collect_pattern_names(pattern: Node, text: &str, names: &mut Vec<String>) {
+fn collect_pattern_names(pattern: Node, text: &str, names: &mut HashSet<String>) {
     let mut stack = vec![pattern];
     while let Some(node) = stack.pop() {
         match node.kind() {
@@ -48,7 +49,7 @@ fn collect_pattern_names(pattern: Node, text: &str, names: &mut Vec<String>) {
                         .or_else(|| name.trim().strip_prefix("ref "))
                         .unwrap_or(name.trim());
                     if !name.is_empty() {
-                        names.push(name.to_string());
+                        names.insert(name.to_string());
                     }
                 }
             }
@@ -64,8 +65,8 @@ fn collect_pattern_names(pattern: Node, text: &str, names: &mut Vec<String>) {
     }
 }
 
-fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
-    let mut names = Vec::new();
+fn local_binding_names(callable: Node, text: &str) -> HashSet<String> {
+    let mut names = HashSet::new();
     let mut stack = vec![callable];
     while let Some(node) = stack.pop() {
         match node.kind() {
@@ -75,7 +76,7 @@ fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
             | "function_expression"
             | "catch_clause" => {
                 if let Some(bound) = binding_name(node, text) {
-                    names.push(bound);
+                    names.insert(bound);
                 }
             }
             // Rust binding forms. `binding_name` handles the simple
@@ -87,7 +88,7 @@ fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
                     collect_pattern_names(pattern, text, &mut names);
                 }
                 if let Some(bound) = binding_name(node, text) {
-                    names.push(bound);
+                    names.insert(bound);
                 }
             }
             "formal_parameters" | "parameters" | "parameter_list" | "closure_parameters" => {
@@ -97,10 +98,10 @@ fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
                         collect_pattern_names(pattern, text, &mut names);
                     }
                     if let Some(bound) = binding_name(child, text) {
-                        names.push(bound);
+                        names.insert(bound);
                     } else if child.kind() == "identifier" {
                         if let Ok(bound) = child.utf8_text(text.as_bytes()) {
-                            names.push(bound.to_string());
+                            names.insert(bound.to_string());
                         }
                     }
                 }
@@ -114,11 +115,13 @@ fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
             }
             stack.push(child);
         }
-        if names.iter().any(|bound| bound == name) {
-            return true;
-        }
     }
-    false
+    names
+}
+
+#[cfg(test)]
+fn has_local_binding(callable: Node, text: &str, name: &str) -> bool {
+    local_binding_names(callable, text).contains(name)
 }
 
 fn callback_identifier<'a>(mut node: Node<'a>, adapter: &Adapter) -> Option<Node<'a>> {
@@ -137,6 +140,13 @@ fn callback_identifier<'a>(mut node: Node<'a>, adapter: &Adapter) -> Option<Node
             _ => return None,
         }
     }
+}
+
+struct PendingCallback {
+    caller: String,
+    target: String,
+    rel: String,
+    range: LspRange,
 }
 
 impl Builder {
@@ -170,73 +180,98 @@ impl Builder {
         matches.next().is_none().then_some(first)
     }
 
-    pub(crate) fn add_callback_edges(&mut self) {
-        let mut pending = Vec::new();
-        let mut seen = HashSet::new();
+    fn callback_pending(
+        &self,
+        rel: &str,
+        argument: Node<'_>,
+        text: &str,
+        bindings: &mut HashMap<usize, HashSet<String>>,
+    ) -> Option<PendingCallback> {
+        let identifier = callback_identifier(argument, self.adapter)?;
+        let name = identifier.utf8_text(text.as_bytes()).ok()?;
+        if argument.kind() != "member_expression" {
+            if let Some(callable) = find_callable(argument, self.adapter) {
+                let names = bindings
+                    .entry(callable.id())
+                    .or_insert_with(|| local_binding_names(callable, text));
+                if names.contains(name) {
+                    return None;
+                }
+            }
+        }
+        let target = self.resolve_callback_target(rel, name)?;
+        let position = byte_to_lsp(text, argument.start_byte());
+        let caller = self.caller_in_file(rel, position)?;
+        Some(PendingCallback {
+            caller,
+            target,
+            rel: rel.to_string(),
+            range: LspRange {
+                start: position,
+                end: byte_to_lsp(text, argument.end_byte()),
+            },
+        })
+    }
 
-        for (rel, source) in &self.sources {
-            let Some(tree) = source.tree.as_ref() else {
-                continue;
-            };
-            let text = source.text.as_str();
-            let mut stack = vec![tree.root_node()];
-            while let Some(node) = stack.pop() {
-                if self.adapter.call_nodes.contains(&node.kind()) {
-                    if let Some(arguments) = node.child_by_field_name("arguments") {
-                        let mut cursor = arguments.walk();
-                        for argument in arguments.named_children(&mut cursor) {
-                            let Some(identifier) = callback_identifier(argument, self.adapter)
-                            else {
-                                continue;
-                            };
-                            let Ok(name) = identifier.utf8_text(text.as_bytes()) else {
-                                continue;
-                            };
-                            if argument.kind() != "member_expression" {
-                                if let Some(callable) = find_callable(argument, self.adapter) {
-                                    if has_local_binding(callable, text, name) {
-                                        continue;
-                                    }
-                                }
-                            }
-                            let Some(target) = self.resolve_callback_target(rel, name) else {
-                                continue;
-                            };
-                            let position = byte_to_lsp(text, argument.start_byte());
-                            let Some(caller) = self.caller_in_file(rel, position) else {
-                                continue;
-                            };
-                            let key = (caller.clone(), target.clone(), argument.start_byte());
-                            if !seen.insert(key) {
-                                continue;
-                            }
-                            pending.push((
-                                caller,
-                                target,
-                                rel.clone(),
-                                LspRange {
-                                    start: position,
-                                    end: byte_to_lsp(text, argument.end_byte()),
-                                },
-                            ));
+    fn scan_callbacks(
+        &self,
+        rel: &str,
+        source: &SourceFile,
+        seen: &mut HashSet<(String, String, usize)>,
+        pending: &mut Vec<PendingCallback>,
+    ) {
+        let Some(tree) = source.tree.as_ref() else {
+            return;
+        };
+        let text = source.text.as_str();
+        let mut bindings = HashMap::new();
+        let mut stack = vec![tree.root_node()];
+        while let Some(node) = stack.pop() {
+            if self.adapter.call_nodes.contains(&node.kind()) {
+                if let Some(arguments) = node.child_by_field_name("arguments") {
+                    let mut cursor = arguments.walk();
+                    for argument in arguments.named_children(&mut cursor) {
+                        let Some(callback) =
+                            self.callback_pending(rel, argument, text, &mut bindings)
+                        else {
+                            continue;
+                        };
+                        let key = (
+                            callback.caller.clone(),
+                            callback.target.clone(),
+                            argument.start_byte(),
+                        );
+                        if seen.insert(key) {
+                            pending.push(callback);
                         }
                     }
                 }
-                let mut cursor = node.walk();
-                for child in node.named_children(&mut cursor) {
-                    stack.push(child);
-                }
+            }
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                stack.push(child);
             }
         }
+    }
 
-        for (caller, target, rel, range) in pending {
-            let key = format!("call:{caller}->{target}");
+    fn emit_callback_edges(&mut self, pending: Vec<PendingCallback>) {
+        for callback in pending {
+            let key = format!("call:{}->{}", callback.caller, callback.target);
             if self.edges.contains_key(&key) {
                 continue;
             }
-            let site = self.call_site(&rel, range);
-            self.add_edge(&caller, &target, site, false, true);
+            let site = self.call_site(&callback.rel, callback.range);
+            self.add_edge(&callback.caller, &callback.target, site, false, true);
         }
+    }
+
+    pub(crate) fn add_callback_edges(&mut self) {
+        let mut pending = Vec::new();
+        let mut seen = HashSet::new();
+        for (rel, source) in &self.sources {
+            self.scan_callbacks(rel, source, &mut seen, &mut pending);
+        }
+        self.emit_callback_edges(pending);
     }
 }
 

@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::languages::{Adapter, LanguageId};
-use crate::lsp::LspRange;
+use crate::lsp::{LspPosition, LspRange};
 use crate::source::ast::{
     declares_callable, declares_data, declares_type_only, describe_function, signature_at,
     variable_callable,
@@ -230,6 +230,68 @@ struct NodeShape {
     sloc: u32,
 }
 
+fn base_shape(
+    source: Option<&SourceFile>,
+    symbol: &RawSymbol,
+    kind: NodeKind,
+    synthetic: bool,
+) -> NodeShape {
+    let mut declaration = declaration_line(source, symbol.range.start.line);
+    if declaration.is_empty() {
+        declaration = symbol.detail.clone();
+    }
+    NodeShape {
+        declaration,
+        params: 0,
+        cyclomatic: 0,
+        resolved_kind: kind,
+        sloc: if synthetic {
+            0
+        } else {
+            source_sloc(source, symbol.range.start.line, symbol.range.end.line)
+        },
+    }
+}
+
+fn apply_callable_shape(
+    shape: &mut NodeShape,
+    tree: &tree_sitter::Tree,
+    text: &str,
+    adapter: &Adapter,
+    position: LspPosition,
+) -> Option<()> {
+    let (params, complexity) = match describe_function(tree, text, adapter, position) {
+        Some(described) => {
+            if !declares_callable(tree, text, adapter, position) {
+                return None; // e.g. JSX branches TypeScript reports as methods
+            }
+            described
+        }
+        None => variable_callable(tree, text, adapter, position)?,
+    };
+    shape.params = params;
+    shape.cyclomatic = complexity;
+    Some(())
+}
+
+fn apply_data_shape(
+    shape: &mut NodeShape,
+    tree: &tree_sitter::Tree,
+    text: &str,
+    adapter: &Adapter,
+    position: LspPosition,
+) -> Option<()> {
+    if adapter.id == LanguageId::TypeScript && !declares_data(tree, text, adapter, position) {
+        return None;
+    }
+    if let Some((params, complexity)) = variable_callable(tree, text, adapter, position) {
+        shape.resolved_kind = NodeKind::Function;
+        shape.params = params;
+        shape.cyclomatic = complexity;
+    }
+    Some(())
+}
+
 pub(crate) struct NodeSpec<'a> {
     pub(super) symbol: &'a RawSymbol,
     pub(super) rel: &'a str,
@@ -265,55 +327,32 @@ impl Builder {
         synthetic: bool,
     ) -> Option<NodeShape> {
         let source = self.sources.get(rel);
-        let mut declaration = declaration_line(source, symbol.range.start.line);
-        if declaration.is_empty() {
-            declaration = symbol.detail.clone();
-        }
-        let mut shape = NodeShape {
-            declaration,
-            params: 0,
-            cyclomatic: 0,
-            resolved_kind: kind,
-            sloc: if synthetic {
-                0
-            } else {
-                source_sloc(source, symbol.range.start.line, symbol.range.end.line)
-            },
-        };
+        let mut shape = base_shape(source, symbol, kind, synthetic);
         let Some(source) = source else {
             return Some(shape);
         };
         let Some(tree) = &source.tree else {
             return Some(shape);
         };
-        if !synthetic && kind.is_callable() {
-            if let Some((params, complexity)) =
-                describe_function(tree, &source.text, self.adapter, symbol.selection.start)
-            {
-                if !declares_callable(tree, &source.text, self.adapter, symbol.selection.start) {
-                    return None; // e.g. JSX branches TypeScript reports as methods
-                }
-                shape.params = params;
-                shape.cyclomatic = complexity;
-            } else {
-                let (params, complexity) =
-                    variable_callable(tree, &source.text, self.adapter, symbol.selection.start)?;
-                shape.params = params;
-                shape.cyclomatic = complexity;
-            }
+        if synthetic {
+            return Some(shape);
+        }
+        if kind.is_callable() {
+            apply_callable_shape(
+                &mut shape,
+                tree,
+                &source.text,
+                self.adapter,
+                symbol.selection.start,
+            )?;
         } else if kind.is_data() {
-            if self.adapter.id == LanguageId::TypeScript
-                && !declares_data(tree, &source.text, self.adapter, symbol.selection.start)
-            {
-                return None;
-            }
-            if let Some((params, complexity)) =
-                variable_callable(tree, &source.text, self.adapter, symbol.selection.start)
-            {
-                shape.resolved_kind = NodeKind::Function;
-                shape.params = params;
-                shape.cyclomatic = complexity;
-            }
+            apply_data_shape(
+                &mut shape,
+                tree,
+                &source.text,
+                self.adapter,
+                symbol.selection.start,
+            )?;
         }
         Some(shape)
     }
