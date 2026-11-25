@@ -240,6 +240,13 @@ pub(crate) struct NodeSpec<'a> {
     pub(super) lazy: bool,
 }
 
+struct ChildWork<'a> {
+    symbol: &'a RawSymbol,
+    parent_qname: String,
+    parent_exported: bool,
+    container: Option<String>,
+}
+
 impl Builder {
     fn reserve_node(&mut self) -> bool {
         if self.records.len() >= self.max_nodes {
@@ -528,53 +535,107 @@ impl Builder {
             return;
         }
         let local = symbol.name.clone();
-        let qname = if !parent_qname.is_empty() {
-            format!("{parent_qname}.{local}")
-        } else if let Some(container) = container {
-            format!("{container}.{local}")
-        } else {
-            local.clone()
-        };
-        match symbol.kind {
-            LSP_CLASS => {
-                // Type aliases and interfaces are not instantiable. Do not
-                // invent a synthetic constructor (and do not walk their
-                // members) when the LSP reports them as LSP_CLASS.
-                if self.is_type_only_symbol(symbol, rel) {
-                    return;
-                }
-                let class_exported =
-                    self.add_class_symbol(symbol, rel, &local, &qname, parent_exported);
-                for child in &symbol.children {
-                    if child.kind == LSP_CONSTRUCTOR {
-                        continue;
-                    }
-                    if child.kind == LSP_METHOD || child.kind == LSP_FUNCTION {
-                        self.add_symbol(child, rel, &qname, class_exported, Some(&qname));
-                    }
-                }
-            }
-            LSP_STRUCT => {} // Rust struct: a type, not a graph primitive
-            LSP_OBJECT => {
-                let container = normalize_container_name(&local);
-                let trait_impl = local.contains(" for ");
-                for child in &symbol.children {
-                    self.add_symbol(
-                        child,
-                        rel,
-                        "",
-                        parent_exported || trait_impl,
-                        Some(&container),
-                    );
-                }
-            }
+        let qname = symbol_qname(parent_qname, &local, container);
+        let children = match symbol.kind {
+            LSP_CLASS => self.class_work(symbol, rel, &local, &qname, parent_exported),
+            LSP_STRUCT => Vec::new(), // Rust struct: a type, not a graph primitive
+            LSP_OBJECT => self.object_work(symbol, &local, parent_exported),
             LSP_INTERFACE | LSP_ENUM | LSP_MODULE | LSP_NAMESPACE | LSP_PACKAGE => {
-                for child in &symbol.children {
-                    self.add_symbol(child, rel, &qname, parent_exported, Some(&qname));
-                }
+                self.container_work(symbol, &qname, parent_exported)
             }
-            _ => self.add_leaf_symbol(symbol, rel, qname, parent_exported, container),
+            _ => {
+                self.add_leaf_symbol(symbol, rel, qname, parent_exported, container);
+                Vec::new()
+            }
+        };
+        for work in children {
+            self.add_symbol(
+                work.symbol,
+                rel,
+                &work.parent_qname,
+                work.parent_exported,
+                work.container.as_deref(),
+            );
         }
+    }
+
+    fn class_work<'a>(
+        &mut self,
+        symbol: &'a RawSymbol,
+        rel: &str,
+        local: &str,
+        qname: &str,
+        parent_exported: bool,
+    ) -> Vec<ChildWork<'a>> {
+        // Type aliases and interfaces are not instantiable. Do not invent a
+        // synthetic constructor (and do not walk their members) when the LSP
+        // reports them as LSP_CLASS.
+        if self.is_type_only_symbol(symbol, rel) {
+            return Vec::new();
+        }
+        let class_exported = self.add_class_symbol(symbol, rel, local, qname, parent_exported);
+        symbol
+            .children
+            .iter()
+            .filter(|child| {
+                child.kind != LSP_CONSTRUCTOR
+                    && (child.kind == LSP_METHOD || child.kind == LSP_FUNCTION)
+            })
+            .map(|child| ChildWork {
+                symbol: child,
+                parent_qname: qname.to_string(),
+                parent_exported: class_exported,
+                container: Some(qname.to_string()),
+            })
+            .collect()
+    }
+
+    fn object_work<'a>(
+        &self,
+        symbol: &'a RawSymbol,
+        local: &str,
+        parent_exported: bool,
+    ) -> Vec<ChildWork<'a>> {
+        let container = normalize_container_name(local);
+        let trait_impl = local.contains(" for ");
+        symbol
+            .children
+            .iter()
+            .map(|child| ChildWork {
+                symbol: child,
+                parent_qname: String::new(),
+                parent_exported: parent_exported || trait_impl,
+                container: Some(container.clone()),
+            })
+            .collect()
+    }
+
+    fn container_work<'a>(
+        &self,
+        symbol: &'a RawSymbol,
+        qname: &str,
+        parent_exported: bool,
+    ) -> Vec<ChildWork<'a>> {
+        symbol
+            .children
+            .iter()
+            .map(|child| ChildWork {
+                symbol: child,
+                parent_qname: qname.to_string(),
+                parent_exported,
+                container: Some(qname.to_string()),
+            })
+            .collect()
+    }
+}
+
+fn symbol_qname(parent_qname: &str, local: &str, container: Option<&str>) -> String {
+    if !parent_qname.is_empty() {
+        format!("{parent_qname}.{local}")
+    } else if let Some(container) = container {
+        format!("{container}.{local}")
+    } else {
+        local.to_string()
     }
 }
 
@@ -597,6 +658,13 @@ mod tests {
         let source = source("fn f() {\n    // comment\n\n    let x = 1;\n}\n");
         assert_eq!(source_sloc(Some(&source), 0, 3), 2);
         assert_eq!(source_sloc(None, 0, 4), 0);
+    }
+
+    #[test]
+    fn symbol_qname_prefers_parent_then_container() {
+        assert_eq!(symbol_qname("Parent", "child", Some("Container")), "Parent.child");
+        assert_eq!(symbol_qname("", "child", Some("Container")), "Container.child");
+        assert_eq!(symbol_qname("", "child", None), "child");
     }
 
     #[test]
