@@ -87,7 +87,7 @@ The `instability` metric is normally defined on packages/classes (`Ce/(Ca+Ce)`);
 | `params` | Explicit parameters; receivers (`self`, `this`) are excluded. |
 | `loc` | Lines spanned by the declaration (LSP range). |
 | `ifc` | `LOC + (fanIn × fanOut)²` — information flow complexity from Punia et al. |
-| `hotspot` | Heuristic min-max blend over callables: `0.35·transitiveFanIn + 0.20·fanIn + 0.15·cyclomatic + 0.15·loc + 0.15·fanOut`. Not a scientific metric; a triage score. |
+| `hotspot` | Decision-first triage score: `raw = (cyclomatic−1) · (1+ln(1+transitiveFanIn)) · (1+ln(1+loc)) · (1+ln(1+fanOut))`, stored as `raw / max(raw)` so the value stays in 0..1. A function with no decisions scores zero regardless of fan-in; logarithmic factors compress heavy tails without thresholds. Only the final score is normalized, not each metric. Not a scientific metric. |
 
 Cyclomatic decision nodes per language:
 

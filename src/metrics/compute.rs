@@ -14,6 +14,17 @@ use super::top::top_by;
 const TRANSITIVE_NODE_LIMIT: usize = 3000;
 const BETWEENNESS_WORK_LIMIT: usize = 6_000_000;
 
+/// Decision-first triage score: no decisions means no hotspot, regardless of
+/// how many callers a helper has. The logarithmic factors compress heavy tails
+/// without introducing thresholds or snapshot-relative normalization.
+pub(crate) fn hotspot_score(node: &GraphNode) -> f64 {
+    let decisions = node.cyclomatic.saturating_sub(1) as f64;
+    let impact = 1.0 + (1.0 + node.metrics.transitive_fan_in as f64).ln();
+    let size = 1.0 + (1.0 + node.loc as f64).ln();
+    let spread = 1.0 + (1.0 + node.metrics.fan_out as f64).ln();
+    decisions * impact * size * spread
+}
+
 /// Absolute, snapshot-independent refactoring priority.
 ///
 /// Complexity is the dominant local term; transitive fan-in adds change impact
@@ -396,42 +407,19 @@ fn compute_reachability(&mut self) {
             .copied()
             .filter(|index| self.callable[*index])
             .collect();
-        let min_max = |value: &dyn Fn(usize) -> f64| -> (f64, f64) {
-            let mut min = f64::INFINITY;
-            let mut max = f64::NEG_INFINITY;
-            for index in &callables {
-                let current = value(*index);
-                min = min.min(current);
-                max = max.max(current);
-            }
-            if callables.is_empty() {
-                (0.0, 0.0)
-            } else {
-                (min, max)
-            }
-        };
-        let normalize = |value: f64, (min, max): (f64, f64)| -> f64 {
-            if max > min {
-                (value - min) / (max - min)
-            } else {
-                0.0
-            }
-        };
-        let blast = min_max(&|index| self.nodes[index].metrics.transitive_fan_in as f64);
-        let fan_in = min_max(&|index| self.nodes[index].metrics.fan_in as f64);
-        let cyclomatic = min_max(&|index| self.nodes[index].cyclomatic as f64);
-        let loc = min_max(&|index| self.nodes[index].loc as f64);
-        let fan_out = min_max(&|index| self.nodes[index].metrics.fan_out as f64);
-        for index in &callables {
-            let value = 0.35
-                * normalize(self.nodes[*index].metrics.transitive_fan_in as f64, blast)
-                + 0.2 * normalize(self.nodes[*index].metrics.fan_in as f64, fan_in)
-                + 0.15 * normalize(self.nodes[*index].cyclomatic as f64, cyclomatic)
-                + 0.15 * normalize(self.nodes[*index].loc as f64, loc)
-                + 0.15 * normalize(self.nodes[*index].metrics.fan_out as f64, fan_out);
-            self.nodes[*index].metrics.hotspot = value;
-            let priority = refactor_priority(&self.nodes[*index]);
-            self.nodes[*index].metrics.refactor_priority = priority;
+        let scores: Vec<(usize, f64)> = callables
+            .iter()
+            .map(|index| (*index, hotspot_score(&self.nodes[*index])))
+            .collect();
+        let scale = scores
+            .iter()
+            .map(|(_, score)| *score)
+            .fold(0.0, f64::max)
+            .max(f64::MIN_POSITIVE);
+        for (index, score) in scores {
+            self.nodes[index].metrics.hotspot = score / scale;
+            let priority = refactor_priority(&self.nodes[index]);
+            self.nodes[index].metrics.refactor_priority = priority;
         }
     }
 
@@ -720,6 +708,24 @@ mod tests {
         assert!(refactor_priority(&node(5, 100, 10, 0, 0)) > base);
         assert!(refactor_priority(&node(5, 10, 20, 0, 0)) > base);
         assert!(refactor_priority(&node(5, 10, 10, 2, 8)) > base);
+    }
+
+    #[test]
+    fn hotspot_ignores_trivial_helpers() {
+        let mut trivial = node(1, 100, 100, 100, 100);
+        trivial.metrics.fan_out = 100;
+        assert_eq!(hotspot_score(&trivial), 0.0);
+    }
+
+    #[test]
+    fn hotspot_grows_with_decisions_impact_size_and_spread() {
+        let base = node(5, 10, 10, 0, 0);
+        assert!(hotspot_score(&node(6, 10, 10, 0, 0)) > hotspot_score(&base));
+        assert!(hotspot_score(&node(5, 100, 10, 0, 0)) > hotspot_score(&base));
+        assert!(hotspot_score(&node(5, 10, 20, 0, 0)) > hotspot_score(&base));
+        let mut spread = node(5, 10, 10, 0, 0);
+        spread.metrics.fan_out = 20;
+        assert!(hotspot_score(&spread) > hotspot_score(&base));
     }
 
     #[test]
