@@ -155,6 +155,7 @@ pub(super) enum AuditFormat {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(super) enum AuditOrder {
     Hotspot,
+    DelegationOverhead,
     Priority,
     Complexity,
     BlastRadius,
@@ -189,6 +190,7 @@ pub(super) enum AuditDiffOrder {
     Ifc,
     Betweenness,
     Hotspot,
+    DelegationOverhead,
     Params,
     Name,
 }

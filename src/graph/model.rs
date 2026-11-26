@@ -72,6 +72,8 @@ pub struct NodeMetrics {
     pub pass_through: bool,
     #[serde(default)]
     pub fragmentation: f64,
+    #[serde(default)]
+    pub delegation_overhead: f64,
     pub hotspot: f64,
     #[serde(default)]
     pub refactor_priority: f64,
@@ -108,6 +110,7 @@ impl Default for NodeMetrics {
             dead_code_candidate: false,
             pass_through: false,
             fragmentation: 0.0,
+            delegation_overhead: 0.0,
             hotspot: 0.0,
             refactor_priority: 0.0,
         }

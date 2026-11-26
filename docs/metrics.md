@@ -78,6 +78,7 @@ Centrality answers a different question than degree: a small utility can have hu
 | `resultIgnoredRatio` | ignored call sites / call sites with known usage | Data-flow smell: a function that calls many things but discards every result is side-effect-driven. Unknown sites (macros, unsupported syntax) are excluded. |
 | `fragmentation` | `transitiveFanOut / (1 + Σ cyclomatic of reachable callables)` | Higher values mean many small callables behind this one relative to their combined decision count. Useful for spotting over-extraction; a leaf is 0. Above 3000 callables it falls back to direct fan-out. |
 | `passThrough` | `callFanIn == 1 && callFanOut == 1 && cyclomatic == 1` | Pure forwarding shape: one caller, one callee, no decisions. A candidate for review, not proof: adapters and deliberate wrappers match too. `passThroughRatio` is the share of callables with this shape. |
+| `delegationOverhead` | `max(0, Σ 1/(1 + cyclomatic(callee)) − (cyclomatic − 1))` over direct call callees | Decision budget vs. indirection cost. A callee with `cyclomatic = 1` costs 0.5; a complex callee costs less. `>= 1` means at least two trivial calls beyond the decisions in this callable: a merge signal, not proof. Direct call edges only, so it scales without a BFS. |
 
 The `instability` metric is normally defined on packages/classes (`Ce/(Ca+Ce)`); applying it to functions is a deliberate prototype-level analogy. The coupling.dev and ast-metrics write-ups give the original definition and the Stable Dependencies Principle.
 

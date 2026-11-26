@@ -307,6 +307,7 @@ struct MetricSet {
     instability: f64,
     ifc: f64,
     hotspot: f64,
+    delegation_overhead: f64,
     betweenness: f64,
     result_ignored_ratio: f64,
     scc_size: u32,
@@ -333,6 +334,7 @@ impl MetricSet {
             instability: node.metrics.instability,
             ifc: node.metrics.ifc,
             hotspot: node.metrics.hotspot,
+            delegation_overhead: node.metrics.delegation_overhead,
             betweenness: node.metrics.betweenness,
             result_ignored_ratio: node.metrics.result_ignored_ratio,
             scc_size: node.metrics.scc_size,
@@ -358,6 +360,7 @@ impl MetricSet {
             AuditDiffOrder::Ifc => self.ifc,
             AuditDiffOrder::Betweenness => self.betweenness,
             AuditDiffOrder::Hotspot => self.hotspot,
+            AuditDiffOrder::DelegationOverhead => self.delegation_overhead,
             AuditDiffOrder::Params => self.params as f64,
             AuditDiffOrder::Name => 0.0,
         }
@@ -383,6 +386,7 @@ struct MetricDelta {
     instability: f64,
     ifc: f64,
     hotspot: f64,
+    delegation_overhead: f64,
     betweenness: f64,
     result_ignored_ratio: f64,
     scc_size: i64,
@@ -408,6 +412,7 @@ impl MetricDelta {
             instability: new.instability - old.instability,
             ifc: new.ifc - old.ifc,
             hotspot: new.hotspot - old.hotspot,
+            delegation_overhead: new.delegation_overhead - old.delegation_overhead,
             betweenness: new.betweenness - old.betweenness,
             result_ignored_ratio: new.result_ignored_ratio - old.result_ignored_ratio,
             scc_size: i64::from(new.scc_size) - i64::from(old.scc_size),
@@ -431,6 +436,7 @@ impl MetricDelta {
             AuditDiffOrder::Ifc => self.ifc,
             AuditDiffOrder::Betweenness => self.betweenness,
             AuditDiffOrder::Hotspot => self.hotspot,
+            AuditDiffOrder::DelegationOverhead => self.delegation_overhead,
             AuditDiffOrder::Params => self.params as f64,
             AuditDiffOrder::Name => 0.0,
         }
@@ -441,6 +447,7 @@ impl MetricDelta {
             || [self.cyclomatic, self.sloc, self.loc, self.params]
                 .iter()
                 .any(|value| *value != 0)
+            || self.delegation_overhead.abs() >= 1e-9
     }
 
     fn is_zero(&self) -> bool {
@@ -464,6 +471,7 @@ impl MetricDelta {
             self.instability,
             self.ifc,
             self.hotspot,
+            self.delegation_overhead,
             self.betweenness,
             self.result_ignored_ratio,
         ];
@@ -871,6 +879,7 @@ fn order_label(order: AuditDiffOrder) -> &'static str {
         AuditDiffOrder::Ifc => "ifc",
         AuditDiffOrder::Betweenness => "betweenness",
         AuditDiffOrder::Hotspot => "hotspot",
+        AuditDiffOrder::DelegationOverhead => "delegation-overhead",
         AuditDiffOrder::Params => "params",
         AuditDiffOrder::Name => "name",
     }

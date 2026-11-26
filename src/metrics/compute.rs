@@ -192,6 +192,18 @@ impl<'a> GraphAnalysis<'a> {
             let fan_out = call_fan_out + data_fan_out;
             let known_sites = self.known_sites[*index];
             let ignored_sites = self.ignored_sites[*index];
+            // Each direct call to a low-decision callee is indirection cost. Decisions in
+            // this callable pay for that cost; the surplus is the merge signal.
+            let delegation_overhead = if self.callable[*index] {
+                let indirection: f64 = self.out_adj[*index]
+                    .iter()
+                    .map(|target| 1.0 / (1.0 + self.nodes[*target].cyclomatic as f64))
+                    .sum();
+                let budget = self.nodes[*index].cyclomatic.saturating_sub(1) as f64;
+                (indirection - budget).max(0.0)
+            } else {
+                0.0
+            };
             let metrics = &mut self.nodes[*index].metrics;
             metrics.fan_in = fan_in;
             metrics.fan_out = fan_out;
@@ -205,6 +217,7 @@ impl<'a> GraphAnalysis<'a> {
                 && call_fan_in == 1
                 && call_fan_out == 1
                 && self.nodes[*index].cyclomatic == 1;
+            metrics.delegation_overhead = delegation_overhead;
             metrics.result_ignored_ratio = if known_sites > 0 {
                 ignored_sites as f64 / known_sites as f64
             } else {
@@ -868,6 +881,31 @@ mod tests {
         assert_eq!(nodes[0].metrics.call_fan_out, 0);
         assert!(!nodes[0].metrics.in_cycle);
         assert_eq!(nodes[0].metrics.call_in, 1);
+    }
+
+    #[test]
+    fn delegation_overhead_is_the_surplus_above_the_decision_budget() {
+        let mut nodes = vec![symbol(
+            "root#run",
+            "run",
+            NodeKind::Function,
+            "src/root.rs",
+        )];
+        for index in 0..10 {
+            nodes.push(symbol(
+                &format!("helper{index}#run"),
+                &format!("helper{index}"),
+                NodeKind::Function,
+                &format!("src/helper{index}.rs"),
+            ));
+        }
+        nodes[0].cyclomatic = 5;
+        let edges: Vec<GraphEdge> = (0..10)
+            .map(|index| call("root#run", &format!("helper{index}#run")))
+            .collect();
+        compute(&mut nodes, &edges, Conventions::of("rust"));
+        assert!((nodes[0].metrics.delegation_overhead - 1.0).abs() < 1e-9);
+        assert_eq!(nodes[1].metrics.delegation_overhead, 0.0);
     }
 
     #[test]

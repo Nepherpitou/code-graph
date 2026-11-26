@@ -247,6 +247,7 @@ fn node_row(node: &GraphNode, value: f64) -> Value {
         "params": node.params,
         "hotspot": metric_json(node.metrics.hotspot),
         "fragmentation": metric_json(node.metrics.fragmentation),
+        "delegationOverhead": metric_json(node.metrics.delegation_overhead),
         "passThrough": node.metrics.pass_through,
         "ifc": metric_json(node.metrics.ifc),
         "betweenness": metric_json(node.metrics.betweenness),
@@ -512,6 +513,7 @@ impl AuditOrder {
     pub(super) fn label(self) -> &'static str {
         match self {
             AuditOrder::Hotspot => "hotspot",
+            AuditOrder::DelegationOverhead => "delegation-overhead",
             AuditOrder::Priority => "priority",
             AuditOrder::Complexity => "cyclomatic",
             AuditOrder::BlastRadius => "transitive-in",
@@ -533,6 +535,7 @@ impl AuditOrder {
     pub(super) fn value(self, node: &GraphNode) -> f64 {
         match self {
             AuditOrder::Hotspot => node.metrics.hotspot,
+            AuditOrder::DelegationOverhead => node.metrics.delegation_overhead,
             AuditOrder::Priority => node.metrics.refactor_priority,
             AuditOrder::Complexity => node.cyclomatic as f64,
             AuditOrder::BlastRadius => node.metrics.transitive_fan_in as f64,
@@ -855,6 +858,10 @@ fn print_focus_metrics(node: &GraphNode) {
     println!("  betweenness    {:>8}", metric(node.metrics.betweenness));
     println!("  instability    {:>8}", metric(node.metrics.instability));
     println!("  fragmentation  {:>8}", metric(node.metrics.fragmentation));
+    println!(
+        "  delegation-overhead {:>3}",
+        metric(node.metrics.delegation_overhead)
+    );
     println!(
         "  pass-through   {:>8}",
         if node.metrics.pass_through {
@@ -1331,6 +1338,10 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
         (
             "ifc",
             "information-flow complexity: LOC + (call-fan-in × call-fan-out)²",
+        ),
+        (
+            "delegation-overhead",
+            "direct call indirection beyond the decision budget; >= 1 means merge, not split",
         ),
         (
             "betweenness",
