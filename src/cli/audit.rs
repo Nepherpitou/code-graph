@@ -1305,7 +1305,7 @@ fn metric_definitions() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "priority",
-            "absolute refactoring priority: complexity * impact * call instability",
+            "absolute review priority: decisions + sloc + delegation, weighted by impact and call instability",
         ),
         (
             "hotspot",

@@ -86,7 +86,7 @@ The audit deliberately has no `smells`, severity, or configurable thresholds yet
 `priority` is snapshot-independent and uses SLOC (non-empty, non-comment lines) rather than the declaration span:
 
 ```text
-priority = (cyclomatic + ln(1 + sloc))
+priority = (cyclomatic + ln(1 + sloc) + delegationOverhead)
          * (1 + log2(1 + transitiveFanIn))
          * (1 + callInstability)
 ```

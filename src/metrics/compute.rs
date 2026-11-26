@@ -25,12 +25,15 @@ pub(crate) fn hotspot_score(node: &GraphNode) -> f64 {
     decisions * impact * size * spread * (1.0 + node.metrics.fragmentation)
 }
 
-/// Absolute, snapshot-independent refactoring priority.
+/// Absolute, snapshot-independent review priority.
 ///
-/// Complexity is the dominant local term; transitive fan-in adds change impact
-/// with diminishing returns; instability keeps stable shared helpers low.
+/// Local pressure is decisions, size, and delegation overhead; transitive fan-in
+/// adds change impact with diminishing returns; instability keeps stable shared
+/// helpers low.
 pub(crate) fn refactor_priority(node: &GraphNode) -> f64 {
-    let complexity = node.cyclomatic as f64 + (1.0 + node.sloc as f64).ln();
+    let complexity = node.cyclomatic as f64
+        + (1.0 + node.sloc as f64).ln()
+        + node.metrics.delegation_overhead;
     let impact = 1.0 + ((1 + node.metrics.transitive_fan_in) as f64).log2();
     let call_edges = node.metrics.call_fan_in + node.metrics.call_fan_out;
     let instability = if call_edges > 0 {
@@ -779,6 +782,14 @@ mod tests {
         assert!(refactor_priority(&node(5, 100, 10, 0, 0)) > base);
         assert!(refactor_priority(&node(5, 10, 20, 0, 0)) > base);
         assert!(refactor_priority(&node(5, 10, 10, 2, 8)) > base);
+    }
+
+    #[test]
+    fn priority_rewards_delegation_overhead_without_decisions() {
+        let mut base = node(1, 10, 0, 0, 0);
+        let plain = refactor_priority(&base);
+        base.metrics.delegation_overhead = 2.0;
+        assert!(refactor_priority(&base) > plain);
     }
 
     #[test]
